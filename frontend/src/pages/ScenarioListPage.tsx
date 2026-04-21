@@ -145,7 +145,7 @@ const ScenarioListPage: React.FC = () => {
   };
 
   const filteredMetrics = metrics.filter(
-    (m) => m.category === selectedSceneType || m.category === 'general'
+    (m) => m.category === selectedSceneType || m.category === 'custom' || m.category === 'general'
   );
 
   const columns = [

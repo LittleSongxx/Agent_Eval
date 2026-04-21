@@ -3,7 +3,7 @@ export interface LLMConfig {
   name: string;
   provider: string;
   api_base_url: string;
-  api_key: string;
+  api_key_masked: string;
   model_name: string;
   temperature: number;
   max_tokens: number;

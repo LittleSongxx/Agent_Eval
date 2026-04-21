@@ -16,29 +16,30 @@ from app.schemas.llm_config import (
 router = APIRouter(prefix="/llm-configs", tags=["LLM Configs"])
 
 
-@router.get("", response_model=List[LLMConfigResponse])
+@router.get("")
 def list_llm_configs(db: Session = Depends(get_db)):
-    return db.query(LLMConfig).all()
+    configs = db.query(LLMConfig).all()
+    return [LLMConfigResponse.from_orm_with_mask(c) for c in configs]
 
 
-@router.post("", response_model=LLMConfigResponse, status_code=201)
+@router.post("", status_code=201)
 def create_llm_config(payload: LLMConfigCreate, db: Session = Depends(get_db)):
     config = LLMConfig(**payload.model_dump())
     db.add(config)
     db.commit()
     db.refresh(config)
-    return config
+    return LLMConfigResponse.from_orm_with_mask(config)
 
 
-@router.get("/{config_id}", response_model=LLMConfigResponse)
+@router.get("/{config_id}")
 def get_llm_config(config_id: int, db: Session = Depends(get_db)):
     config = db.query(LLMConfig).filter(LLMConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="LLM config not found")
-    return config
+    return LLMConfigResponse.from_orm_with_mask(config)
 
 
-@router.put("/{config_id}", response_model=LLMConfigResponse)
+@router.put("/{config_id}")
 def update_llm_config(
     config_id: int, payload: LLMConfigUpdate, db: Session = Depends(get_db)
 ):
@@ -52,7 +53,7 @@ def update_llm_config(
 
     db.commit()
     db.refresh(config)
-    return config
+    return LLMConfigResponse.from_orm_with_mask(config)
 
 
 @router.delete("/{config_id}", status_code=204)

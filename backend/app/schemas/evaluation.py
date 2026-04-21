@@ -13,7 +13,7 @@ class EvalTaskCreate(BaseModel):
     llm_config_id: int
 
 
-class EvalTaskResponse(BaseModel):
+class EvalTaskBrief(BaseModel):
     id: int
     name: str
     dataset_id: int
@@ -30,6 +30,34 @@ class EvalTaskResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DatasetBrief(BaseModel):
+    id: int
+    name: str
+    sample_type: str
+    row_count: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ScenarioBrief(BaseModel):
+    id: int
+    name: str
+    scene_type: str
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMConfigBrief(BaseModel):
+    id: int
+    name: str
+    model_name: str
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EvalTaskResponse(EvalTaskBrief):
+    dataset: Optional[DatasetBrief] = None
+    scenario: Optional[ScenarioBrief] = None
+    llm_config: Optional[LLMConfigBrief] = None
 
 
 class EvalRowResultResponse(BaseModel):
@@ -53,7 +81,7 @@ class ReportSummary(BaseModel):
     fail_count: int
     error_count: int
     pass_rate: float
-    metric_summary: Dict[str, Dict[str, float]]
+    metric_summary: Optional[Dict[str, Any]] = None
 
 
 class ReportRowsResponse(BaseModel):

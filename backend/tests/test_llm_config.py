@@ -11,7 +11,8 @@ def test_create_llm_config(client, test_llm_payload):
     body = resp.json()
     assert body["name"] == "Test LLM"
     assert body["api_base_url"] == test_llm_payload["api_base_url"]
-    assert body["api_key"] == test_llm_payload["api_key"]
+    assert "api_key_masked" in body
+    assert "****" in body["api_key_masked"]
     assert body["model_name"] == test_llm_payload["model_name"]
     assert body["provider"] == "openai"
     assert body["temperature"] == 0.01
