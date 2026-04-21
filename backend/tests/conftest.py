@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 os.environ["SEED_ON_STARTUP"] = "false"
+os.environ["RUN_EVAL_ON_CREATE"] = "false"
 os.environ["LLM_ENDPOINT"] = "https://api.example.com/v1"
 os.environ["LLM_MODEL"] = "test-model"
 os.environ["LLM_API_KEY"] = "test-api-key"

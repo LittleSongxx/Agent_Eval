@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     SEED_ON_STARTUP: bool = True
+    RUN_EVAL_ON_CREATE: bool = True
 
     DEFAULT_LLM_NAME: str = "Qwen Plus (通义千问)"
     LLM_PROVIDER: str = "openai"

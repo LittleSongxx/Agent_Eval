@@ -486,11 +486,17 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     row_error, False, execution_time_ms,
                 )
                 task.completed_rows = idx + 1
-                task.progress = round((idx + 1) / total_rows * 100, 2)
+                task.progress = round((idx + 1) / total_rows, 4)
                 db.commit()
                 all_row_scores.append(metric_scores)
-                await asyncio.sleep(0)  # yield control
+                await asyncio.sleep(0)
                 continue
+
+            # -- Check cancellation --
+            db.refresh(task)
+            if task.status == "cancelled":
+                logger.info("Evaluation %d cancelled by user at row %d", task_id, idx)
+                break
 
             # -- Score legacy metrics --
             for metric_name, metric_instance, _sm in legacy_metrics:
@@ -499,13 +505,13 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                         score = await metric_instance.multi_turn_ascore(sample)
                     else:
                         score = await metric_instance.single_turn_ascore(sample)
-                    metric_scores[metric_name] = float(score)
+                    metric_scores[metric_name] = {"score": round(float(score), 4), "reason": ""}
                 except Exception as exc:
                     logger.error(
                         "Row %d metric %s error: %s",
                         dataset_row.row_index, metric_name, exc,
                     )
-                    metric_scores[metric_name] = None
+                    metric_scores[metric_name] = {"score": None, "reason": str(exc)[:500]}
 
             # -- Score simple metrics --
             for metric_name, metric_instance, _sm in simple_metrics:
@@ -516,13 +522,17 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                         if var in row_data:
                             score_kwargs[var] = row_data[var]
                     result = metric_instance.score(**score_kwargs)
-                    metric_scores[metric_name] = result.value
+                    val = result.value if hasattr(result, "value") else result
+                    reason = str(result.reason) if hasattr(result, "reason") else ""
+                    if isinstance(val, (int, float)):
+                        val = round(float(val), 4)
+                    metric_scores[metric_name] = {"score": val, "reason": reason[:500]}
                 except Exception as exc:
                     logger.error(
                         "Row %d metric %s error: %s",
                         dataset_row.row_index, metric_name, exc,
                     )
-                    metric_scores[metric_name] = None
+                    metric_scores[metric_name] = {"score": None, "reason": str(exc)[:500]}
 
             # -- Determine pass/fail --
             is_pass = _determine_pass(
@@ -537,7 +547,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             )
 
             task.completed_rows = idx + 1
-            task.progress = round((idx + 1) / total_rows * 100, 2)
+            task.progress = round((idx + 1) / total_rows, 4)
             db.commit()
 
             all_row_scores.append(metric_scores)
@@ -635,10 +645,12 @@ def _determine_pass(
         threshold = scenario_metric.pass_threshold
         if threshold is None:
             continue
-        score = metric_scores.get(metric_name)
+        raw = metric_scores.get(metric_name)
+        if raw is None:
+            continue
+        score = raw.get("score") if isinstance(raw, dict) else raw
         if score is None:
             continue
-        # Discrete string values: interpret common "pass"-like words as 1.0
         if isinstance(score, str):
             numeric_score = 1.0 if score.lower() in ("pass", "yes", "true", "1") else 0.0
         else:

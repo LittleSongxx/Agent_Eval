@@ -4,6 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.models.evaluation import EvalTask
 from app.models.dataset import Dataset
@@ -43,10 +44,11 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
     db.commit()
     db.refresh(task)
 
-    # Launch background evaluation
-    from app.core.evaluation_engine import run_evaluation
+    if settings.RUN_EVAL_ON_CREATE:
+        # Launch background evaluation
+        from app.core.evaluation_engine import run_evaluation
 
-    asyncio.create_task(run_evaluation(task.id, SessionLocal))
+        asyncio.create_task(run_evaluation(task.id, SessionLocal))
 
     return task
 
