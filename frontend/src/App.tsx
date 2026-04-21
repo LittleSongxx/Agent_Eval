@@ -1,0 +1,95 @@
+import React, { useState } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Layout, Menu, Typography } from 'antd';
+import {
+  SettingOutlined,
+  DatabaseOutlined,
+  AppstoreOutlined,
+  PlayCircleOutlined,
+  BarChartOutlined,
+} from '@ant-design/icons';
+
+import LLMConfigPage from './pages/LLMConfigPage';
+import DatasetListPage from './pages/DatasetListPage';
+import DatasetDetailPage from './pages/DatasetDetailPage';
+import ScenarioListPage from './pages/ScenarioListPage';
+import EvaluationPage from './pages/EvaluationPage';
+import ReportDetailPage from './pages/ReportDetailPage';
+
+const { Header, Sider, Content } = Layout;
+const { Title } = Typography;
+
+const menuItems = [
+  { key: '/llm-configs', icon: <SettingOutlined />, label: 'LLM配置' },
+  { key: '/datasets', icon: <DatabaseOutlined />, label: '数据管理' },
+  { key: '/scenarios', icon: <AppstoreOutlined />, label: '场景管理' },
+  { key: '/evaluations', icon: <PlayCircleOutlined />, label: '评测执行' },
+  { key: '/reports', icon: <BarChartOutlined />, label: '评测报告' },
+];
+
+const App: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const selectedKey = '/' + location.pathname.split('/')[1];
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 24px',
+          background: '#001529',
+        }}
+      >
+        <Title level={4} style={{ color: '#fff', margin: 0, whiteSpace: 'nowrap' }}>
+          AI 评测平台
+        </Title>
+      </Header>
+      <Layout>
+        <Sider
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          theme="dark"
+          width={200}
+          collapsedWidth={80}
+        >
+          <Menu
+            mode="inline"
+            theme="dark"
+            selectedKeys={[selectedKey]}
+            style={{ height: '100%', borderRight: 0, paddingTop: 16 }}
+            items={menuItems}
+            onClick={({ key }) => navigate(key)}
+          />
+        </Sider>
+        <Layout style={{ padding: 24 }}>
+          <Content
+            style={{
+              background: '#fff',
+              padding: 24,
+              margin: 0,
+              borderRadius: 8,
+              minHeight: 280,
+            }}
+          >
+            <Routes>
+              <Route path="/llm-configs" element={<LLMConfigPage />} />
+              <Route path="/datasets" element={<DatasetListPage />} />
+              <Route path="/datasets/:id" element={<DatasetDetailPage />} />
+              <Route path="/scenarios" element={<ScenarioListPage />} />
+              <Route path="/evaluations" element={<EvaluationPage />} />
+              <Route path="/reports/:id" element={<ReportDetailPage />} />
+              <Route path="*" element={<Navigate to="/datasets" replace />} />
+            </Routes>
+          </Content>
+        </Layout>
+      </Layout>
+    </Layout>
+  );
+};
+
+export default App;
