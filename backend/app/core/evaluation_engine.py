@@ -692,12 +692,16 @@ def _compute_summary_scores(
             if raw is None:
                 error_count += 1
                 continue
-            if isinstance(raw, str):
+            score = raw.get("score") if isinstance(raw, dict) else raw
+            if score is None:
+                error_count += 1
+                continue
+            if isinstance(score, str):
                 numeric_values.append(
-                    1.0 if raw.lower() in ("pass", "yes", "true", "1") else 0.0
+                    1.0 if score.lower() in ("pass", "yes", "true", "1") else 0.0
                 )
             else:
-                numeric_values.append(float(raw))
+                numeric_values.append(float(score))
 
         if numeric_values:
             mean_val = sum(numeric_values) / len(numeric_values)
