@@ -1,16 +1,11 @@
-def _setup_eval_prerequisites(client):
+def _setup_eval_prerequisites(client, test_llm_payload):
     """Create LLM config, metric, scenario, and dataset with one row.
 
     Returns (llm_config, dataset, scenario) response dicts.
     """
     llm = client.post(
         "/api/llm-configs",
-        json={
-            "name": "Test LLM",
-            "api_base_url": "https://api.example.com/v1",
-            "api_key": "sk-test",
-            "model_name": "test-model",
-        },
+        json=test_llm_payload,
     ).json()
 
     metric = client.post(
@@ -61,8 +56,8 @@ def _setup_eval_prerequisites(client):
     return llm, dataset, scenario
 
 
-def test_create_evaluation(client):
-    llm, dataset, scenario = _setup_eval_prerequisites(client)
+def test_create_evaluation(client, test_llm_payload):
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
     resp = client.post(
         "/api/evaluations",
         json={
@@ -81,8 +76,8 @@ def test_create_evaluation(client):
     assert body["llm_config_id"] == llm["id"]
 
 
-def test_list_evaluations(client):
-    llm, dataset, scenario = _setup_eval_prerequisites(client)
+def test_list_evaluations(client, test_llm_payload):
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
     for i in range(2):
         client.post(
             "/api/evaluations",

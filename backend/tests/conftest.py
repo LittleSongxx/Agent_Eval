@@ -1,7 +1,17 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+os.environ["SEED_ON_STARTUP"] = "false"
+os.environ["LLM_ENDPOINT"] = "https://api.example.com/v1"
+os.environ["LLM_MODEL"] = "test-model"
+os.environ["LLM_API_KEY"] = "test-api-key"
+os.environ.setdefault("TEST_LLM_ENDPOINT", os.environ["LLM_ENDPOINT"])
+os.environ.setdefault("TEST_LLM_MODEL", os.environ["LLM_MODEL"])
+os.environ.setdefault("TEST_LLM_API_KEY", os.environ["LLM_API_KEY"])
 
 from app.core.database import Base, get_db
 from app.main import app
@@ -41,3 +51,13 @@ def client(db):
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def test_llm_payload():
+    return {
+        "name": "Test LLM",
+        "api_base_url": os.environ["TEST_LLM_ENDPOINT"],
+        "api_key": os.environ["TEST_LLM_API_KEY"],
+        "model_name": os.environ["TEST_LLM_MODEL"],
+    }

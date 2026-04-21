@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import (
     LLMConfig,
     Dataset,
@@ -14,12 +15,51 @@ from app.models import (
 )
 
 
+def sync_default_llm_config(db: Session) -> tuple[LLMConfig, bool]:
+    """Create or update the default LLM config from environment settings."""
+
+    config = (
+        db.query(LLMConfig)
+        .filter(LLMConfig.name == settings.DEFAULT_LLM_NAME)
+        .first()
+    )
+    if config is None:
+        config = db.query(LLMConfig).filter(LLMConfig.is_default.is_(True)).first()
+
+    values = {
+        "name": settings.DEFAULT_LLM_NAME,
+        "provider": settings.LLM_PROVIDER,
+        "api_base_url": settings.LLM_ENDPOINT,
+        "api_key": settings.LLM_API_KEY,
+        "model_name": settings.LLM_MODEL,
+        "temperature": settings.LLM_TEMPERATURE,
+        "max_tokens": settings.LLM_MAX_TOKENS,
+        "is_default": True,
+    }
+
+    created = config is None
+    if created:
+        config = LLMConfig(**values)
+        db.add(config)
+    else:
+        for key, value in values.items():
+            setattr(config, key, value)
+
+    if not settings.LLM_API_KEY:
+        print("[seed] LLM_API_KEY is empty; configure backend/.env before testing LLM connectivity.")
+
+    db.flush()
+    return config, created
+
+
 def run_seed(db: Session) -> None:
     """Populate the database with initial seed data if tables are empty."""
 
     existing = db.query(LLMConfig).first()
+    llm_config, _ = sync_default_llm_config(db)
     if existing is not None:
-        print("[seed] Tables already contain data, skipping seed.")
+        db.commit()
+        print("[seed] Tables already contain data; synced default LLM config and skipped sample seed.")
         return
 
     print("[seed] Seeding database...")
@@ -27,18 +67,7 @@ def run_seed(db: Session) -> None:
     # ------------------------------------------------------------------
     # 1. LLM Config - Qwen Plus
     # ------------------------------------------------------------------
-    llm_config = LLMConfig(
-        name="Qwen Plus (\u901a\u4e49\u5343\u95ee)",
-        provider="openai",
-        api_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        api_key="sk-7f6944e4b5134d0ca47594133ef58bea",
-        model_name="qwen-plus",
-        temperature=0.01,
-        max_tokens=1024,
-        is_default=True,
-    )
-    db.add(llm_config)
-    db.flush()
+    # The default LLM has already been created from Settings above.
 
     # ------------------------------------------------------------------
     # 2. Builtin Metric Definitions (10 metrics)

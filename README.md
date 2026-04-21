@@ -26,7 +26,16 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env
 python run.py
+```
+
+后端会从 `backend/.env` 读取默认评测 LLM 配置。当前支持 OpenAI 兼容接口，关键环境变量如下：
+
+```bash
+LLM_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen-plus
+LLM_API_KEY=your-dashscope-api-key
 ```
 
 后端启动后访问 http://localhost:8000/docs 查看 API 文档。
@@ -44,7 +53,7 @@ npm run dev
 ### 3. 预置数据
 
 系统首次启动时自动创建：
-- 通义千问 LLM 配置（DashScope 端点）
+- 通义千问 LLM 配置（从 `backend/.env` 读取 DashScope 端点、模型和 API Key）
 - 10 个内置评测指标
 - 3 个预置场景模板（RAG/Agent/多轮对话）
 - RAG 示例数据集（5 条 Python 问答数据）

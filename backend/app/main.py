@@ -20,14 +20,15 @@ async def lifespan(application: FastAPI):
     # Ensure upload directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
-    # Run seed data (import here to avoid circular imports)
-    from app.seed import run_seed
-    from app.core.database import SessionLocal
-    db = SessionLocal()
-    try:
-        run_seed(db)
-    finally:
-        db.close()
+    if settings.SEED_ON_STARTUP:
+        # Run seed data (import here to avoid circular imports)
+        from app.seed import run_seed
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        try:
+            run_seed(db)
+        finally:
+            db.close()
 
     yield
 

@@ -1,10 +1,20 @@
-venv/
-node_modules/
+.DS_Store
+
+# Python
 __pycache__/
-*.pyc
-*.db
-test.db
+*.py[cod]
 .pytest_cache/
-uploads/
-*.egg-info/
-.env
+
+# Local runtime data
+backend/.env
+backend/*.db
+backend/uploads/
+backend/venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/

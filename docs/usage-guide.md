@@ -10,19 +10,29 @@ LLM 配置中心用于集中管理评测所需的大语言模型 API 连接信�
 
 ### 1.1 预配置的通义千问
 
-系统首次启动时自动创建一条通义千问配置：
+系统首次启动时会从 `backend/.env` 自动创建或同步一条通义千问配置：
 
 | 字段 | 值 |
 |------|-----|
 | 名称 | Qwen Plus (通义千问) |
 | 提供商 | openai（兼容协议） |
-| API 端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| 模型名称 | qwen-plus |
-| Temperature | 0.01 |
-| 最大 Token | 1024 |
+| API 端点 | `LLM_ENDPOINT`，默认 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| 模型名称 | `LLM_MODEL`，默认 `qwen-plus` |
+| API Key | `LLM_API_KEY` |
+| Temperature | `LLM_TEMPERATURE`，默认 `0.01` |
+| 最大 Token | `LLM_MAX_TOKENS`，默认 `1024` |
 | 默认配置 | 是 |
 
-> 使用前需将 `api_key` 更换为您自己的 DashScope API Key。
+推荐在启动后端前配置：
+
+```bash
+cd backend
+cp .env.example .env
+# 编辑 .env 中的 LLM_API_KEY
+python run.py
+```
+
+> API Key 只放在本地 `backend/.env` 或通过环境变量注入，不建议写入代码、测试文件或文档。
 
 ### 1.2 添加新的 LLM 配置
 
