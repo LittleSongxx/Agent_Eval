@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,21 @@ from app.models.llm_config import LLMConfig
 from app.schemas.evaluation import EvalTaskCreate, EvalTaskResponse
 
 router = APIRouter(prefix="/evaluations", tags=["Evaluations"])
+
+
+def _launch_evaluation(task_id: int) -> None:
+    """Run evaluation outside the FastAPI event loop so progress APIs stay responsive."""
+    from app.core.evaluation_engine import run_evaluation
+
+    def runner() -> None:
+        asyncio.run(run_evaluation(task_id, SessionLocal))
+
+    thread = threading.Thread(
+        target=runner,
+        name=f"eval-task-{task_id}",
+        daemon=True,
+    )
+    thread.start()
 
 
 @router.get("", response_model=List[EvalTaskResponse])
@@ -45,10 +61,7 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
     db.refresh(task)
 
     if settings.RUN_EVAL_ON_CREATE:
-        # Launch background evaluation
-        from app.core.evaluation_engine import run_evaluation
-
-        asyncio.create_task(run_evaluation(task.id, SessionLocal))
+        _launch_evaluation(task.id)
 
     return task
 
@@ -66,7 +79,14 @@ def get_evaluation_logs(task_id: int, db: Session = Depends(get_db)):
     task = db.query(EvalTask).filter(EvalTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Evaluation task not found")
-    return {"task_id": task_id, "status": task.status, "logs": task.logs or ""}
+    return {
+        "task_id": task_id,
+        "status": task.status,
+        "progress": task.progress or 0,
+        "total_rows": task.total_rows or 0,
+        "completed_rows": task.completed_rows or 0,
+        "logs": task.logs or "",
+    }
 
 
 @router.post("/{task_id}/cancel", response_model=EvalTaskResponse)

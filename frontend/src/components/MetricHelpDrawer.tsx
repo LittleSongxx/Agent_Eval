@@ -66,6 +66,36 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
     requiredFields: ['response', 'reference'],
     example: '回答说"GIL限制了所有类型的并行"，标准答案说"GIL限制CPU密集型并行" → 回答过于绝对，事实正确性扣分。',
   },
+  answer_completeness: {
+    name: 'answer_completeness',
+    displayName: '答案完整性 (Answer Completeness)',
+    category: 'RAG',
+    compareSubject: 'response（模型回答）  vs  reference（标准参考答案）',
+    compareMethod: '1. LLM 将 reference 拆解成必须覆盖的关键要点\n2. 检查 response 是否覆盖这些要点，以及是否遗漏关键条件、例外或操作步骤\n3. 分数 = 已覆盖关键要点的比例，并结合遗漏严重程度做扣分\n\n它更关注“有没有答全”，与 factual_correctness 的“事实是否说对”互补。',
+    scoreRange: '0.0 ~ 1.0（1.0 表示回答覆盖标准答案的全部关键要点）',
+    requiredFields: ['user_input', 'response', 'reference'],
+    example: '标准答案要求说明“GIL 影响 CPU 密集型线程，但 IO 密集型仍可能受益”。回答只说“GIL 限制并行” → 事实大致没错，但遗漏 IO 场景，完整性会扣分。',
+  },
+  retrieval_hit_rate: {
+    name: 'retrieval_hit_rate',
+    displayName: '召回命中率 (HitRate@K)',
+    category: 'RAG 检索',
+    compareSubject: 'retrieved_context_ids（实际召回文档ID）  vs  reference_context_ids（期望文档ID）',
+    compareMethod: '1. 取 Top-K 的 retrieved_context_ids\n2. 判断其中是否至少命中 1 个 reference_context_ids\n3. 命中返回 1，未命中返回 0\n4. 多条样本求平均后得到整体召回成功率\n\n这是确定性代码指标，不依赖 LLM 评判。',
+    scoreRange: '0 或 1；报告平均值为 0.0 ~ 1.0（越高表示检索越容易召回正确文档）',
+    requiredFields: ['retrieved_context_ids', 'reference_context_ids'],
+    example: '期望文档=[doc_1, doc_3]，Top-3 召回=[doc_7, doc_3, doc_9] → 命中 doc_3，HitRate@3 = 1。',
+  },
+  retrieval_mrr: {
+    name: 'retrieval_mrr',
+    displayName: '检索排序质量 (MRR)',
+    category: 'RAG 检索',
+    compareSubject: 'retrieved_context_ids（实际召回文档ID及排序）  vs  reference_context_ids（期望文档ID）',
+    compareMethod: '1. 按顺序扫描 retrieved_context_ids\n2. 找到第一个命中的 reference_context_ids\n3. 分数 = 1 / 命中位置排名\n4. 如果没有命中，则分数为 0\n\n它不仅看是否召回，还看正确文档是否排在前面。',
+    scoreRange: '0.0 ~ 1.0（1.0 表示第 1 位就是正确文档；0 表示完全未命中）',
+    requiredFields: ['retrieved_context_ids', 'reference_context_ids'],
+    example: '期望文档=[doc_9]，召回排序=[doc_1, doc_9, doc_3] → 第 2 位命中，MRR = 1/2 = 0.5。',
+  },
   tool_call_accuracy: {
     name: 'tool_call_accuracy',
     displayName: '工具调用准确度 (Tool Call Accuracy)',
@@ -120,7 +150,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
 
 export const MetricHelpIcon: React.FC<{ metricName: string; onClick: () => void }> = ({ metricName, onClick }) => {
   const info = METRIC_HELP[metricName];
-  const tip = info ? info.compareSubject : '点击查看指标详情';
+  const tip = info ? `点击查看评分标准和计算方式：${info.compareSubject}` : '点击查看指标详情';
   return (
     <Tooltip title={tip} placement="top">
       <QuestionCircleOutlined

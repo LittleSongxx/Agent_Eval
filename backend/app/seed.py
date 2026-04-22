@@ -52,14 +52,194 @@ def sync_default_llm_config(db: Session) -> tuple[LLMConfig, bool]:
     return config, created
 
 
+def _ensure_metric_definition(db: Session, data: dict) -> MetricDefinition:
+    metric = db.query(MetricDefinition).filter(MetricDefinition.name == data["name"]).first()
+    if metric is None:
+        metric = MetricDefinition(**data)
+        db.add(metric)
+    else:
+        metric.display_name = data["display_name"]
+        metric.metric_type = data["metric_type"]
+        metric.config = data.get("config")
+        metric.category = data.get("category")
+        metric.is_builtin = data.get("is_builtin", metric.is_builtin)
+    db.flush()
+    return metric
+
+
+def _ensure_scenario_metric(
+    db: Session,
+    scenario_id: int,
+    metric_definition_id: int,
+    pass_threshold: float,
+    weight: float = 1.0,
+) -> None:
+    existing = (
+        db.query(ScenarioMetric)
+        .filter(
+            ScenarioMetric.scenario_id == scenario_id,
+            ScenarioMetric.metric_definition_id == metric_definition_id,
+        )
+        .first()
+    )
+    if existing is None:
+        db.add(
+            ScenarioMetric(
+                scenario_id=scenario_id,
+                metric_definition_id=metric_definition_id,
+                weight=weight,
+                pass_threshold=pass_threshold,
+            )
+        )
+    else:
+        existing.weight = weight
+        existing.pass_threshold = pass_threshold
+    db.flush()
+
+
+def _upgrade_existing_rag_seed(db: Session) -> None:
+    """Idempotently add the enhanced RAG metric layer to an existing local DB."""
+
+    metric_data = [
+        {
+            "name": "context_precision",
+            "display_name": "上下文精确度 (Context Precision)",
+            "metric_type": "builtin_context_precision",
+            "config": {"description": "检索到的上下文中有多少是与回答真正相关的有用信息。需要字段：user_input, retrieved_contexts, reference"},
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "answer_relevancy",
+            "display_name": "回答相关性 (Answer Relevancy)",
+            "metric_type": "builtin_answer_relevancy",
+            "config": {"description": "回答与用户问题的相关程度。需要字段：user_input, response"},
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "answer_completeness",
+            "display_name": "答案完整性 (Answer Completeness)",
+            "metric_type": "numeric",
+            "config": {
+                "prompt": (
+                    "请评估 AI 回答是否完整覆盖了参考答案中的关键要点，并给出 0 到 1 的分数。\n"
+                    "用户问题: {user_input}\n"
+                    "AI回答: {response}\n"
+                    "参考答案: {reference}\n"
+                    "评分标准: 1=完整覆盖所有关键要点；0.5=覆盖部分关键要点；0=遗漏主要要点。"
+                ),
+                "allowed_values": [0.0, 1.0],
+                "description": "回答是否覆盖参考答案的所有关键要点。需要字段：user_input, response, reference",
+            },
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "retrieval_hit_rate",
+            "display_name": "召回命中率 (HitRate@K)",
+            "metric_type": "code_retrieval_hit_rate",
+            "config": {
+                "k": 5,
+                "description": "Top-K 检索结果是否命中任一标准文档 ID。需要字段：retrieved_context_ids, reference_context_ids",
+            },
+            "category": "rag_retrieval",
+            "is_builtin": True,
+        },
+        {
+            "name": "retrieval_mrr",
+            "display_name": "检索排序质量 (MRR)",
+            "metric_type": "code_retrieval_mrr",
+            "config": {"description": "第一个标准文档 ID 在检索结果中的倒数排名。需要字段：retrieved_context_ids, reference_context_ids"},
+            "category": "rag_retrieval",
+            "is_builtin": True,
+        },
+    ]
+    metrics = {item["name"]: _ensure_metric_definition(db, item) for item in metric_data}
+
+    rag_scenario = (
+        db.query(EvalScenario)
+        .filter(EvalScenario.scene_type == "rag", EvalScenario.is_preset.is_(True))
+        .first()
+    )
+    if rag_scenario is not None:
+        rag_scenario.description = "RAG 单轮问答 P0 核心评测模板，覆盖检索召回、检索精确、回答忠实、回答相关、事实正确和答案完整性。"
+        for metric_name in ["context_precision", "answer_relevancy", "answer_completeness"]:
+            _ensure_scenario_metric(db, rag_scenario.id, metrics[metric_name].id, pass_threshold=0.7)
+
+    rag_dataset = db.query(Dataset).filter(Dataset.name == "RAG 示例数据集").first()
+    if rag_dataset is not None:
+        schema = list(rag_dataset.field_schema or [])
+        field_names = {field.get("name") for field in schema}
+        extra_fields = [
+            {"name": "retrieved_context_ids", "type": "text_list", "required": False, "description": "检索到的文档/分片 ID，顺序需与 retrieved_contexts 一致，用于 HitRate@K、MRR 等检索单测指标"},
+            {"name": "reference_context_ids", "type": "text_list", "required": False, "description": "人工标注的标准文档/分片 ID，用于判断检索是否命中正确资料"},
+        ]
+        for field in extra_fields:
+            if field["name"] not in field_names:
+                schema.append(field)
+        rag_dataset.field_schema = schema
+
+    sample_eval = db.query(EvalTask).filter(EvalTask.name == "RAG 示例评测").first()
+    if sample_eval is not None:
+        summary_scores = dict(sample_eval.summary_scores or {})
+        summary_scores.update(
+            {
+                "context_precision": {"mean": 0.88, "min": 0.75, "max": 1.0, "pass_rate": 1.0},
+                "answer_relevancy": {"mean": 0.94, "min": 0.9, "max": 1.0, "pass_rate": 1.0},
+                "answer_completeness": {"mean": 0.81, "min": 0.6, "max": 0.95, "pass_rate": 0.8},
+            }
+        )
+        sample_eval.summary_scores = summary_scores
+
+        extra_rag_scores = [
+            {
+                "context_precision": {"score": 1.0, "reason": "检索片段均与问题和参考答案直接相关。"},
+                "answer_relevancy": {"score": 1.0, "reason": "回答紧扣列表和元组区别，没有跑题。"},
+                "answer_completeness": {"score": 0.95, "reason": "覆盖可变性、不可变性和语法表示，关键点完整。"},
+            },
+            {
+                "context_precision": {"score": 0.9, "reason": "两段上下文均有用，第二段偏示例扩展。"},
+                "answer_relevancy": {"score": 0.95, "reason": "回答围绕装饰器定义和用法展开。"},
+                "answer_completeness": {"score": 0.8, "reason": "覆盖核心概念，但对高阶函数本质说明略少。"},
+            },
+            {
+                "context_precision": {"score": 0.95, "reason": "异常处理结构片段高度相关，常见异常片段作为补充有用。"},
+                "answer_relevancy": {"score": 0.95, "reason": "回答直接说明异常处理方式。"},
+                "answer_completeness": {"score": 0.9, "reason": "覆盖 try/except/finally，略少 else 说明。"},
+            },
+            {
+                "context_precision": {"score": 0.75, "reason": "上下文与 GIL 相关，但缺少 IO 密集型多线程有效性的补充片段。"},
+                "answer_relevancy": {"score": 0.9, "reason": "回答与 GIL 问题相关。"},
+                "answer_completeness": {"score": 0.6, "reason": "未覆盖多线程在 IO 密集型任务中仍有价值，答案不够完整。"},
+            },
+            {
+                "context_precision": {"score": 0.8, "reason": "第一段直接相关，第二段生成器表达式为补充信息。"},
+                "answer_relevancy": {"score": 0.9, "reason": "回答围绕生成器定义和惰性计算。"},
+                "answer_completeness": {"score": 0.8, "reason": "覆盖 yield 和惰性求值，但节省内存表述不够明确。"},
+            },
+        ]
+        row_results = (
+            db.query(EvalRowResult)
+            .filter(EvalRowResult.eval_task_id == sample_eval.id)
+            .order_by(EvalRowResult.row_index)
+            .all()
+        )
+        for row_result, extra_scores in zip(row_results, extra_rag_scores):
+            metric_scores = dict(row_result.metric_scores or {})
+            metric_scores.update(extra_scores)
+            row_result.metric_scores = metric_scores
+
+
 def run_seed(db: Session) -> None:
     """Populate the database with initial seed data if tables are empty."""
 
     existing = db.query(LLMConfig).first()
     llm_config, _ = sync_default_llm_config(db)
     if existing is not None:
+        _upgrade_existing_rag_seed(db)
         db.commit()
-        print("[seed] Tables already contain data; synced default LLM config and skipped sample seed.")
+        print("[seed] Tables already contain data; synced default LLM config and RAG metric layer.")
         return
 
     print("[seed] Seeding database...")
@@ -111,6 +291,43 @@ def run_seed(db: Session) -> None:
             "metric_type": "builtin_factual_correctness",
             "config": {"description": "回答与参考答案在事实层面是否一致。需要字段：response, reference"},
             "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "answer_completeness",
+            "display_name": "答案完整性 (Answer Completeness)",
+            "metric_type": "numeric",
+            "config": {
+                "prompt": (
+                    "请评估 AI 回答是否完整覆盖了参考答案中的关键要点，并给出 0 到 1 的分数。\n"
+                    "用户问题: {user_input}\n"
+                    "AI回答: {response}\n"
+                    "参考答案: {reference}\n"
+                    "评分标准: 1=完整覆盖所有关键要点；0.5=覆盖部分关键要点；0=遗漏主要要点。"
+                ),
+                "allowed_values": [0.0, 1.0],
+                "description": "回答是否覆盖参考答案的所有关键要点。需要字段：user_input, response, reference",
+            },
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "retrieval_hit_rate",
+            "display_name": "召回命中率 (HitRate@K)",
+            "metric_type": "code_retrieval_hit_rate",
+            "config": {
+                "k": 5,
+                "description": "Top-K 检索结果是否命中任一标准文档 ID。需要字段：retrieved_context_ids, reference_context_ids",
+            },
+            "category": "rag_retrieval",
+            "is_builtin": True,
+        },
+        {
+            "name": "retrieval_mrr",
+            "display_name": "检索排序质量 (MRR)",
+            "metric_type": "code_retrieval_mrr",
+            "config": {"description": "第一个标准文档 ID 在检索结果中的倒数排名。需要字段：retrieved_context_ids, reference_context_ids"},
+            "category": "rag_retrieval",
             "is_builtin": True,
         },
         {
@@ -175,7 +392,7 @@ def run_seed(db: Session) -> None:
     # 3a. RAG Evaluation Template
     rag_scenario = EvalScenario(
         name="RAG \u8bc4\u6d4b\u6a21\u677f",
-        description="\u57fa\u4e8e\u68c0\u7d22\u589e\u5f3a\u751f\u6210\uff08RAG\uff09\u7684\u8bc4\u6d4b\u573a\u666f\uff0c\u5305\u542b\u5fe0\u5b9e\u5ea6\u3001\u4e0a\u4e0b\u6587\u53ec\u56de\u7387\u548c\u4e8b\u5b9e\u6b63\u786e\u6027\u6307\u6807",
+        description="RAG 单轮问答 P0 核心评测模板，覆盖检索召回、检索精确、回答忠实、回答相关、事实正确和答案完整性。",
         scene_type="rag",
         sample_type="single_turn",
         is_preset=True,
@@ -198,7 +415,25 @@ def run_seed(db: Session) -> None:
         ),
         ScenarioMetric(
             scenario_id=rag_scenario.id,
+            metric_definition_id=metric_objects["context_precision"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=rag_scenario.id,
+            metric_definition_id=metric_objects["answer_relevancy"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=rag_scenario.id,
             metric_definition_id=metric_objects["factual_correctness"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=rag_scenario.id,
+            metric_definition_id=metric_objects["answer_completeness"].id,
             weight=1.0,
             pass_threshold=0.7,
         ),
@@ -273,6 +508,8 @@ def run_seed(db: Session) -> None:
             {"name": "user_input", "type": "text", "required": True, "description": "\u7528\u6237\u8f93\u5165\u7684\u95ee\u9898"},
             {"name": "response", "type": "text", "required": True, "description": "\u6a21\u578b\u751f\u6210\u7684\u56de\u7b54"},
             {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "\u68c0\u7d22\u5230\u7684\u4e0a\u4e0b\u6587\u5217\u8868"},
+            {"name": "retrieved_context_ids", "type": "text_list", "required": False, "description": "检索到的文档/分片 ID，顺序需与 retrieved_contexts 一致，用于 HitRate@K、MRR 等检索单测指标"},
+            {"name": "reference_context_ids", "type": "text_list", "required": False, "description": "人工标注的标准文档/分片 ID，用于判断检索是否命中正确资料"},
             {"name": "reference", "type": "text", "required": False, "description": "\u53c2\u8003\u7b54\u6848"},
         ],
         row_count=5,
@@ -288,6 +525,8 @@ def run_seed(db: Session) -> None:
                 "Python\u5217\u8868(list)\u662f\u53ef\u53d8\u5e8f\u5217\uff0c\u652f\u6301append\u3001insert\u3001remove\u7b49\u64cd\u4f5c\u3002",
                 "Python\u5143\u7ec4(tuple)\u662f\u4e0d\u53ef\u53d8\u5e8f\u5217\uff0c\u4e00\u65e6\u521b\u5efa\u5c31\u4e0d\u80fd\u4fee\u6539\u5176\u5143\u7d20\u3002",
             ],
+            "retrieved_context_ids": ["python-list-001", "python-tuple-001"],
+            "reference_context_ids": ["python-list-001", "python-tuple-001"],
             "reference": "\u5217\u8868\u662f\u53ef\u53d8\u7684\u6709\u5e8f\u96c6\u5408\uff0c\u5143\u7ec4\u662f\u4e0d\u53ef\u53d8\u7684\u6709\u5e8f\u96c6\u5408\u3002\u5217\u8868\u7528[]\u8868\u793a\uff0c\u5143\u7ec4\u7528()\u8868\u793a\u3002",
         },
         {
@@ -297,6 +536,8 @@ def run_seed(db: Session) -> None:
                 "\u88c5\u9970\u5668\u672c\u8d28\u4e0a\u662f\u4e00\u4e2a\u63a5\u53d7\u51fd\u6570\u4f5c\u4e3a\u53c2\u6570\u5e76\u8fd4\u56de\u65b0\u51fd\u6570\u7684\u9ad8\u9636\u51fd\u6570\u3002",
                 "Python\u88c5\u9970\u5668\u4f7f\u7528@\u8bed\u6cd5\u7cd6\uff0c\u53ef\u4ee5\u5b9e\u73b0\u65e5\u5fd7\u8bb0\u5f55\u3001\u6743\u9650\u68c0\u67e5\u7b49\u6a2a\u5207\u5173\u6ce8\u70b9\u3002",
             ],
+            "retrieved_context_ids": ["python-decorator-001", "python-decorator-002"],
+            "reference_context_ids": ["python-decorator-001"],
             "reference": "\u88c5\u9970\u5668\u662fPython\u7684\u4e00\u79cd\u8bbe\u8ba1\u6a21\u5f0f\uff0c\u5b83\u5141\u8bb8\u5728\u4e0d\u4fee\u6539\u539f\u51fd\u6570\u7684\u60c5\u51b5\u4e0b\u6269\u5c55\u51fd\u6570\u7684\u884c\u4e3a\u3002",
         },
         {
@@ -306,6 +547,8 @@ def run_seed(db: Session) -> None:
                 "Python\u5f02\u5e38\u5904\u7406\u4f7f\u7528try/except/else/finally\u8bed\u53e5\u7ed3\u6784\u3002",
                 "\u5e38\u89c1\u7684\u5f02\u5e38\u5305\u62ecValueError\u3001TypeError\u3001KeyError\u7b49\u3002",
             ],
+            "retrieved_context_ids": ["python-exception-001", "python-exception-002"],
+            "reference_context_ids": ["python-exception-001"],
             "reference": "Python\u4f7f\u7528try/except\u8bed\u53e5\u5904\u7406\u5f02\u5e38\uff0cexcept\u53ef\u4ee5\u6355\u83b7\u7279\u5b9a\u7c7b\u578b\u7684\u5f02\u5e38\uff0cfinally\u5757\u4e2d\u7684\u4ee3\u7801\u65e0\u8bba\u662f\u5426\u53d1\u751f\u5f02\u5e38\u90fd\u4f1a\u6267\u884c\u3002",
         },
         {
@@ -315,6 +558,8 @@ def run_seed(db: Session) -> None:
                 "GIL(Global Interpreter Lock)\u662fCPython\u89e3\u91ca\u5668\u4e2d\u7684\u4e00\u4e2a\u4e92\u65a5\u9501\u3002",
                 "\u7531\u4e8eGIL\u7684\u5b58\u5728\uff0cCPU\u5bc6\u96c6\u578b\u4efb\u52a1\u5efa\u8bae\u4f7f\u7528\u591a\u8fdb\u7a0b\u800c\u975e\u591a\u7ebf\u7a0b\u3002",
             ],
+            "retrieved_context_ids": ["python-gil-001", "python-gil-002"],
+            "reference_context_ids": ["python-gil-001", "python-gil-002", "python-threading-io-001"],
             "reference": "GIL\uff08\u5168\u5c40\u89e3\u91ca\u5668\u9501\uff09\u662fCPython\u7684\u4e00\u4e2a\u673a\u5236\uff0c\u5b83\u4fdd\u8bc1\u540c\u4e00\u65f6\u523b\u53ea\u6709\u4e00\u4e2a\u7ebf\u7a0b\u6267\u884cPython\u5b57\u8282\u7801\uff0c\u9650\u5236\u4e86\u591a\u7ebf\u7a0b\u7684\u5e76\u884c\u6027\u80fd\u3002",
         },
         {
@@ -324,6 +569,8 @@ def run_seed(db: Session) -> None:
                 "\u751f\u6210\u5668\u51fd\u6570\u4f7f\u7528yield\u8bed\u53e5\u8fd4\u56de\u503c\uff0c\u6bcf\u6b21\u8c03\u7528next()\u65f6\u6062\u590d\u6267\u884c\u3002",
                 "\u751f\u6210\u5668\u8868\u8fbe\u5f0f\u7c7b\u4f3c\u5217\u8868\u63a8\u5bfc\u5f0f\uff0c\u4f46\u4f7f\u7528\u5706\u62ec\u53f7\uff0c\u5982(x**2 for x in range(10))\u3002",
             ],
+            "retrieved_context_ids": ["python-generator-001", "python-generator-002"],
+            "reference_context_ids": ["python-generator-001"],
             "reference": "\u751f\u6210\u5668\u662f\u4e00\u79cd\u7279\u6b8a\u7684\u8fed\u4ee3\u5668\uff0c\u901a\u8fc7yield\u5173\u952e\u5b57\u5b9e\u73b0\u60f0\u6027\u6c42\u503c\uff0c\u53ef\u4ee5\u8282\u7701\u5185\u5b58\u3002",
         },
     ]
@@ -367,10 +614,28 @@ def run_seed(db: Session) -> None:
                 "max": 1.0,
                 "pass_rate": 1.0,
             },
+            "context_precision": {
+                "mean": 0.88,
+                "min": 0.75,
+                "max": 1.0,
+                "pass_rate": 1.0,
+            },
+            "answer_relevancy": {
+                "mean": 0.94,
+                "min": 0.9,
+                "max": 1.0,
+                "pass_rate": 1.0,
+            },
             "factual_correctness": {
                 "mean": 0.80,
                 "min": 0.5,
                 "max": 1.0,
+                "pass_rate": 0.8,
+            },
+            "answer_completeness": {
+                "mean": 0.81,
+                "min": 0.6,
+                "max": 0.95,
                 "pass_rate": 0.8,
             },
         },
@@ -490,6 +755,36 @@ def run_seed(db: Session) -> None:
             error=None,
         ),
     ]
+    extra_rag_scores = [
+        {
+            "context_precision": {"score": 1.0, "reason": "检索片段均与问题和参考答案直接相关。"},
+            "answer_relevancy": {"score": 1.0, "reason": "回答紧扣列表和元组区别，没有跑题。"},
+            "answer_completeness": {"score": 0.95, "reason": "覆盖可变性、不可变性和语法表示，关键点完整。"},
+        },
+        {
+            "context_precision": {"score": 0.9, "reason": "两段上下文均有用，第二段偏示例扩展。"},
+            "answer_relevancy": {"score": 0.95, "reason": "回答围绕装饰器定义和用法展开。"},
+            "answer_completeness": {"score": 0.8, "reason": "覆盖核心概念，但对高阶函数本质说明略少。"},
+        },
+        {
+            "context_precision": {"score": 0.95, "reason": "异常处理结构片段高度相关，常见异常片段作为补充有用。"},
+            "answer_relevancy": {"score": 0.95, "reason": "回答直接说明异常处理方式。"},
+            "answer_completeness": {"score": 0.9, "reason": "覆盖 try/except/finally，略少 else 说明。"},
+        },
+        {
+            "context_precision": {"score": 0.75, "reason": "上下文与 GIL 相关，但缺少 IO 密集型多线程有效性的补充片段。"},
+            "answer_relevancy": {"score": 0.9, "reason": "回答与 GIL 问题相关。"},
+            "answer_completeness": {"score": 0.6, "reason": "未覆盖多线程在 IO 密集型任务中仍有价值，答案不够完整。"},
+        },
+        {
+            "context_precision": {"score": 0.8, "reason": "第一段直接相关，第二段生成器表达式为补充信息。"},
+            "answer_relevancy": {"score": 0.9, "reason": "回答围绕生成器定义和惰性计算。"},
+            "answer_completeness": {"score": 0.8, "reason": "覆盖 yield 和惰性求值，但节省内存表述不够明确。"},
+        },
+    ]
+    for row_result, extra_scores in zip(eval_row_results, extra_rag_scores):
+        row_result.metric_scores.update(extra_scores)
+
     db.add_all(eval_row_results)
 
     # ------------------------------------------------------------------

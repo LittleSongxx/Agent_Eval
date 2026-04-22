@@ -64,9 +64,12 @@ const EvaluationPage: React.FC = () => {
   const fetchTasks = useCallback(async () => {
     try {
       const data = await api.listEvaluations();
-      setTasks(Array.isArray(data) ? data : data?.items || []);
+      const normalized = Array.isArray(data) ? data : data?.items || [];
+      setTasks(normalized);
+      return normalized;
     } catch {
       message.error('加载评测任务失败');
+      return [];
     }
   }, []);
 
@@ -97,7 +100,7 @@ const EvaluationPage: React.FC = () => {
       (t) => t.status === 'pending' || t.status === 'running'
     );
     if (hasRunning) {
-      timerRef.current = setInterval(fetchTasks, 3000);
+      timerRef.current = setInterval(fetchTasks, 1000);
     }
     return () => {
       if (timerRef.current) {
@@ -131,14 +134,17 @@ const EvaluationPage: React.FC = () => {
         const data = await api.getEvaluationLogs(consoleTaskId);
         setConsoleLogs(data.logs || '');
         setConsoleStatus(data.status || '');
-        if (!userScrolledUp.current) {
-          setTimeout(() => consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        if (!userScrolledUp.current && consoleBoxRef.current) {
+          setTimeout(() => {
+            const box = consoleBoxRef.current;
+            if (box) box.scrollTop = box.scrollHeight;
+          }, 100);
         }
       } catch { /* ignore */ }
     };
 
     pollLogs();
-    consoleTimerRef.current = setInterval(pollLogs, 2000);
+    consoleTimerRef.current = setInterval(pollLogs, 1000);
 
     return () => {
       if (consoleTimerRef.current) {
@@ -155,6 +161,7 @@ const EvaluationPage: React.FC = () => {
       const created = await api.createEvaluation(values);
       message.success('评测任务已创建');
       form.resetFields();
+      setTasks((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
       fetchTasks();
       openConsole(created.id);
     } catch {
@@ -173,6 +180,30 @@ const EvaluationPage: React.FC = () => {
       message.error('取消失败');
     }
   };
+
+  const getTaskPercent = (task: EvalTask) => {
+    if (task.total_rows && task.total_rows > 0) {
+      return Math.min(100, Math.round((task.completed_rows / task.total_rows) * 100));
+    }
+    return Math.round((task.progress || 0) * 100);
+  };
+
+  const getTaskCountText = (task: EvalTask) => {
+    const completed = task.completed_rows || 0;
+    const total = task.total_rows || 0;
+    return total > 0 ? `${completed}/${total}` : `${completed}/-`;
+  };
+
+  const getProgressStatus = (status: string): 'active' | 'success' | 'exception' | 'normal' => {
+    if (status === 'completed') return 'success';
+    if (status === 'failed') return 'exception';
+    if (status === 'running') return 'active';
+    return 'normal';
+  };
+
+  const progressTask =
+    (consoleTaskId ? tasks.find((t) => t.id === consoleTaskId) : undefined) ||
+    tasks.find((t) => t.status === 'running' || t.status === 'pending');
 
   const columns = [
     { title: '任务名称', dataIndex: 'name', key: 'name', width: 180 },
@@ -212,13 +243,13 @@ const EvaluationPage: React.FC = () => {
       render: (_: unknown, record: EvalTask) => (
         <Space>
           <Progress
-            percent={Math.round(record.progress * 100)}
+            percent={getTaskPercent(record)}
             size="small"
             style={{ width: 120 }}
-            status={record.status === 'failed' ? 'exception' : undefined}
+            status={getProgressStatus(record.status)}
           />
           <span style={{ fontSize: 12, color: '#999' }}>
-            {record.completed_rows}/{record.total_rows}
+            {getTaskCountText(record)}
           </span>
         </Space>
       ),
@@ -330,6 +361,38 @@ const EvaluationPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Card>
+
+      {progressTask && (
+        <Card
+          title="当前评测进度"
+          style={{ marginBottom: 24, borderColor: '#d6e4ff' }}
+          extra={
+            <Tag color={statusColorMap[progressTask.status] || 'default'}>
+              {statusLabelMap[progressTask.status] || progressTask.status}
+            </Tag>
+          }
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Space wrap>
+              <Text strong>{progressTask.name}</Text>
+              <Text type="secondary">
+                总计 {progressTask.total_rows || 0} 条，已完成 {progressTask.completed_rows || 0} 条
+              </Text>
+              {progressTask.status === 'running' && (
+                <Text type="secondary">每 1 秒自动刷新一次</Text>
+              )}
+            </Space>
+            <Progress
+              percent={getTaskPercent(progressTask)}
+              status={getProgressStatus(progressTask.status)}
+              strokeWidth={12}
+            />
+            {progressTask.error_message && (
+              <Text type="danger">{progressTask.error_message}</Text>
+            )}
+          </Space>
+        </Card>
+      )}
 
       <Table
         rowKey="id"

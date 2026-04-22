@@ -10,7 +10,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import type { ReportSummary, EvalRowResult, PaginatedResponse } from '../types';
 import * as api from '../services/api';
-import METRIC_HELP from '../components/MetricHelpDrawer';
+import { MetricHelpDrawer, MetricHelpIcon } from '../components/MetricHelpDrawer';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -20,6 +20,9 @@ const METRIC_CN: Record<string, { name: string; short: string; subjects: string 
   context_precision:   { name: '上下文精确度', short: 'AI检索的上下文 vs 你写的标准答案', subjects: '评测LLM检查：被测系统检索到的文档(retrieved_contexts)里有多少对回答问题真正有用' },
   answer_relevancy:    { name: '回答相关性', short: 'AI回答 vs 用户问题', subjects: '评测LLM检查：被测系统的回答(response)是否切题、与用户提问(user_input)相关' },
   factual_correctness: { name: '事实正确性', short: 'AI回答 vs 你写的标准答案', subjects: '评测LLM检查：被测系统的回答(response)在事实层面与你写的标准答案(reference)是否一致' },
+  answer_completeness: { name: '答案完整性', short: 'AI回答 vs 你写的标准答案', subjects: '评测LLM检查：被测系统的回答(response)是否覆盖标准答案(reference)中的关键要点、条件和步骤' },
+  retrieval_hit_rate:  { name: '召回命中率', short: '召回文档ID vs 期望文档ID', subjects: '代码指标检查：被测系统召回的文档ID(retrieved_context_ids)是否命中你标注的期望文档ID(reference_context_ids)' },
+  retrieval_mrr:       { name: '检索排序质量', short: '召回排序 vs 期望文档ID', subjects: '代码指标检查：第一个正确文档在召回列表中的排名，越靠前分数越高' },
   tool_call_accuracy:  { name: '工具调用准确度', short: 'AI实际调用 vs 你写的期望调用', subjects: '直接对比：被测Agent在对话中实际调用的工具，与你标注的期望工具(reference_tool_calls)的名称和参数是否一致' },
   agent_goal_accuracy: { name: '目标达成度', short: '对话结果 vs 你写的期望目标', subjects: '评测LLM阅读整段对话，判断被测Agent最终是否达成了你标注的期望目标(reference)' },
   topic_adherence:     { name: '话题遵守度', short: '对话话题 vs 你写的允许话题', subjects: '评测LLM检查：对话中讨论的话题是否在你标注的允许范围(reference_topics)内' },
@@ -54,10 +57,12 @@ const FIELD_META: Record<string, { label: string; group: string; tip: string }> 
   user_input:           { label: '测试问题 / 对话记录', group: 'input',   tip: '你设计的测试用例输入' },
   response:             { label: '被测系统的回答',      group: 'output',  tip: '从你的 RAG/Agent 系统收集的回答，评测引擎对它打分' },
   retrieved_contexts:   { label: '被测系统检索到的上下文', group: 'output', tip: '从你的 RAG 检索模块收集的文档片段，忠实度指标会检查回答是否基于这些内容' },
+  retrieved_context_ids:{ label: '被测系统召回的文档 ID', group: 'output', tip: '从你的 RAG 检索模块收集的文档唯一标识，用于 HitRate@K 和 MRR 等确定性检索指标' },
   reference:            { label: '标准答案（你写的）',    group: 'ref',    tip: '你人工标注的正确答案，评测 LLM 用它来衡量回答质量' },
   reference_tool_calls: { label: '期望的工具调用（你写的）', group: 'ref',  tip: '你标注的 Agent 应该调用哪些工具，工具调用准确度指标会拿实际调用与这里对比' },
   reference_topics:     { label: '允许的话题范围（你写的）', group: 'ref',  tip: '你标注的对话应围绕的话题，话题遵守度指标会检查 AI 是否跑题' },
   reference_contexts:   { label: '参考上下文（你写的）',    group: 'ref',   tip: '你标注的理想检索结果' },
+  reference_context_ids:{ label: '期望召回的文档 ID（你写的）', group: 'ref', tip: '你标注的正确文档唯一标识，用于判断检索是否命中以及排序是否合理' },
 };
 
 const DataFieldsView: React.FC<{ data: Record<string, any> }> = ({ data }) => {
@@ -138,6 +143,7 @@ const ReportDetailPage: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState<EvalRowResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [helpMetric, setHelpMetric] = useState<string | null>(null);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true);
@@ -164,6 +170,9 @@ const ReportDetailPage: React.FC = () => {
   const passRateColor = (r: number) => r >= 0.8 ? '#52c41a' : r >= 0.6 ? '#faad14' : '#ff4d4f';
   const metricNames = summary ? Object.keys(summary.metric_summary || {}) : [];
   const evalTask = summary?.eval_task;
+  const metricHelp = (metric: string) => (
+    <MetricHelpIcon metricName={metric} onClick={() => setHelpMetric(metric)} />
+  );
 
   const detailColumns = [
     { title: '#', dataIndex: 'row_index', key: 'row_index', width: 50 },
@@ -175,7 +184,12 @@ const ReportDetailPage: React.FC = () => {
         r.is_pass === false ? <Tag color="error">不通过</Tag> : <Tag>-</Tag>,
     },
     ...metricNames.map((metric) => ({
-      title: <span>{getMetricCN(metric).name} <Tooltip title={getMetricCN(metric).short}><QuestionCircleOutlined style={{ color: '#1677ff', fontSize: 12 }} /></Tooltip></span>,
+      title: (
+        <Space size={4}>
+          <span>{getMetricCN(metric).name}</span>
+          {metricHelp(metric)}
+        </Space>
+      ),
       key: metric, width: 130,
       render: (_: unknown, record: EvalRowResult) => {
         const ms = record.metric_scores?.[metric];
@@ -213,7 +227,7 @@ const ReportDetailPage: React.FC = () => {
               render: (name: string) => (
                 <Space>
                   <Text strong>{getMetricCN(name).name}</Text>
-                  <Tooltip title={getMetricCN(name).subjects}><QuestionCircleOutlined style={{ color: '#1677ff', fontSize: 12 }} /></Tooltip>
+                  {metricHelp(name)}
                 </Space>
               ),
             },
@@ -267,10 +281,13 @@ const ReportDetailPage: React.FC = () => {
             {
               title: '指标', width: 140, dataIndex: 'metric',
               render: (_: unknown, r: any) => (
-                <div>
-                  <Text strong>{r.cn.name || r.metric}</Text>
-                  <div style={{ fontSize: 11, color: '#999', lineHeight: 1.3, marginTop: 2 }}>{r.cn.short}</div>
-                </div>
+                <Space size={4} align="start">
+                  <div>
+                    <Text strong>{r.cn.name || r.metric}</Text>
+                    <div style={{ fontSize: 11, color: '#999', lineHeight: 1.3, marginTop: 2 }}>{r.cn.short}</div>
+                  </div>
+                  {metricHelp(r.metric)}
+                </Space>
               ),
             },
             {
@@ -327,40 +344,43 @@ const ReportDetailPage: React.FC = () => {
   };
 
   return (
-    <Spin spinning={loading}>
-      <Space style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/evaluations')}>返回评测列表</Button>
-        <Title level={4} style={{ margin: 0 }}>评测报告</Title>
-      </Space>
+    <>
+      <Spin spinning={loading}>
+        <Space style={{ marginBottom: 16 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/evaluations')}>返回评测列表</Button>
+          <Title level={4} style={{ margin: 0 }}>评测报告</Title>
+        </Space>
 
-      <Tabs defaultActiveKey="overview" items={[
-        { key: 'overview', label: '评测总览', children: renderOverview() },
-        {
-          key: 'detail', label: '逐条明细',
-          children: (
-            <div>
-              <Space style={{ marginBottom: 16 }}>
-                <Text>状态筛选:</Text>
-                <Select style={{ width: 140 }} allowClear placeholder="全部" value={statusFilter}
-                  onChange={(v) => { setStatusFilter(v); setPage(1); }}
-                  options={[{ label: '通过', value: 'pass' }, { label: '不通过', value: 'fail' }, { label: '错误', value: 'error' }]}
+        <Tabs defaultActiveKey="overview" items={[
+          { key: 'overview', label: '评测总览', children: renderOverview() },
+          {
+            key: 'detail', label: '逐条明细',
+            children: (
+              <div>
+                <Space style={{ marginBottom: 16 }}>
+                  <Text>状态筛选:</Text>
+                  <Select style={{ width: 140 }} allowClear placeholder="全部" value={statusFilter}
+                    onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    options={[{ label: '通过', value: 'pass' }, { label: '不通过', value: 'fail' }, { label: '错误', value: 'error' }]}
+                  />
+                </Space>
+                <Table rowKey="id" loading={rowsLoading} columns={detailColumns} dataSource={rows} scroll={{ x: 'max-content' }}
+                  pagination={{ current: page, pageSize, total: rowsTotal, showSizeChanger: true, showTotal: (t) => `共 ${t} 条`,
+                    onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+                  }}
                 />
-              </Space>
-              <Table rowKey="id" loading={rowsLoading} columns={detailColumns} dataSource={rows} scroll={{ x: 'max-content' }}
-                pagination={{ current: page, pageSize, total: rowsTotal, showSizeChanger: true, showTotal: (t) => `共 ${t} 条`,
-                  onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-                }}
-              />
-              <Drawer title={`第 ${selectedRow?.row_index ?? '-'} 条评测详情`} open={drawerOpen}
-                onClose={() => { setDrawerOpen(false); setSelectedRow(null); }} width={680}
-              >
-                <Spin spinning={detailLoading}>{renderDrawer()}</Spin>
-              </Drawer>
-            </div>
-          ),
-        },
-      ]} />
-    </Spin>
+                <Drawer title={`第 ${selectedRow?.row_index ?? '-'} 条评测详情`} open={drawerOpen}
+                  onClose={() => { setDrawerOpen(false); setSelectedRow(null); }} width={680}
+                >
+                  <Spin spinning={detailLoading}>{renderDrawer()}</Spin>
+                </Drawer>
+              </div>
+            ),
+          },
+        ]} />
+      </Spin>
+      <MetricHelpDrawer open={!!helpMetric} metricName={helpMetric} onClose={() => setHelpMetric(null)} />
+    </>
   );
 };
 

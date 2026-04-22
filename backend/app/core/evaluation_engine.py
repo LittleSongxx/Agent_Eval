@@ -136,6 +136,65 @@ _BUILTIN_METRIC_REGISTRY: t.Dict[str, t.Tuple[str, str, bool]] = {
 }
 
 
+class _MetricResult:
+    """Small result object compatible with the simple-metric execution path."""
+
+    def __init__(self, value: float, reason: str):
+        self.value = value
+        self.reason = reason
+
+
+class RetrievalHitRateAtK:
+    """Deterministic retrieval metric: whether any expected document id is in top-k."""
+
+    def __init__(self, k: int = 5):
+        self.k = k
+
+    def get_variables(self) -> list[str]:
+        return ["retrieved_context_ids", "reference_context_ids"]
+
+    def score(
+        self,
+        retrieved_context_ids: list[str] | None = None,
+        reference_context_ids: list[str] | None = None,
+        **_: t.Any,
+    ) -> _MetricResult:
+        retrieved = list(retrieved_context_ids or [])[: self.k]
+        expected = set(reference_context_ids or [])
+        if not expected:
+            return _MetricResult(0.0, "Missing reference_context_ids; cannot compute HitRate@K.")
+        hit = bool(set(retrieved) & expected)
+        return _MetricResult(
+            1.0 if hit else 0.0,
+            f"HitRate@{self.k}: retrieved top-{self.k}={retrieved}, expected={sorted(expected)}",
+        )
+
+
+class RetrievalMRR:
+    """Deterministic retrieval metric: reciprocal rank of first expected document id."""
+
+    def get_variables(self) -> list[str]:
+        return ["retrieved_context_ids", "reference_context_ids"]
+
+    def score(
+        self,
+        retrieved_context_ids: list[str] | None = None,
+        reference_context_ids: list[str] | None = None,
+        **_: t.Any,
+    ) -> _MetricResult:
+        retrieved = list(retrieved_context_ids or [])
+        expected = set(reference_context_ids or [])
+        if not expected:
+            return _MetricResult(0.0, "Missing reference_context_ids; cannot compute MRR.")
+        for idx, doc_id in enumerate(retrieved, start=1):
+            if doc_id in expected:
+                return _MetricResult(
+                    round(1.0 / idx, 4),
+                    f"First relevant document {doc_id!r} found at rank {idx}.",
+                )
+        return _MetricResult(0.0, "No expected document id found in retrieved_context_ids.")
+
+
 def build_metric(
     metric_def,
     llm,
@@ -169,6 +228,13 @@ def build_metric(
         if needs_llm:
             metric_instance.llm = llm
         return ("legacy", metric_instance)
+
+    # --- Deterministic retrieval metrics ----------------------------------------
+    if metric_type == "code_retrieval_hit_rate":
+        return ("simple", RetrievalHitRateAtK(k=int(config.get("k", 5))))
+
+    if metric_type == "code_retrieval_mrr":
+        return ("simple", RetrievalMRR())
 
     # --- AspectCritic (legacy, but user-configured) -----------------------------
     if metric_type == "aspect_critic":
@@ -386,12 +452,35 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         for sm in scenario_metrics:
             _ = sm.metric_definition
 
+        dataset_rows: t.List[DatasetRow] = (
+            db.query(DatasetRow)
+            .filter(DatasetRow.dataset_id == dataset.id)
+            .order_by(DatasetRow.row_index)
+            .all()
+        )
+        total_rows = len(dataset_rows)
+        if total_rows == 0:
+            task.status = "failed"
+            task.total_rows = 0
+            task.completed_rows = 0
+            task.progress = 0.0
+            task.started_at = datetime.now(timezone.utc)
+            _log(task, "✗ 数据集没有数据行")
+            db.commit()
+            raise RuntimeError(f"Dataset {dataset.id} has no rows")
+
+        task.status = "running"
+        task.total_rows = total_rows
+        task.completed_rows = 0
+        task.progress = 0.0
+        task.started_at = datetime.now(timezone.utc)
         _log(task, f"========== 评测任务启动 ==========")
         _log(task, f"任务: {task.name} (ID={task_id})")
-        _log(task, f"数据集: {dataset.name} ({dataset.row_count} 条)")
+        _log(task, f"数据集: {dataset.name} ({total_rows} 条)")
         _log(task, f"场景: {scenario.name}")
         _log(task, f"LLM: {llm_config.model_name} @ {llm_config.api_base_url}")
         _log(task, f"指标数: {len(scenario_metrics)} 个")
+        _log(task, f"进度: 0/{total_rows} (0%)")
         db.commit()
 
         _log(task, f"正在构建 LLM 实例...")
@@ -430,23 +519,6 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             except Exception as exc:
                 _log(task, f"⚠ 指标 [{metric_name}] 初始化警告: {exc}")
 
-        dataset_rows: t.List[DatasetRow] = (
-            db.query(DatasetRow)
-            .filter(DatasetRow.dataset_id == dataset.id)
-            .order_by(DatasetRow.row_index)
-            .all()
-        )
-        total_rows = len(dataset_rows)
-        if total_rows == 0:
-            _log(task, "✗ 数据集没有数据行")
-            db.commit()
-            raise RuntimeError(f"Dataset {dataset.id} has no rows")
-
-        task.status = "running"
-        task.total_rows = total_rows
-        task.completed_rows = 0
-        task.progress = 0.0
-        task.started_at = datetime.now(timezone.utc)
         _log(task, f"========== 开始逐行评测 ({total_rows} 条) ==========")
         db.commit()
 
@@ -475,6 +547,10 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 _persist_row_result(db, task, dataset_row, metric_scores, row_error, False, execution_time_ms)
                 task.completed_rows = idx + 1
                 task.progress = round((idx + 1) / total_rows, 4)
+                _log(
+                    task,
+                    f"  → 进度: {task.completed_rows}/{total_rows} ({round(task.progress * 100, 1)}%)",
+                )
                 db.commit()
                 all_row_scores.append(metric_scores)
                 await asyncio.sleep(0)
@@ -536,6 +612,10 @@ async def run_evaluation(task_id: int, session_factory) -> None:
 
             status_icon = "✓ 通过" if is_pass else "✗ 不通过"
             _log(task, f"  → 结果: {status_icon} ({execution_time_ms}ms)")
+            _log(
+                task,
+                f"  → 进度: {task.completed_rows}/{total_rows} ({round(task.progress * 100, 1)}%)",
+            )
             db.commit()
 
             all_row_scores.append(metric_scores)
