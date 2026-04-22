@@ -289,7 +289,7 @@ const ReportDetailPage: React.FC = () => {
         </div>
 
         <Title level={5}>📊 指标评分详情</Title>
-        <Alert message="每个指标由评测 LLM（如通义千问）作为评判者，阅读您的数据后独立打分。" type="info" showIcon style={{ marginBottom: 12 }} />
+        <Alert message="LLM 类指标由平台原生 Judge 调用当前配置的评测模型打分并返回理由；确定性指标由后端代码直接计算。" type="info" showIcon style={{ marginBottom: 12 }} />
 
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           {scoreGroups.map((group) => (

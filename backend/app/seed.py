@@ -163,6 +163,80 @@ def _ensure_scenario_metric(
     db.flush()
 
 
+def _ensure_dataset_schema_fields(dataset: Dataset, fields: list[dict]) -> None:
+    schema = [dict(field) for field in (dataset.field_schema or [])]
+    field_by_name = {field.get("name"): field for field in schema}
+    for field in fields:
+        existing = field_by_name.get(field["name"])
+        if existing is None:
+            schema.append(dict(field))
+        else:
+            existing.update(field)
+    dataset.field_schema = schema
+
+
+def _merge_dataset_row_data(db: Session, dataset: Dataset, row_updates: list[dict]) -> None:
+    rows = (
+        db.query(DatasetRow)
+        .filter(DatasetRow.dataset_id == dataset.id)
+        .order_by(DatasetRow.row_index)
+        .all()
+    )
+    for row, update in zip(rows, row_updates):
+        row.data = {**(row.data or {}), **update}
+    dataset.row_count = len(rows)
+
+
+def _upgrade_existing_sample_datasets(db: Session) -> None:
+    """Keep bundled sample datasets compatible with their preset metrics."""
+
+    agent_dataset = db.query(Dataset).filter(Dataset.name == "Agent 工具调用示例数据集").first()
+    if agent_dataset is not None:
+        agent_dataset.description = (
+            "包含 3 条客服 Agent 对话的示例数据，演示工具调用评测流程。字段含义："
+            "user_input=多轮对话轨迹，reference=期望达成的目标，reference_tool_calls=期望调用的工具列表，"
+            "reference_topics=允许的话题范围（用于误选多轮对话模板时也能评分）"
+        )
+        _ensure_dataset_schema_fields(
+            agent_dataset,
+            [
+                {"name": "user_input", "type": "conversation", "required": True, "description": "多轮对话轨迹：Human发问→AI决策→Tool执行→AI回复，type只能是human/ai/tool三种"},
+                {"name": "reference", "type": "text", "required": True, "description": "期望 Agent 最终应达成的目标"},
+                {"name": "reference_tool_calls", "type": "tool_call_list", "required": True, "description": "期望 Agent 应该调用的工具列表，每个含 name 和 args"},
+                {"name": "reference_topics", "type": "text_list", "required": False, "description": "该 Agent 任务允许围绕的话题列表，用于 Topic Adherence 等多轮对话指标"},
+            ],
+        )
+        _merge_dataset_row_data(
+            db,
+            agent_dataset,
+            [
+                {"reference_topics": ["订单查询", "物流跟踪", "客服售后"]},
+                {"reference_topics": ["订单查询", "退货申请", "售后服务"]},
+                {"reference_topics": ["天气查询", "消息发送", "任务执行"]},
+            ],
+        )
+
+    multi_turn_dataset = db.query(Dataset).filter(Dataset.name == "多轮对话示例数据集").first()
+    if multi_turn_dataset is not None:
+        _ensure_dataset_schema_fields(
+            multi_turn_dataset,
+            [
+                {"name": "user_input", "type": "conversation", "required": True, "description": "完整多轮对话记录（Human 和 AI 交替对话）"},
+                {"name": "reference", "type": "text", "required": False, "description": "期望的对话最终结果"},
+                {"name": "reference_topics", "type": "text_list", "required": True, "description": "对话应围绕的话题列表，Topic Adherence 指标必需"},
+            ],
+        )
+        _merge_dataset_row_data(
+            db,
+            multi_turn_dataset,
+            [
+                {"reference_topics": ["退货政策", "售后服务"]},
+                {"reference_topics": ["产品故障", "保修政策", "维修服务"]},
+                {"reference_topics": ["促销活动", "商品推荐", "购物指导"]},
+            ],
+        )
+
+
 def _upgrade_existing_rag_seed(db: Session) -> None:
     """Idempotently add the enhanced RAG metric layer to an existing local DB."""
 
@@ -328,8 +402,9 @@ def run_seed(db: Session) -> None:
     llm_config, _ = sync_default_llm_config(db)
     if existing is not None:
         _upgrade_existing_rag_seed(db)
+        _upgrade_existing_sample_datasets(db)
         db.commit()
-        print("[seed] Tables already contain data; synced default LLM config and RAG metric layer.")
+        print("[seed] Tables already contain data; synced default LLM config, metric layer, and sample datasets.")
         return
 
     print("[seed] Seeding database...")
@@ -889,6 +964,7 @@ def run_seed(db: Session) -> None:
             {"name": "user_input", "type": "conversation", "required": True, "description": "多轮对话轨迹：Human发问→AI决策→Tool执行→AI回复，type只能是human/ai/tool三种"},
             {"name": "reference", "type": "text", "required": True, "description": "期望Agent最终应达成的目标（如：成功查询到订单状态）"},
             {"name": "reference_tool_calls", "type": "tool_call_list", "required": True, "description": "期望Agent应该调用的工具列表，每个含name和args"},
+            {"name": "reference_topics", "type": "text_list", "required": False, "description": "该 Agent 任务允许围绕的话题列表，用于 Topic Adherence 等多轮对话指标"},
         ],
         row_count=3,
     )
@@ -907,6 +983,7 @@ def run_seed(db: Session) -> None:
             "reference_tool_calls": [
                 {"name": "query_order", "args": {"order_id": "ORD-20240101"}},
             ],
+            "reference_topics": ["订单查询", "物流跟踪", "客服售后"],
         },
         {
             "user_input": [
@@ -922,6 +999,7 @@ def run_seed(db: Session) -> None:
                 {"name": "query_order", "args": {"order_id": "ORD-20240202"}},
                 {"name": "create_return", "args": {"order_id": "ORD-20240202", "item": "手机壳", "reason": "用户要求退货"}},
             ],
+            "reference_topics": ["订单查询", "退货申请", "售后服务"],
         },
         {
             "user_input": [
@@ -937,6 +1015,7 @@ def run_seed(db: Session) -> None:
                 {"name": "get_weather", "args": {"city": "北京", "date": "tomorrow"}},
                 {"name": "send_message", "args": {"to": "张经理", "content": "北京明天天气：晴，15-25℃，北风3级"}},
             ],
+            "reference_topics": ["天气查询", "消息发送", "任务执行"],
         },
     ]
 
@@ -954,7 +1033,7 @@ def run_seed(db: Session) -> None:
         field_schema=[
             {"name": "user_input", "type": "conversation", "required": True, "description": "完整多轮对话记录（Human和AI交替对话）"},
             {"name": "reference", "type": "text", "required": False, "description": "期望的对话最终结果"},
-            {"name": "reference_topics", "type": "text_list", "required": False, "description": "对话应围绕的话题列表（如：[\"退货\", \"售后\"]）"},
+            {"name": "reference_topics", "type": "text_list", "required": True, "description": "对话应围绕的话题列表，Topic Adherence 指标必需"},
         ],
         row_count=3,
     )

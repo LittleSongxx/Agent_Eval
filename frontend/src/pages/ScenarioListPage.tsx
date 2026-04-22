@@ -38,6 +38,13 @@ interface SelectedMetric {
   pass_threshold: number | null;
 }
 
+interface ScenarioMetricEntry {
+  key: string;
+  metricName: string;
+  label: string;
+  scenarioMetric: any;
+}
+
 const presetCards = [
   {
     key: 'rag',
@@ -174,27 +181,74 @@ const ScenarioListPage: React.FC = () => {
     return scenarioMetric.metric_definition?.display_name || getMetricDisplayName(scenarioMetric.metric_definition_id);
   };
 
+  const getScenarioMetricEntries = (metricList: any[] = []): ScenarioMetricEntry[] =>
+    metricList.map((scenarioMetric: any, index: number) => {
+      const metricName = getScenarioMetricName(scenarioMetric);
+      return {
+        key: `${scenarioMetric?.id || scenarioMetric?.metric_definition_id || metricName}-${index}`,
+        metricName,
+        label: getScenarioMetricLabel(scenarioMetric),
+        scenarioMetric,
+      };
+    });
+
+  const getScenarioMetricCount = (metricList: any[] = []) => getScenarioMetricEntries(metricList).length;
+
+  const getScenarioMetricGroups = (metricList: any[] = []) => {
+    const entries = getScenarioMetricEntries(metricList);
+    const layerOrder = Array.from(new Set(entries.map((entry) => getMetricLayer(entry.metricName).key)))
+      .sort((a, b) => {
+        const aMetric = entries.find((entry) => getMetricLayer(entry.metricName).key === a)?.metricName || '';
+        const bMetric = entries.find((entry) => getMetricLayer(entry.metricName).key === b)?.metricName || '';
+        return getMetricLayerIndex(aMetric) - getMetricLayerIndex(bMetric);
+      });
+
+    return layerOrder.map((layerKey) => {
+      const layerEntries = entries.filter((entry) => getMetricLayer(entry.metricName).key === layerKey);
+      return {
+        ...getMetricLayer(layerEntries[0].metricName),
+        entries: layerEntries,
+      };
+    });
+  };
+
   const renderScenarioMetricGroups = (metricList: any[], compact = false) => {
     if (!metricList || metricList.length === 0) return <Tag>无指标</Tag>;
-    const metricByName = new Map(
-      metricList.map((scenarioMetric: any) => [getScenarioMetricName(scenarioMetric), scenarioMetric])
-    );
+    const groups = getScenarioMetricGroups(metricList);
 
     return (
-      <Space direction="vertical" size={4} style={{ width: '100%' }}>
-        {groupMetricNames(metricList.map(getScenarioMetricName)).map((group) => (
-          <div key={group.key}>
-            <Tag color={group.color} style={{ marginRight: 8 }}>{group.name}</Tag>
-            <Space size={[4, 4]} wrap>
-              {group.metrics.map((metricName) => {
-                const scenarioMetric: any = metricByName.get(metricName);
+      <Space direction="vertical" size={compact ? 8 : 10} style={{ width: '100%' }}>
+        {groups.map((group) => (
+          <div key={group.key} style={{ textAlign: 'left' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                marginBottom: 6,
+                padding: compact ? '3px 8px' : '5px 10px',
+                borderLeft: `3px solid ${group.headerBorder}`,
+                background: group.headerBg,
+                color: group.headerText,
+                borderRadius: 4,
+                fontSize: compact ? 12 : 13,
+                fontWeight: 500,
+              }}
+            >
+              <span>{group.name}</span>
+              <span>{group.entries.length} 项</span>
+            </div>
+            <Space size={[4, 4]} wrap style={{ width: '100%' }}>
+              {group.entries.map((entry) => {
+                const scenarioMetric = entry.scenarioMetric;
                 return (
-                  <Tag key={scenarioMetric?.id || metricName} color="cyan" style={{ marginRight: 0 }}>
-                    {getScenarioMetricLabel(scenarioMetric)}
+                  <Tag key={entry.key} color={group.color} style={{ marginRight: 0 }}>
+                    {entry.label}
                     {!compact && scenarioMetric?.pass_threshold != null && (
                       <span style={{ color: '#999', marginLeft: 4 }}>≥{scenarioMetric.pass_threshold}</span>
                     )}
-                    <MetricHelpIcon metricName={metricName} onClick={() => setHelpMetric(metricName)} />
+                    <MetricHelpIcon metricName={entry.metricName} onClick={() => setHelpMetric(entry.metricName)} />
                   </Tag>
                 );
               })}
@@ -226,7 +280,15 @@ const ScenarioListPage: React.FC = () => {
       title: '评测指标',
       dataIndex: 'metrics',
       key: 'metrics_display',
-      render: (metricList: any[]) => renderScenarioMetricGroups(metricList),
+      render: (metricList: any[]) => (
+        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+          <Badge
+            count={`${getScenarioMetricCount(metricList || [])} 个指标`}
+            style={{ backgroundColor: '#1677ff' }}
+          />
+          {renderScenarioMetricGroups(metricList)}
+        </Space>
+      ),
     },
     {
       title: '创建时间',
@@ -272,7 +334,7 @@ const ScenarioListPage: React.FC = () => {
                 {matched && (
                   <Space direction="vertical" size={8}>
                     <Badge
-                      count={`${matched.metrics?.length || 0} 个指标`}
+                      count={`${getScenarioMetricCount(matched.metrics || [])} 个指标`}
                       style={{ backgroundColor: '#1677ff' }}
                     />
                     {renderScenarioMetricGroups(matched.metrics || [], true)}

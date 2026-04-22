@@ -1,20 +1,17 @@
 """
-Evaluation engine -- bridges UI configuration to ragas metric execution.
+Evaluation engine for the AI Evaluation Platform.
 
-This module is the core of the AI Evaluation Platform. It translates database
-models (EvalTask, EvalScenario, MetricDefinition, LLMConfig, Dataset) into
-ragas metric instances, builds ragas samples from dataset rows, and orchestrates
-the full evaluation loop with progress tracking and error handling.
-
-Called via ``asyncio.create_task(run_evaluation(task.id, SessionLocal))`` from
-the evaluation API endpoint.
+The engine owns metric execution instead of depending on a specific third-party
+metric framework. LLM-based metrics use the configured OpenAI-compatible model
+directly and persist both the score and the judge's concrete reason.
 """
 
 from __future__ import annotations
 
 import asyncio
-import importlib
+import json
 import logging
+import re
 import time
 import typing as t
 from datetime import datetime, timezone
@@ -22,126 +19,267 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# 1. build_ragas_llm
-# ---------------------------------------------------------------------------
-
-def build_ragas_llm(llm_config):
-    """
-    Create a ragas-compatible LLM wrapper from an LLMConfig database model.
-
-    Tries the modern ``llm_factory`` path first (instructor-based, no langchain
-    dependency required at runtime). Falls back to ``LangchainLLMWrapper`` when
-    ``llm_factory`` is unavailable or raises.
-
-    Parameters
-    ----------
-    llm_config : app.models.llm_config.LLMConfig
-        Database row with provider, api_base_url, api_key, model_name, etc.
-
-    Returns
-    -------
-    BaseRagasLLM or InstructorBaseRagasLLM
-        A ragas LLM usable by both legacy and simple metric classes.
-    """
-    try:
-        import openai as openai_lib
-        from ragas.llms import llm_factory
-
-        client = openai_lib.OpenAI(
-            base_url=llm_config.api_base_url,
-            api_key=llm_config.api_key,
-        )
-        llm = llm_factory(
-            model=llm_config.model_name,
-            client=client,
-        )
-        logger.info(
-            "Built ragas LLM via llm_factory: model=%s base_url=%s",
-            llm_config.model_name,
-            llm_config.api_base_url,
-        )
-        return llm
-    except Exception as exc:
-        logger.warning(
-            "llm_factory failed (%s), falling back to LangchainLLMWrapper", exc
-        )
-
-    # Fallback: langchain-openai + LangchainLLMWrapper
-    from langchain_openai import ChatOpenAI
-    from ragas.llms.base import LangchainLLMWrapper
-
-    langchain_llm = ChatOpenAI(
-        base_url=llm_config.api_base_url,
-        api_key=llm_config.api_key,
-        model=llm_config.model_name,
-        temperature=llm_config.temperature or 0.01,
-        max_tokens=llm_config.max_tokens or 1024,
-    )
-    wrapper = LangchainLLMWrapper(langchain_llm)
-    logger.info(
-        "Built ragas LLM via LangchainLLMWrapper: model=%s base_url=%s",
-        llm_config.model_name,
-        llm_config.api_base_url,
-    )
-    return wrapper
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-# ---------------------------------------------------------------------------
-# 2. build_metric
-# ---------------------------------------------------------------------------
+_BUILTIN_LLM_METRIC_SPECS: dict[str, dict[str, t.Any]] = {
+    "builtin_faithfulness": {
+        "required_fields": ["response", "retrieved_contexts"],
+        "criteria": (
+            "判断 AI 回答是否忠实于检索上下文。回答中的关键事实必须能从 retrieved_contexts "
+            "得到直接或合理支持；捏造、不被上下文支持或与上下文冲突的内容需要扣分。"
+        ),
+    },
+    "builtin_context_recall": {
+        "required_fields": ["retrieved_contexts", "reference"],
+        "criteria": (
+            "判断检索上下文是否覆盖参考答案中的关键事实和必要依据。reference 中的重要要点如果在 "
+            "retrieved_contexts 中找不到对应支持，需要扣分。"
+        ),
+    },
+    "builtin_context_precision": {
+        "required_fields": ["user_input", "retrieved_contexts"],
+        "criteria": (
+            "判断检索上下文与用户问题及参考答案是否相关、有用。无关、重复、噪声或无法支撑回答的片段越多，"
+            "分数越低。"
+        ),
+    },
+    "builtin_factual_correctness": {
+        "required_fields": ["response", "reference"],
+        "criteria": (
+            "判断 AI 回答与参考答案在事实层面是否一致。事实错误、遗漏关键限定条件、与 reference 冲突的内容"
+            "需要扣分。"
+        ),
+    },
+    "builtin_answer_relevancy": {
+        "required_fields": ["user_input", "response"],
+        "criteria": (
+            "判断 AI 回答是否直接回应用户问题。跑题、泛泛而谈、答非所问或只回答了问题的一小部分需要扣分。"
+        ),
+    },
+    "builtin_agent_goal_accuracy": {
+        "required_fields": ["user_input", "reference"],
+        "criteria": (
+            "判断 Agent 在整段对话中是否完成了用户目标，并与 reference 中的期望结果一致。工具调用、最终回复"
+            "和中间步骤都可以作为证据。"
+        ),
+    },
+    "builtin_topic_adherence": {
+        "required_fields": ["user_input", "reference_topics"],
+        "criteria": (
+            "判断多轮对话是否始终围绕 reference_topics 指定的话题范围展开。明显偏离主题、引入无关内容或没有"
+            "回应当前轮次主题需要扣分。"
+        ),
+    },
+}
 
-# Registry: metric_type -> (module_path, class_name, needs_llm)
-_BUILTIN_METRIC_REGISTRY: t.Dict[str, t.Tuple[str, str, bool]] = {
-    "builtin_faithfulness": (
-        "ragas.metrics._faithfulness",
-        "Faithfulness",
-        True,
-    ),
-    "builtin_context_recall": (
-        "ragas.metrics._context_recall",
-        "LLMContextRecall",
-        True,
-    ),
-    "builtin_context_precision": (
-        "ragas.metrics._context_precision",
-        "LLMContextPrecisionWithReference",
-        True,
-    ),
-    "builtin_factual_correctness": (
-        "ragas.metrics._factual_correctness",
-        "FactualCorrectness",
-        True,
-    ),
-    "builtin_answer_relevancy": (
-        "ragas.metrics._answer_relevance",
-        "AnswerRelevancy",
-        True,
-    ),
-    "builtin_tool_call_accuracy": (
-        "ragas.metrics._tool_call_accuracy",
-        "ToolCallAccuracy",
-        False,
-    ),
-    "builtin_agent_goal_accuracy": (
-        "ragas.metrics._goal_accuracy",
-        "AgentGoalAccuracyWithReference",
-        True,
-    ),
-    "builtin_topic_adherence": (
-        "ragas.metrics._topic_adherence",
-        "TopicAdherenceScore",
-        True,
-    ),
+
+_NAMED_LLM_METRIC_SPECS: dict[str, dict[str, t.Any]] = {
+    "answer_completeness": {
+        "required_fields": ["response", "reference"],
+        "criteria": (
+            "判断 AI 回答是否完整覆盖参考答案中的关键要点。遗漏主要结论、条件、步骤或重要限定需要扣分；"
+            "表达顺序不同但语义完整可以给高分。"
+        ),
+    },
 }
 
 
 class _MetricResult:
-    """Small result object compatible with the simple-metric execution path."""
+    """Small result object shared by all metric implementations."""
 
-    def __init__(self, value: float, reason: str):
+    def __init__(self, value: t.Any, reason: str):
         self.value = value
         self.reason = reason
+
+
+class OpenAIJudgeClient:
+    """OpenAI-compatible JSON judge client used by native LLM metrics."""
+
+    def __init__(self, llm_config):
+        from openai import AsyncOpenAI
+
+        self.model = llm_config.model_name
+        self.temperature = llm_config.temperature if llm_config.temperature is not None else 0.01
+        self.max_tokens = min(int(llm_config.max_tokens or 1024), 1200)
+        self.client = AsyncOpenAI(
+            base_url=llm_config.api_base_url,
+            api_key=llm_config.api_key,
+            timeout=180,
+            max_retries=2,
+        )
+
+    async def judge_json(self, payload: dict[str, t.Any]) -> dict[str, t.Any]:
+        system_prompt = (
+            "你是一个严谨的 AI 评测裁判。只能依据用户提供的样本字段评分，不要引入外部知识或想象证据。"
+            "必须返回严格 JSON，格式为 {\"score\": 数值或标签, \"reason\": \"1到2句中文理由\"}。"
+            "reason 必须指出具体支撑点或扣分点，不要写空泛结论。"
+        )
+        user_prompt = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            logger.warning("Judge JSON mode failed, retrying without response_format: %s", exc)
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+
+        content = response.choices[0].message.content or ""
+        return _parse_json_object(content)
+
+
+class NativeBuiltinLLMMetric:
+    """Built-in metric implemented by our own judge prompt."""
+
+    def __init__(self, metric_def, spec: dict[str, t.Any]):
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.required_fields = list(
+            self.config.get("required_fields") or spec.get("required_fields") or []
+        )
+        self.criteria = spec["criteria"]
+        self.description = self.config.get("description")
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+
+        payload = {
+            "metric": {
+                "name": self.name,
+                "display_name": self.display_name,
+                "score_range": "0 到 1，1 表示完全满足指标，0 表示完全不满足",
+                "criteria": self.criteria,
+                "description": self.description,
+                "required_fields": self.required_fields,
+            },
+            "sample": _sample_payload(row_data),
+            "instruction": (
+                "请给出 0 到 1 的浮点分数，并用中文说明理由。理由必须基于 sample 中的具体字段，"
+                "指出哪里支持高分或哪里导致扣分。"
+            ),
+        }
+        result = await judge.judge_json(payload)
+        score = _coerce_float(result.get("score"))
+        reason = _clean_reason(result.get("reason"))
+        if score is None:
+            raise ValueError(f"Judge did not return a numeric score for {self.name}")
+        if not reason:
+            raise ValueError(f"Judge did not return a reason for {self.name}")
+        return _MetricResult(round(_clamp(score, 0.0, 1.0), 4), reason)
+
+
+class NativePromptMetric:
+    """User-configured prompt metric implemented by the platform judge."""
+
+    def __init__(self, metric_def, mode: str):
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.mode = mode
+        self.config = metric_def.config or {}
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        if self.mode == "numeric":
+            return await self._score_numeric(row_data, judge)
+        if self.mode == "discrete":
+            return await self._score_discrete(row_data, judge)
+        if self.mode == "aspect_critic":
+            return await self._score_aspect(row_data, judge)
+        raise ValueError(f"Unsupported prompt metric mode: {self.mode}")
+
+    async def _score_numeric(
+        self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient
+    ) -> _MetricResult:
+        raw_range = self.config.get("allowed_values", [0.0, 1.0])
+        lower, upper = float(raw_range[0]), float(raw_range[1])
+        prompt = _render_prompt(self.config.get("prompt", ""), row_data)
+        payload = {
+            "metric": {
+                "name": self.name,
+                "display_name": self.display_name,
+                "score_range": f"{lower} 到 {upper}",
+                "criteria": self.config.get("description") or prompt,
+            },
+            "prompt": prompt,
+            "sample": _sample_payload(row_data),
+            "instruction": "请按 prompt 的标准评分，返回 JSON: {\"score\": 数值, \"reason\": \"中文理由\"}。",
+        }
+        result = await judge.judge_json(payload)
+        score = _coerce_float(result.get("score"))
+        reason = _clean_reason(result.get("reason"))
+        if score is None:
+            raise ValueError(f"Judge did not return a numeric score for {self.name}")
+        if not reason:
+            raise ValueError(f"Judge did not return a reason for {self.name}")
+        return _MetricResult(round(_clamp(score, lower, upper), 4), reason)
+
+    async def _score_discrete(
+        self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient
+    ) -> _MetricResult:
+        allowed_values = [str(v) for v in self.config.get("allowed_values", ["pass", "fail"])]
+        prompt = _render_prompt(self.config.get("prompt", ""), row_data)
+        payload = {
+            "metric": {
+                "name": self.name,
+                "display_name": self.display_name,
+                "allowed_values": allowed_values,
+                "criteria": self.config.get("description") or prompt,
+            },
+            "prompt": prompt,
+            "sample": _sample_payload(row_data),
+            "instruction": "score 必须严格使用 allowed_values 中的一个值，并返回中文 reason。",
+        }
+        result = await judge.judge_json(payload)
+        score = str(result.get("score", "")).strip()
+        reason = _clean_reason(result.get("reason"))
+        if score not in allowed_values:
+            score = _match_allowed_value(score, allowed_values)
+        if not score:
+            raise ValueError(f"Judge did not return an allowed value for {self.name}")
+        if not reason:
+            raise ValueError(f"Judge did not return a reason for {self.name}")
+        return _MetricResult(score, reason)
+
+    async def _score_aspect(
+        self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient
+    ) -> _MetricResult:
+        definition = self.config.get("definition") or self.config.get("description") or self.display_name
+        payload = {
+            "metric": {
+                "name": self.name,
+                "display_name": self.display_name,
+                "score_range": "0 或 1，1 表示样本满足 definition，0 表示不满足",
+                "definition": definition,
+                "description": self.config.get("description"),
+            },
+            "sample": _sample_payload(row_data),
+            "instruction": "判断样本是否满足 definition，返回 0 或 1，并说明具体理由。",
+        }
+        result = await judge.judge_json(payload)
+        score = _coerce_float(result.get("score"))
+        reason = _clean_reason(result.get("reason"))
+        if score is None:
+            raise ValueError(f"Judge did not return a numeric score for {self.name}")
+        if not reason:
+            raise ValueError(f"Judge did not return a reason for {self.name}")
+        return _MetricResult(1.0 if score >= 0.5 else 0.0, reason)
 
 
 class RetrievalHitRateAtK:
@@ -150,31 +288,35 @@ class RetrievalHitRateAtK:
     def __init__(self, k: int = 5):
         self.k = k
 
-    def get_variables(self) -> list[str]:
-        return ["retrieved_context_ids", "reference_context_ids"]
-
     def score(
         self,
         retrieved_context_ids: list[str] | None = None,
         reference_context_ids: list[str] | None = None,
         **_: t.Any,
     ) -> _MetricResult:
-        retrieved = list(retrieved_context_ids or [])[: self.k]
-        expected = set(reference_context_ids or [])
+        row_data = {
+            "retrieved_context_ids": retrieved_context_ids,
+            "reference_context_ids": reference_context_ids,
+        }
+        retrieved = list(row_data.get("retrieved_context_ids") or [])[: self.k]
+        expected = set(row_data.get("reference_context_ids") or [])
         if not expected:
-            return _MetricResult(0.0, "Missing reference_context_ids; cannot compute HitRate@K.")
+            return _MetricResult(None, "缺少 reference_context_ids，无法计算 HitRate@K。")
         hit = bool(set(retrieved) & expected)
         return _MetricResult(
             1.0 if hit else 0.0,
-            f"HitRate@{self.k}: retrieved top-{self.k}={retrieved}, expected={sorted(expected)}",
+            f"HitRate@{self.k}: top-{self.k} 检索 ID 为 {retrieved}，标准 ID 为 {sorted(expected)}。",
+        )
+
+    async def ascore(self, row_data: dict[str, t.Any], _judge: OpenAIJudgeClient) -> _MetricResult:
+        return self.score(
+            retrieved_context_ids=row_data.get("retrieved_context_ids"),
+            reference_context_ids=row_data.get("reference_context_ids"),
         )
 
 
 class RetrievalMRR:
     """Deterministic retrieval metric: reciprocal rank of first expected document id."""
-
-    def get_variables(self) -> list[str]:
-        return ["retrieved_context_ids", "reference_context_ids"]
 
     def score(
         self,
@@ -185,246 +327,88 @@ class RetrievalMRR:
         retrieved = list(retrieved_context_ids or [])
         expected = set(reference_context_ids or [])
         if not expected:
-            return _MetricResult(0.0, "Missing reference_context_ids; cannot compute MRR.")
+            return _MetricResult(None, "缺少 reference_context_ids，无法计算 MRR。")
         for idx, doc_id in enumerate(retrieved, start=1):
             if doc_id in expected:
                 return _MetricResult(
                     round(1.0 / idx, 4),
-                    f"First relevant document {doc_id!r} found at rank {idx}.",
+                    f"第一个命中的标准文档 ID 为 {doc_id!r}，位于第 {idx} 位。",
                 )
-        return _MetricResult(0.0, "No expected document id found in retrieved_context_ids.")
+        return _MetricResult(0.0, "retrieved_context_ids 中没有命中任何标准文档 ID。")
+
+    async def ascore(self, row_data: dict[str, t.Any], _judge: OpenAIJudgeClient) -> _MetricResult:
+        return self.score(
+            retrieved_context_ids=row_data.get("retrieved_context_ids"),
+            reference_context_ids=row_data.get("reference_context_ids"),
+        )
 
 
-def build_metric(
-    metric_def,
-    llm,
-) -> t.Tuple[str, t.Any]:
+class ToolCallAccuracyMetric:
+    """Deterministic Agent metric comparing actual and expected tool calls."""
+
+    async def ascore(self, row_data: dict[str, t.Any], _judge: OpenAIJudgeClient) -> _MetricResult:
+        expected = list(row_data.get("reference_tool_calls") or [])
+        actual = _extract_actual_tool_calls(row_data.get("user_input"))
+        if not expected:
+            return _MetricResult(None, "缺少 reference_tool_calls，无法计算工具调用准确度。")
+
+        unmatched = list(actual)
+        matched = 0
+        for expected_call in expected:
+            match_idx = _find_tool_call_match(expected_call, unmatched)
+            if match_idx is not None:
+                matched += 1
+                unmatched.pop(match_idx)
+
+        score = round(matched / len(expected), 4)
+        return _MetricResult(
+            score,
+            f"期望工具调用 {len(expected)} 个，实际调用 {len(actual)} 个，完全匹配 {matched} 个。",
+        )
+
+
+def build_metric(metric_def, llm=None) -> tuple[str, t.Any]:
     """
-    Instantiate a ragas metric from a MetricDefinition database row.
+    Instantiate a metric executor from a MetricDefinition database row.
 
-    Parameters
-    ----------
-    metric_def : app.models.metric_definition.MetricDefinition
-        Row with ``metric_type``, ``name``, ``config`` (JSON dict), etc.
-    llm
-        The ragas LLM to attach to LLM-based metrics.
-
-    Returns
-    -------
-    (metric_kind, metric_instance)
-        ``metric_kind`` is ``"legacy"`` for built-in ragas metrics / AspectCritic
-        (scored via ``single_turn_ascore`` / ``multi_turn_ascore``) or ``"simple"``
-        for DiscreteMetric / NumericMetric (scored via ``.score(llm=..., **kwargs)``).
+    The default path is native and OpenAI-compatible. This keeps the platform
+    independent from third-party metric internals while still supporting configurable judge
+    prompts and deterministic retrieval metrics.
     """
     metric_type: str = metric_def.metric_type
     config: dict = metric_def.config or {}
 
-    # --- Built-in legacy metrics ------------------------------------------------
-    if metric_type in _BUILTIN_METRIC_REGISTRY:
-        module_path, class_name, needs_llm = _BUILTIN_METRIC_REGISTRY[metric_type]
-        mod = importlib.import_module(module_path)
-        MetricClass = getattr(mod, class_name)
-        metric_instance = MetricClass()
-        if needs_llm:
-            metric_instance.llm = llm
-        return ("legacy", metric_instance)
+    spec = _NAMED_LLM_METRIC_SPECS.get(metric_def.name) or _BUILTIN_LLM_METRIC_SPECS.get(metric_type)
+    if spec:
+        return ("llm", NativeBuiltinLLMMetric(metric_def, spec))
 
-    # --- Deterministic retrieval metrics ----------------------------------------
     if metric_type == "code_retrieval_hit_rate":
         return ("simple", RetrievalHitRateAtK(k=int(config.get("k", 5))))
 
     if metric_type == "code_retrieval_mrr":
         return ("simple", RetrievalMRR())
 
-    # --- AspectCritic (legacy, but user-configured) -----------------------------
-    if metric_type == "aspect_critic":
-        from ragas.metrics._aspect_critic import AspectCritic
+    if metric_type == "builtin_tool_call_accuracy":
+        return ("simple", ToolCallAccuracyMetric())
 
-        definition = config.get("definition", "")
-        metric_instance = AspectCritic(
-            name=metric_def.name,
-            definition=definition,
-            llm=llm,
-        )
-        return ("legacy", metric_instance)
-
-    # --- DiscreteMetric (simple) ------------------------------------------------
-    if metric_type == "discrete":
-        from ragas.metrics.discrete import DiscreteMetric
-
-        prompt_text = config.get("prompt", "")
-        allowed_values = config.get("allowed_values", ["pass", "fail"])
-        metric_instance = DiscreteMetric(
-            name=metric_def.name,
-            prompt=prompt_text,
-            allowed_values=allowed_values,
-        )
-        return ("simple", metric_instance)
-
-    # --- NumericMetric (simple) -------------------------------------------------
-    if metric_type == "numeric":
-        from ragas.metrics.numeric import NumericMetric
-
-        prompt_text = config.get("prompt", "")
-        raw_range = config.get("allowed_values", [0.0, 1.0])
-        allowed_values = (float(raw_range[0]), float(raw_range[1]))
-        metric_instance = NumericMetric(
-            name=metric_def.name,
-            prompt=prompt_text,
-            allowed_values=allowed_values,
-        )
-        return ("simple", metric_instance)
+    if metric_type in {"numeric", "discrete", "aspect_critic"}:
+        return ("llm", NativePromptMetric(metric_def, mode=metric_type))
 
     raise ValueError(f"Unknown metric_type: {metric_type!r}")
 
-
-# ---------------------------------------------------------------------------
-# 3. build_single_turn_sample
-# ---------------------------------------------------------------------------
-
-def build_single_turn_sample(row_data: dict):
-    """
-    Convert a flat dict (from ``DatasetRow.data``) into a ragas
-    ``SingleTurnSample``.  Missing keys are silently omitted so the pydantic
-    model uses its ``None`` defaults.
-
-    Parameters
-    ----------
-    row_data : dict
-        Typically a subset of: ``user_input``, ``response``, ``reference``,
-        ``retrieved_contexts``, ``reference_contexts``, etc.
-
-    Returns
-    -------
-    SingleTurnSample
-    """
-    from ragas.dataset_schema import SingleTurnSample
-
-    accepted_fields = {
-        "user_input",
-        "response",
-        "reference",
-        "retrieved_contexts",
-        "reference_contexts",
-        "retrieved_context_ids",
-        "reference_context_ids",
-        "multi_responses",
-        "rubrics",
-    }
-
-    kwargs: dict = {}
-    for key in accepted_fields:
-        if key in row_data and row_data[key] is not None:
-            kwargs[key] = row_data[key]
-
-    return SingleTurnSample(**kwargs)
-
-
-# ---------------------------------------------------------------------------
-# 4. build_multi_turn_sample
-# ---------------------------------------------------------------------------
-
-def build_multi_turn_sample(row_data: dict):
-    """
-    Convert a dict with conversation data into a ragas ``MultiTurnSample``.
-
-    ``row_data["user_input"]`` should be a list of message dicts::
-
-        [
-            {"type": "human", "content": "Hello"},
-            {"type": "ai", "content": "Hi!", "tool_calls": [
-                {"name": "search", "args": {"q": "hello"}}
-            ]},
-            {"type": "tool", "content": "search result ..."},
-        ]
-
-    Each dict is converted into the corresponding ragas message type.
-
-    Parameters
-    ----------
-    row_data : dict
-        Must contain ``user_input`` (list[dict]).  May also contain
-        ``reference``, ``reference_tool_calls``, ``reference_topics``,
-        ``rubrics``.
-
-    Returns
-    -------
-    MultiTurnSample
-    """
-    from ragas.dataset_schema import MultiTurnSample
-    from ragas.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
-
-    raw_messages = row_data.get("user_input", [])
-    messages: list = []
-
-    for msg in raw_messages:
-        msg_type = msg.get("type", "human")
-        content = msg.get("content", "")
-        metadata = msg.get("metadata")
-
-        if msg_type == "human":
-            messages.append(HumanMessage(content=content, metadata=metadata))
-
-        elif msg_type == "ai":
-            tool_calls_raw = msg.get("tool_calls") or []
-            tool_calls = [
-                ToolCall(name=tc["name"], args=tc.get("args", {}))
-                for tc in tool_calls_raw
-            ] or None
-            messages.append(
-                AIMessage(content=content, tool_calls=tool_calls, metadata=metadata)
-            )
-
-        elif msg_type == "tool":
-            messages.append(ToolMessage(content=content, metadata=metadata))
-
-        else:
-            logger.warning("Unknown message type %r, treating as human", msg_type)
-            messages.append(HumanMessage(content=content, metadata=metadata))
-
-    kwargs: dict = {"user_input": messages}
-
-    if row_data.get("reference") is not None:
-        kwargs["reference"] = row_data["reference"]
-
-    if row_data.get("reference_tool_calls") is not None:
-        kwargs["reference_tool_calls"] = [
-            ToolCall(name=tc["name"], args=tc.get("args", {}))
-            for tc in row_data["reference_tool_calls"]
-        ]
-
-    if row_data.get("reference_topics") is not None:
-        kwargs["reference_topics"] = row_data["reference_topics"]
-
-    if row_data.get("rubrics") is not None:
-        kwargs["rubrics"] = row_data["rubrics"]
-
-    return MultiTurnSample(**kwargs)
-
-
-# ---------------------------------------------------------------------------
-# 5. run_evaluation  (async entry-point)
-# ---------------------------------------------------------------------------
 
 async def run_evaluation(task_id: int, session_factory) -> None:
     """
     Execute a full evaluation run for the given EvalTask.
 
     Designed to be launched with ``asyncio.create_task(...)`` from the API
-    endpoint.  ``session_factory`` is the sync ``SessionLocal`` class -- we
-    open our own session so the request session can close independently.
-
-    Parameters
-    ----------
-    task_id : int
-        Primary key of the ``EvalTask`` to execute.
-    session_factory
-        Sync SQLAlchemy ``sessionmaker`` (e.g. ``SessionLocal``).
+    endpoint. ``session_factory`` is the sync ``SessionLocal`` class, so the
+    background runner opens its own session.
     """
     from app.models.dataset import DatasetRow
-    from app.models.evaluation import EvalRowResult, EvalTask
+    from app.models.evaluation import EvalTask
     from app.models.metric_definition import MetricDefinition
-    from app.models.scenario import EvalScenario, ScenarioMetric
+    from app.models.scenario import ScenarioMetric
 
     db = session_factory()
 
@@ -444,7 +428,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         scenario = task.scenario
         llm_config = task.llm_config
 
-        scenario_metrics: t.List[ScenarioMetric] = (
+        scenario_metrics: list[ScenarioMetric] = (
             db.query(ScenarioMetric)
             .filter(ScenarioMetric.scenario_id == scenario.id)
             .all()
@@ -452,7 +436,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         for sm in scenario_metrics:
             _ = sm.metric_definition
 
-        dataset_rows: t.List[DatasetRow] = (
+        dataset_rows: list[DatasetRow] = (
             db.query(DatasetRow)
             .filter(DatasetRow.dataset_id == dataset.id)
             .order_by(DatasetRow.row_index)
@@ -474,87 +458,82 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         task.completed_rows = 0
         task.progress = 0.0
         task.started_at = datetime.now(timezone.utc)
-        _log(task, f"========== 评测任务启动 ==========")
+        _log(task, "========== 评测任务启动 ==========")
         _log(task, f"任务: {task.name} (ID={task_id})")
         _log(task, f"数据集: {dataset.name} ({total_rows} 条)")
         _log(task, f"场景: {scenario.name}")
-        _log(task, f"LLM: {llm_config.model_name} @ {llm_config.api_base_url}")
+        _log(task, f"评判 LLM: {llm_config.model_name} @ {llm_config.api_base_url}")
         _log(task, f"指标数: {len(scenario_metrics)} 个")
         _log(task, f"进度: 0/{total_rows} (0%)")
         db.commit()
 
-        _log(task, f"正在构建 LLM 实例...")
+        _log(task, "正在构建原生评判 LLM 客户端...")
         db.commit()
-        ragas_llm = build_ragas_llm(llm_config)
-        _log(task, f"✓ LLM 构建成功")
+        judge_client = OpenAIJudgeClient(llm_config)
+        _log(task, "✓ 评判 LLM 客户端构建成功")
         db.commit()
 
-        legacy_metrics: t.List[t.Tuple[str, t.Any, ScenarioMetric]] = []
-        simple_metrics: t.List[t.Tuple[str, t.Any, ScenarioMetric]] = []
-
+        metrics: list[tuple[str, t.Any, ScenarioMetric]] = []
         for sm in scenario_metrics:
             metric_def: MetricDefinition = sm.metric_definition
             try:
-                kind, metric_instance = build_metric(metric_def, ragas_llm)
+                kind, metric_instance = build_metric(metric_def)
+                metrics.append((metric_def.name, metric_instance, sm))
                 _log(task, f"✓ 指标 [{metric_def.display_name}] 构建成功 (类型: {kind})")
             except Exception as exc:
                 _log(task, f"✗ 指标 [{metric_def.display_name}] 构建失败: {exc}")
-                continue
 
-            if kind == "legacy":
-                legacy_metrics.append((metric_def.name, metric_instance, sm))
-            else:
-                simple_metrics.append((metric_def.name, metric_instance, sm))
-
-        if not legacy_metrics and not simple_metrics:
+        if not metrics:
             _log(task, "✗ 错误: 没有任何指标构建成功，无法执行评测")
             db.commit()
             raise RuntimeError("No metrics could be built for this scenario")
 
-        from ragas.run_config import RunConfig
-        run_config = RunConfig(timeout=180, max_retries=3, max_wait=60)
-        for metric_name, metric_instance, _sm in legacy_metrics:
-            try:
-                metric_instance.init(run_config)
-            except Exception as exc:
-                _log(task, f"⚠ 指标 [{metric_name}] 初始化警告: {exc}")
-
         _log(task, f"========== 开始逐行评测 ({total_rows} 条) ==========")
         db.commit()
 
-        # ------------------------------------------------------------------
-        # Step 7: Process each row
-        # ------------------------------------------------------------------
-        sample_type = scenario.sample_type or "single_turn"
-        all_row_scores: t.List[t.Dict[str, t.Any]] = []
+        all_row_scores: list[dict[str, t.Any]] = []
 
         for idx, dataset_row in enumerate(dataset_rows):
+            db.refresh(task)
+            if task.status == "cancelled":
+                _log(task, f"⚠ 用户取消评测，已完成 {idx}/{total_rows} 行")
+                db.commit()
+                break
+
             row_start = time.time()
             row_data: dict = dataset_row.data or {}
-            metric_scores: t.Dict[str, t.Any] = {}
-            row_error: t.Optional[str] = None
+            metric_scores: dict[str, t.Any] = {}
+            row_error: str | None = None
 
-            # -- Build ragas sample --
-            try:
-                if sample_type == "multi_turn":
-                    sample = build_multi_turn_sample(row_data)
-                else:
-                    sample = build_single_turn_sample(row_data)
-            except Exception as exc:
-                row_error = f"Failed to build sample: {exc}"
-                _log(task, f"  ✗ 行 #{idx}: 构建样本失败 - {exc}")
-                execution_time_ms = int((time.time() - row_start) * 1000)
-                _persist_row_result(db, task, dataset_row, metric_scores, row_error, False, execution_time_ms)
-                task.completed_rows = idx + 1
-                task.progress = round((idx + 1) / total_rows, 4)
-                _log(
-                    task,
-                    f"  → 进度: {task.completed_rows}/{total_rows} ({round(task.progress * 100, 1)}%)",
-                )
+            user_input_preview = str(row_data.get("user_input", ""))[:60]
+            _log(task, f"── 行 #{idx + 1}/{total_rows}: {user_input_preview}...")
+            db.commit()
+
+            for metric_name, metric_instance, _sm in metrics:
+                db.refresh(task)
+                if task.status == "cancelled":
+                    _log(task, f"⚠ 用户取消评测，当前行停止在指标 [{metric_name}]")
+                    db.commit()
+                    break
+
+                _log(task, f"  ▸ 评测指标 [{metric_name}]...")
                 db.commit()
-                all_row_scores.append(metric_scores)
+                try:
+                    result = await metric_instance.ascore(row_data, judge_client)
+                    val = result.value
+                    if isinstance(val, (int, float)):
+                        val = round(float(val), 4)
+                    reason = str(result.reason or "")[:800]
+                    metric_scores[metric_name] = {"score": val, "reason": reason}
+                    if val is None:
+                        _log(task, f"  ✗ [{metric_name}] 无法评分: {reason[:200]}")
+                    else:
+                        _log(task, f"  ✓ [{metric_name}] = {val}")
+                except Exception as exc:
+                    metric_scores[metric_name] = {"score": None, "reason": str(exc)[:800]}
+                    _log(task, f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
+                db.commit()
                 await asyncio.sleep(0)
-                continue
 
             db.refresh(task)
             if task.status == "cancelled":
@@ -562,47 +541,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 db.commit()
                 break
 
-            user_input_preview = str(row_data.get("user_input", ""))[:60]
-            _log(task, f"── 行 #{idx+1}/{total_rows}: {user_input_preview}...")
-            db.commit()
-
-            for metric_name, metric_instance, _sm in legacy_metrics:
-                _log(task, f"  ▸ 评测指标 [{metric_name}]...")
-                db.commit()
-                try:
-                    if sample_type == "multi_turn":
-                        score = await metric_instance.multi_turn_ascore(sample)
-                    else:
-                        score = await metric_instance.single_turn_ascore(sample)
-                    metric_scores[metric_name] = {"score": round(float(score), 4), "reason": ""}
-                    _log(task, f"  ✓ [{metric_name}] = {round(float(score), 4)}")
-                except Exception as exc:
-                    metric_scores[metric_name] = {"score": None, "reason": str(exc)[:500]}
-                    _log(task, f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
-                db.commit()
-
-            for metric_name, metric_instance, _sm in simple_metrics:
-                _log(task, f"  ▸ 评测指标 [{metric_name}]...")
-                db.commit()
-                try:
-                    variables = metric_instance.get_variables()
-                    score_kwargs: dict = {"llm": ragas_llm}
-                    for var in variables:
-                        if var in row_data:
-                            score_kwargs[var] = row_data[var]
-                    result = metric_instance.score(**score_kwargs)
-                    val = result.value if hasattr(result, "value") else result
-                    reason = str(result.reason) if hasattr(result, "reason") else ""
-                    if isinstance(val, (int, float)):
-                        val = round(float(val), 4)
-                    metric_scores[metric_name] = {"score": val, "reason": reason[:500]}
-                    _log(task, f"  ✓ [{metric_name}] = {val}")
-                except Exception as exc:
-                    metric_scores[metric_name] = {"score": None, "reason": str(exc)[:500]}
-                    _log(task, f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
-                db.commit()
-
-            is_pass = _determine_pass(metric_scores, legacy_metrics, simple_metrics)
+            is_pass = _determine_pass(metric_scores, metrics)
             execution_time_ms = int((time.time() - row_start) * 1000)
 
             _persist_row_result(db, task, dataset_row, metric_scores, row_error, is_pass, execution_time_ms)
@@ -623,25 +562,25 @@ async def run_evaluation(task_id: int, session_factory) -> None:
 
         db.refresh(task)
         if task.status == "cancelled":
-            _log(task, f"========== 评测已取消 ==========")
+            _log(task, "========== 评测已取消 ==========")
             task.finished_at = datetime.now(timezone.utc)
             db.commit()
         else:
-            _log(task, f"========== 计算汇总统计 ==========")
+            _log(task, "========== 计算汇总统计 ==========")
             db.commit()
-            summary_scores = _compute_summary_scores(all_row_scores, legacy_metrics, simple_metrics)
+            summary_scores = _compute_summary_scores(all_row_scores, metrics)
             task.status = "completed"
             task.finished_at = datetime.now(timezone.utc)
             task.summary_scores = summary_scores
             task.progress = 1.0
 
-            pass_count = sum(1 for s in all_row_scores if _determine_pass(s, legacy_metrics, simple_metrics))
-            _log(task, f"通过: {pass_count}/{total_rows} ({round(pass_count/total_rows*100, 1)}%)")
+            pass_count = sum(1 for s in all_row_scores if _determine_pass(s, metrics))
+            _log(task, f"通过: {pass_count}/{total_rows} ({round(pass_count / total_rows * 100, 1)}%)")
             for m_name, info in summary_scores.items():
                 mean = info.get("mean")
                 pr = info.get("pass_rate")
                 _log(task, f"  {m_name}: 均值={mean}, 通过率={pr}")
-            _log(task, f"========== 评测完成 ==========")
+            _log(task, "========== 评测完成 ==========")
             db.commit()
 
     except Exception as exc:
@@ -654,30 +593,24 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 task.error_message = str(exc)[:2000]
                 task.finished_at = datetime.now(timezone.utc)
                 _log(task, f"✗✗✗ 评测失败: {str(exc)[:500]}")
-                _log(task, f"========== 评测异常终止 ==========")
+                _log(task, "========== 评测异常终止 ==========")
                 db.commit()
         except Exception:
-            logger.exception(
-                "Failed to persist error status for task %d", task_id
-            )
+            logger.exception("Failed to persist error status for task %d", task_id)
     finally:
         db.close()
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 def _persist_row_result(
     db,
     task,
     dataset_row,
     metric_scores: dict,
-    error: t.Optional[str],
+    error: str | None,
     is_pass: bool,
     execution_time_ms: int,
 ) -> None:
-    """Create an ``EvalRowResult`` and add it to the session (caller commits)."""
+    """Create an EvalRowResult and add it to the session (caller commits)."""
     from app.models.evaluation import EvalRowResult
 
     row_result = EvalRowResult(
@@ -692,20 +625,14 @@ def _persist_row_result(
     db.add(row_result)
 
 
-def _determine_pass(
-    metric_scores: dict,
-    legacy_metrics: list,
-    simple_metrics: list,
-) -> bool:
+def _determine_pass(metric_scores: dict, metrics: list) -> bool:
     """
-    Determine whether a row passes based on per-metric ``pass_threshold``
-    from the ``ScenarioMetric`` association.
+    Determine whether a row passes based on per-metric pass_threshold.
 
-    A row passes when **all** metrics that have a defined threshold meet or
-    exceed that threshold.  Metrics with errors (score=None) cause failure.
+    A row passes when all metrics that have a defined threshold meet or exceed
+    that threshold. Metrics with errors (score=None) cause failure.
     """
-    all_metrics = list(legacy_metrics) + list(simple_metrics)
-    for metric_name, _metric_instance, scenario_metric in all_metrics:
+    for metric_name, _metric_instance, scenario_metric in metrics:
         threshold = scenario_metric.pass_threshold
         if threshold is None:
             continue
@@ -724,31 +651,23 @@ def _determine_pass(
     return True
 
 
-def _compute_summary_scores(
-    all_row_scores: t.List[t.Dict[str, t.Any]],
-    legacy_metrics: list,
-    simple_metrics: list,
-) -> dict:
+def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: list) -> dict:
     """
     Compute per-metric aggregate statistics across all evaluated rows.
 
-    Returns a dict like::
-
-        {
-            "faithfulness": {
-                "mean": 0.85, "min": 0.6, "max": 1.0,
-                "pass_rate": 0.9, "count": 10, "error_count": 0
-            },
-            ...
+    Returns a dict like:
+    {
+        "faithfulness": {
+            "mean": 0.85, "min": 0.6, "max": 1.0,
+            "pass_rate": 0.9, "count": 10, "error_count": 0
         }
+    }
     """
-    all_metrics = list(legacy_metrics) + list(simple_metrics)
-    thresholds = {name: sm.pass_threshold for name, _, sm in all_metrics}
-
+    thresholds = {name: sm.pass_threshold for name, _, sm in metrics}
     summary: dict = {}
 
-    for metric_name, _, _ in all_metrics:
-        numeric_values: t.List[float] = []
+    for metric_name, _, _ in metrics:
+        numeric_values: list[float] = []
         error_count = 0
 
         for row_scores in all_row_scores:
@@ -794,3 +713,155 @@ def _compute_summary_scores(
         }
 
     return summary
+
+
+def _parse_json_object(content: str) -> dict[str, t.Any]:
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        match = _JSON_OBJECT_RE.search(content)
+        if not match:
+            raise ValueError(f"Judge response is not JSON: {content[:200]}")
+        parsed = json.loads(match.group(0))
+    if not isinstance(parsed, dict):
+        raise ValueError("Judge response JSON must be an object")
+    return parsed
+
+
+def _coerce_float(value: t.Any) -> float | None:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        if match:
+            return float(match.group(0))
+    return None
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _clean_reason(value: t.Any) -> str:
+    if value is None:
+        return ""
+    reason = str(value).strip()
+    return reason[:800]
+
+
+def _missing_required_fields(row_data: dict[str, t.Any], required_fields: list[str]) -> list[str]:
+    missing: list[str] = []
+    for field in required_fields:
+        value = row_data.get(field)
+        if value is None or value == "" or value == [] or value == {}:
+            missing.append(field)
+    return missing
+
+
+def _sample_payload(row_data: dict[str, t.Any]) -> dict[str, t.Any]:
+    important_fields = [
+        "user_input",
+        "response",
+        "reference",
+        "retrieved_contexts",
+        "reference_contexts",
+        "retrieved_context_ids",
+        "reference_context_ids",
+        "reference_tool_calls",
+        "reference_topics",
+        "rubrics",
+    ]
+    payload = {
+        key: _json_safe(row_data[key])
+        for key in important_fields
+        if key in row_data and row_data[key] is not None
+    }
+    for key, value in row_data.items():
+        if key not in payload and len(payload) < 16:
+            payload[key] = _json_safe(value)
+    return payload
+
+
+def _json_safe(value: t.Any, limit: int = 2400) -> t.Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _limit_text(value, limit)
+    if isinstance(value, list):
+        per_item_limit = max(300, limit // max(len(value), 1))
+        return [_json_safe(item, per_item_limit) for item in value[:12]]
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe(item, 700)
+            for key, item in list(value.items())[:20]
+        }
+    return _limit_text(str(value), limit)
+
+
+def _limit_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...[truncated]"
+
+
+def _render_prompt(prompt: str, row_data: dict[str, t.Any]) -> str:
+    if not prompt:
+        return ""
+    safe_vars = {
+        key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+        for key, value in row_data.items()
+    }
+    try:
+        return prompt.format_map(_SafeFormatDict(safe_vars))
+    except Exception:
+        return prompt
+
+
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def _match_allowed_value(value: str, allowed_values: list[str]) -> str:
+    normalized = value.strip().lower()
+    for allowed in allowed_values:
+        if normalized == allowed.lower():
+            return allowed
+    for allowed in allowed_values:
+        if allowed.lower() in normalized:
+            return allowed
+    return ""
+
+
+def _extract_actual_tool_calls(user_input: t.Any) -> list[dict[str, t.Any]]:
+    if not isinstance(user_input, list):
+        return []
+    calls: list[dict[str, t.Any]] = []
+    for message in user_input:
+        if not isinstance(message, dict):
+            continue
+        for tool_call in message.get("tool_calls") or []:
+            if isinstance(tool_call, dict):
+                calls.append(
+                    {
+                        "name": tool_call.get("name"),
+                        "args": tool_call.get("args") or {},
+                    }
+                )
+    return calls
+
+
+def _find_tool_call_match(
+    expected_call: dict[str, t.Any],
+    actual_calls: list[dict[str, t.Any]],
+) -> int | None:
+    expected_name = expected_call.get("name")
+    expected_args = expected_call.get("args") or {}
+    for idx, actual_call in enumerate(actual_calls):
+        if actual_call.get("name") != expected_name:
+            continue
+        if (actual_call.get("args") or {}) == expected_args:
+            return idx
+    return None

@@ -153,7 +153,14 @@ user_input,response,retrieved_contexts,reference,retrieved_context_ids,reference
 
 ## 三、创建 Agent 评测
 
-Agent 评测评估工具调用准确性和目标达成度。
+Agent 评测评估工具调用准确性和目标达成度。它和“多轮对话评测”的区别是：Agent 场景关注行动链路是否正确，包括是否调用了正确工具、参数是否正确、工具返回后是否完成用户目标；多轮对话场景关注对话体验是否稳定，包括是否跑题、是否记住上下文、回答是否连贯。
+
+| 场景 | 关注点 | 典型字段 | 典型指标 |
+|------|--------|----------|----------|
+| Agent 评测 | 工具调用和任务闭环 | `reference_tool_calls`, `reference` | Tool Call Accuracy, Agent Goal Accuracy |
+| 多轮对话评测 | 话题范围和上下文连贯 | `reference_topics`, 可选 `reference` | Topic Adherence, Coherence |
+
+如果一个样本既是多轮，又包含工具调用和明确任务目标，优先按 Agent 评测处理；如果只是普通 human/ai 多轮聊天，没有工具执行链，就按多轮对话评测处理。
 
 ### 3.1 准备数据文件
 
@@ -205,8 +212,23 @@ Agent 评测评估工具调用准确性和目标达成度。
 
 - 场景选 `Agent 评测模板`（含 Tool Call Accuracy + Agent Goal Accuracy）
 - 执行后查看报告
-- **Tool Call Accuracy**：工具名称和参数是否与预期一致
-- **Agent Goal Accuracy**：是否达成用户目标（由 LLM 判断）
+- **Tool Call Accuracy**：后端确定性比较实际工具调用和期望工具调用，给出匹配数量说明
+- **Agent Goal Accuracy**：平台原生 Judge 阅读完整 Agent 轨迹，判断是否达成用户目标并返回理由
+
+### 3.4 创建多轮对话评测
+
+多轮对话评测不要求工具调用，重点看对话是否围绕业务话题、上下文是否连贯。
+
+核心字段：
+
+- `user_input`：human/ai 交替的完整对话
+- `reference_topics`：允许讨论的话题范围，例如 `["订单查询", "退货退款", "物流追踪"]`
+- `reference`：可选，用于描述期望对话结果
+
+执行时选择 `多轮对话评测模板`：
+
+- **Topic Adherence**：平台原生 Judge 判断对话是否围绕 `reference_topics`
+- **Coherence**：平台原生 Judge 判断对话是否前后连贯、逻辑清晰
 
 ---
 
