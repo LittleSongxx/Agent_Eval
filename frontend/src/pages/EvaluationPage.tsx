@@ -18,12 +18,14 @@ import {
   PlayCircleOutlined,
   StopOutlined,
   FileTextOutlined,
+  CodeOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { EvalTask, Dataset, EvalScenario, LLMConfig } from '../types';
 import * as api from '../services/api';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const statusColorMap: Record<string, string> = {
   pending: 'blue',
@@ -51,6 +53,13 @@ const EvaluationPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [consoleTaskId, setConsoleTaskId] = useState<number | null>(null);
+  const [consoleLogs, setConsoleLogs] = useState('');
+  const [consoleStatus, setConsoleStatus] = useState('');
+  const consoleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
+  const consoleBoxRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -98,14 +107,56 @@ const EvaluationPage: React.FC = () => {
     };
   }, [tasks, fetchTasks]);
 
+  const openConsole = (taskId: number) => {
+    setConsoleTaskId(taskId);
+    setConsoleLogs('');
+    setConsoleStatus('');
+    userScrolledUp.current = false;
+  };
+
+  const closeConsole = () => {
+    setConsoleTaskId(null);
+    setConsoleLogs('');
+    if (consoleTimerRef.current) {
+      clearInterval(consoleTimerRef.current);
+      consoleTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (consoleTaskId === null) return;
+
+    const pollLogs = async () => {
+      try {
+        const data = await api.getEvaluationLogs(consoleTaskId);
+        setConsoleLogs(data.logs || '');
+        setConsoleStatus(data.status || '');
+        if (!userScrolledUp.current) {
+          setTimeout(() => consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
+      } catch { /* ignore */ }
+    };
+
+    pollLogs();
+    consoleTimerRef.current = setInterval(pollLogs, 2000);
+
+    return () => {
+      if (consoleTimerRef.current) {
+        clearInterval(consoleTimerRef.current);
+        consoleTimerRef.current = null;
+      }
+    };
+  }, [consoleTaskId]);
+
   const handleCreate = async () => {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
-      await api.createEvaluation(values);
+      const created = await api.createEvaluation(values);
       message.success('评测任务已创建');
       form.resetFields();
       fetchTasks();
+      openConsole(created.id);
     } catch {
       message.error('创建评测失败');
     } finally {
@@ -185,6 +236,14 @@ const EvaluationPage: React.FC = () => {
       width: 180,
       render: (_: unknown, record: EvalTask) => (
         <Space>
+          <Button
+            size="small"
+            type="link"
+            icon={<CodeOutlined />}
+            onClick={() => openConsole(record.id)}
+          >
+            日志
+          </Button>
           {record.status === 'completed' && (
             <Button
               size="small"
@@ -192,7 +251,7 @@ const EvaluationPage: React.FC = () => {
               icon={<FileTextOutlined />}
               onClick={() => navigate(`/reports/${record.id}`)}
             >
-              查看报告
+              报告
             </Button>
           )}
           {(record.status === 'running' || record.status === 'pending') && (
@@ -281,6 +340,84 @@ const EvaluationPage: React.FC = () => {
           showTotal: (t) => `共 ${t} 条`,
         }}
       />
+
+      {consoleTaskId !== null && (
+        <div style={{ marginTop: 16 }}>
+          <div
+            style={{
+              background: '#1e1e1e',
+              borderRadius: '8px 8px 0 0',
+              padding: '8px 16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <Space>
+              <CodeOutlined style={{ color: '#4ec9b0' }} />
+              <Text style={{ color: '#ccc', fontSize: 13 }}>
+                评测日志 — 任务 #{consoleTaskId}
+              </Text>
+              <Tag
+                color={
+                  consoleStatus === 'running' ? 'orange' :
+                  consoleStatus === 'completed' ? 'green' :
+                  consoleStatus === 'failed' ? 'red' : 'blue'
+                }
+                style={{ fontSize: 11 }}
+              >
+                {statusLabelMap[consoleStatus] || consoleStatus}
+              </Tag>
+            </Space>
+            <Button
+              type="text"
+              size="small"
+              icon={<CloseOutlined style={{ color: '#999' }} />}
+              onClick={closeConsole}
+            />
+          </div>
+          <div
+            ref={consoleBoxRef}
+            onScroll={() => {
+              const el = consoleBoxRef.current;
+              if (!el) return;
+              const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+              userScrolledUp.current = !atBottom;
+            }}
+            style={{
+              background: '#1e1e1e',
+              borderRadius: '0 0 8px 8px',
+              padding: '12px 16px',
+              height: 360,
+              overflowY: 'auto',
+              fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+              fontSize: 13,
+              lineHeight: 1.7,
+              color: '#d4d4d4',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {consoleLogs ? consoleLogs.split('\n').map((line, i) => {
+              let color = '#d4d4d4';
+              if (line.includes('✓')) color = '#4ec9b0';
+              else if (line.includes('✗')) color = '#f44747';
+              else if (line.includes('⚠')) color = '#dcdcaa';
+              else if (line.includes('══')) color = '#569cd6';
+              else if (line.includes('──')) color = '#808080';
+              else if (line.includes('▸')) color = '#9cdcfe';
+              return (
+                <div key={i} style={{ color, minHeight: 20 }}>
+                  {line}
+                </div>
+              );
+            }) : (
+              <div style={{ color: '#808080' }}>等待日志输出...</div>
+            )}
+            <div ref={consoleEndRef} />
+          </div>
+        </div>
+      )}
     </Spin>
   );
 };

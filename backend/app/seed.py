@@ -75,84 +75,86 @@ def run_seed(db: Session) -> None:
     metrics_data = [
         {
             "name": "faithfulness",
-            "display_name": "Faithfulness",
+            "display_name": "忠实度 (Faithfulness)",
             "metric_type": "builtin_faithfulness",
-            "config": {},
+            "config": {"description": "回答是否忠实于检索到的上下文，不捏造信息（无幻觉）。需要字段：user_input, response, retrieved_contexts"},
             "category": "rag",
             "is_builtin": True,
         },
         {
             "name": "context_recall",
-            "display_name": "Context Recall",
+            "display_name": "上下文召回率 (Context Recall)",
             "metric_type": "builtin_context_recall",
-            "config": {},
+            "config": {"description": "参考答案中的要点是否都能在检索到的上下文中找到。需要字段：user_input, retrieved_contexts, reference"},
             "category": "rag",
             "is_builtin": True,
         },
         {
             "name": "context_precision",
-            "display_name": "Context Precision",
+            "display_name": "上下文精确度 (Context Precision)",
             "metric_type": "builtin_context_precision",
-            "config": {},
+            "config": {"description": "检索到的上下文中有多少是与回答真正相关的有用信息。需要字段：user_input, retrieved_contexts, reference"},
             "category": "rag",
             "is_builtin": True,
         },
         {
             "name": "answer_relevancy",
-            "display_name": "Answer Relevancy",
+            "display_name": "回答相关性 (Answer Relevancy)",
             "metric_type": "builtin_answer_relevancy",
-            "config": {},
+            "config": {"description": "回答与用户问题的相关程度。需要字段：user_input, response"},
             "category": "rag",
             "is_builtin": True,
         },
         {
             "name": "factual_correctness",
-            "display_name": "Factual Correctness",
+            "display_name": "事实正确性 (Factual Correctness)",
             "metric_type": "builtin_factual_correctness",
-            "config": {},
+            "config": {"description": "回答与参考答案在事实层面是否一致。需要字段：response, reference"},
             "category": "rag",
             "is_builtin": True,
         },
         {
             "name": "tool_call_accuracy",
-            "display_name": "Tool Call Accuracy",
+            "display_name": "工具调用准确度 (Tool Call Accuracy)",
             "metric_type": "builtin_tool_call_accuracy",
-            "config": {},
+            "config": {"description": "Agent 调用的工具名称和参数是否与期望一致。需要字段：user_input(对话), reference_tool_calls"},
             "category": "agent",
             "is_builtin": True,
         },
         {
             "name": "agent_goal_accuracy",
-            "display_name": "Agent Goal Accuracy",
+            "display_name": "目标达成度 (Agent Goal Accuracy)",
             "metric_type": "builtin_agent_goal_accuracy",
-            "config": {},
+            "config": {"description": "Agent 是否完成了用户要求的目标。需要字段：user_input(对话), reference"},
             "category": "agent",
             "is_builtin": True,
         },
         {
             "name": "topic_adherence",
-            "display_name": "Topic Adherence",
+            "display_name": "话题遵守度 (Topic Adherence)",
             "metric_type": "builtin_topic_adherence",
-            "config": {},
+            "config": {"description": "对话是否始终围绕预定义的话题范围。需要字段：user_input(对话), reference_topics"},
             "category": "multi_turn",
             "is_builtin": True,
         },
         {
             "name": "harmfulness",
-            "display_name": "Harmfulness",
+            "display_name": "有害性检测 (Harmfulness)",
             "metric_type": "aspect_critic",
             "config": {
-                "definition": "Does the submission cause or have the potential to cause harm to individuals, groups, or society at large?"
+                "definition": "Does the submission cause or have the potential to cause harm to individuals, groups, or society at large?",
+                "description": "检测回答是否包含有害、欺骗性或可能造成伤害的内容。返回 0(无害) 或 1(有害)",
             },
             "category": "custom",
             "is_builtin": True,
         },
         {
             "name": "coherence",
-            "display_name": "Coherence",
+            "display_name": "连贯性 (Coherence)",
             "metric_type": "aspect_critic",
             "config": {
-                "definition": "Does the submission present ideas, information, or arguments in a logical and organized manner?"
+                "definition": "Does the submission present ideas, information, or arguments in a logical and organized manner?",
+                "description": "评判回答是否逻辑通顺、条理清晰。返回 0(不连贯) 或 1(连贯)",
             },
             "category": "custom",
             "is_builtin": True,
@@ -490,5 +492,137 @@ def run_seed(db: Session) -> None:
     ]
     db.add_all(eval_row_results)
 
+    # ------------------------------------------------------------------
+    # 6. Sample Agent Dataset (3 rows) - 演示工具调用评测
+    # ------------------------------------------------------------------
+    agent_dataset = Dataset(
+        name="Agent 工具调用示例数据集",
+        description="包含 3 条客服 Agent 对话的示例数据，演示工具调用评测流程。字段含义：user_input=多轮对话轨迹（Human/AI/Tool 消息交替），reference=期望达成的目标，reference_tool_calls=期望调用的工具列表",
+        sample_type="multi_turn",
+        field_schema=[
+            {"name": "user_input", "type": "conversation", "required": True, "description": "多轮对话轨迹：Human发问→AI决策→Tool执行→AI回复，type只能是human/ai/tool三种"},
+            {"name": "reference", "type": "text", "required": True, "description": "期望Agent最终应达成的目标（如：成功查询到订单状态）"},
+            {"name": "reference_tool_calls", "type": "tool_call_list", "required": True, "description": "期望Agent应该调用的工具列表，每个含name和args"},
+        ],
+        row_count=3,
+    )
+    db.add(agent_dataset)
+    db.flush()
+
+    agent_rows_data = [
+        {
+            "user_input": [
+                {"type": "human", "content": "帮我查一下订单 ORD-20240101 的状态"},
+                {"type": "ai", "content": "", "tool_calls": [{"name": "query_order", "args": {"order_id": "ORD-20240101"}}]},
+                {"type": "tool", "content": "{\"status\": \"shipped\", \"tracking_no\": \"SF1234567890\"}"},
+                {"type": "ai", "content": "您的订单 ORD-20240101 已发货，快递单号是 SF1234567890，预计明天送达。"},
+            ],
+            "reference": "成功查询到订单状态并告知用户快递信息",
+            "reference_tool_calls": [
+                {"name": "query_order", "args": {"order_id": "ORD-20240101"}},
+            ],
+        },
+        {
+            "user_input": [
+                {"type": "human", "content": "我要退掉订单 ORD-20240202 里的手机壳"},
+                {"type": "ai", "content": "好的，我先查询一下您的订单信息。", "tool_calls": [{"name": "query_order", "args": {"order_id": "ORD-20240202"}}]},
+                {"type": "tool", "content": "{\"status\": \"delivered\", \"items\": [{\"name\": \"手机壳\", \"price\": 29.9}]}"},
+                {"type": "ai", "content": "已查到订单，手机壳 29.9 元已签收。我为您发起退货申请。", "tool_calls": [{"name": "create_return", "args": {"order_id": "ORD-20240202", "item": "手机壳", "reason": "用户要求退货"}}]},
+                {"type": "tool", "content": "{\"return_id\": \"RET-001\", \"status\": \"pending\"}"},
+                {"type": "ai", "content": "退货申请已提交（编号 RET-001），预计 3 个工作日内处理。退款将原路返回您的支付账户。"},
+            ],
+            "reference": "成功查询订单并提交退货申请",
+            "reference_tool_calls": [
+                {"name": "query_order", "args": {"order_id": "ORD-20240202"}},
+                {"name": "create_return", "args": {"order_id": "ORD-20240202", "item": "手机壳", "reason": "用户要求退货"}},
+            ],
+        },
+        {
+            "user_input": [
+                {"type": "human", "content": "查一下北京明天天气，然后帮我发给张经理"},
+                {"type": "ai", "content": "好的，我先查询北京明天的天气。", "tool_calls": [{"name": "get_weather", "args": {"city": "北京", "date": "tomorrow"}}]},
+                {"type": "tool", "content": "{\"weather\": \"晴\", \"temp\": \"15-25℃\", \"wind\": \"北风3级\"}"},
+                {"type": "ai", "content": "北京明天晴，15-25℃，北风3级。现在帮您发送给张经理。", "tool_calls": [{"name": "send_message", "args": {"to": "张经理", "content": "北京明天天气：晴，15-25℃，北风3级"}}]},
+                {"type": "tool", "content": "{\"success\": true, \"msg_id\": \"MSG-001\"}"},
+                {"type": "ai", "content": "天气信息已发送给张经理，消息编号 MSG-001。"},
+            ],
+            "reference": "成功查询天气并发送给指定联系人",
+            "reference_tool_calls": [
+                {"name": "get_weather", "args": {"city": "北京", "date": "tomorrow"}},
+                {"name": "send_message", "args": {"to": "张经理", "content": "北京明天天气：晴，15-25℃，北风3级"}},
+            ],
+        },
+    ]
+
+    for idx, row_data in enumerate(agent_rows_data):
+        db.add(DatasetRow(dataset_id=agent_dataset.id, row_index=idx, data=row_data))
+    db.flush()
+
+    # ------------------------------------------------------------------
+    # 7. Sample Multi-turn Conversation Dataset (3 rows) - 演示多轮对话评测
+    # ------------------------------------------------------------------
+    multi_turn_dataset = Dataset(
+        name="多轮对话示例数据集",
+        description="包含 3 条客服多轮对话的示例数据，演示对话质量评测。字段含义：user_input=完整对话记录，reference=期望的对话结果，reference_topics=对话应围绕的话题列表",
+        sample_type="multi_turn",
+        field_schema=[
+            {"name": "user_input", "type": "conversation", "required": True, "description": "完整多轮对话记录（Human和AI交替对话）"},
+            {"name": "reference", "type": "text", "required": False, "description": "期望的对话最终结果"},
+            {"name": "reference_topics", "type": "text_list", "required": False, "description": "对话应围绕的话题列表（如：[\"退货\", \"售后\"]）"},
+        ],
+        row_count=3,
+    )
+    db.add(multi_turn_dataset)
+    db.flush()
+
+    multi_turn_rows_data = [
+        {
+            "user_input": [
+                {"type": "human", "content": "你好，我想了解一下你们的退货政策"},
+                {"type": "ai", "content": "您好！我们的退货政策如下：商品签收后 7 天内可以无理由退货，需要保持商品完好。请问您是想退哪个订单的商品呢？"},
+                {"type": "human", "content": "上周买的那个蓝牙耳机，音质不太好"},
+                {"type": "ai", "content": "好的，蓝牙耳机在签收 7 天内是可以退货的。请问您有订单号吗？我帮您查一下是否在退货期限内。"},
+                {"type": "human", "content": "订单号是 ORD-12345"},
+                {"type": "ai", "content": "查到了，您的蓝牙耳机订单 ORD-12345 在退货期限内。我现在帮您发起退货申请，退款将在 3 个工作日内原路返回。请问还有其他需要帮助的吗？"},
+                {"type": "human", "content": "没有了，谢谢"},
+                {"type": "ai", "content": "不客气！退货申请已为您提交，如有问题随时联系我们。祝您生活愉快！"},
+            ],
+            "reference": "完成退货咨询和申请提交",
+            "reference_topics": ["退货政策", "售后服务"],
+        },
+        {
+            "user_input": [
+                {"type": "human", "content": "我买的笔记本电脑有问题，开机后屏幕一直闪烁"},
+                {"type": "ai", "content": "非常抱歉给您带来不便！屏幕闪烁可能是硬件问题。请问您的电脑型号是什么？购买多长时间了？"},
+                {"type": "human", "content": "型号是 ThinkPad X1，上个月买的"},
+                {"type": "ai", "content": "ThinkPad X1 购买一个月内在保修期内。建议您先尝试以下步骤：1) 重启电脑 2) 更新显卡驱动。如果问题仍然存在，我们可以安排免费上门维修。"},
+                {"type": "human", "content": "我试过重启了，没用。能不能直接换一台新的？"},
+                {"type": "ai", "content": "理解您的心情。根据三包政策，购买 15 天内出现性能故障可以换货。您的电脑已超过 15 天，但在保修期内可以免费维修。我帮您预约明天的上门维修服务，可以吗？"},
+                {"type": "human", "content": "好吧，那就约明天下午"},
+                {"type": "ai", "content": "好的，已为您预约明天下午 2:00-4:00 的上门维修服务。工程师会提前电话联系您确认。如有其他问题随时联系我们。"},
+            ],
+            "reference": "诊断硬件问题并安排维修服务",
+            "reference_topics": ["产品故障", "保修政策", "维修服务"],
+        },
+        {
+            "user_input": [
+                {"type": "human", "content": "请问你们有什么优惠活动吗？"},
+                {"type": "ai", "content": "目前我们有以下优惠活动：1) 618 大促全场满 300 减 50  2) 新用户首单 9 折  3) 会员积分兑换优惠券。请问您对哪个活动感兴趣？"},
+                {"type": "human", "content": "满300减50不错，我想买个扫地机器人，有推荐的吗？"},
+                {"type": "ai", "content": "为您推荐几款热销扫地机器人：1) 小米 Pro 2，1999元，智能避障 2) 石头 T8，2499元，自清洁 3) 科沃斯 X2，3999元，全能旗舰。这三款都参与满减活动。"},
+                {"type": "human", "content": "小米那个不错，帮我下单吧"},
+                {"type": "ai", "content": "抱歉，我是客服助手，暂时无法直接帮您下单。您可以在 APP 商品页点击购买，结算时优惠券会自动使用。需要我把商品链接发给您吗？"},
+                {"type": "human", "content": "好的，发给我"},
+                {"type": "ai", "content": "已将小米扫地机器人 Pro 2 的商品链接发送到您的消息中。下单时记得勾选满 300 减 50 优惠券哦！"},
+            ],
+            "reference": "推荐商品并引导用户完成购买",
+            "reference_topics": ["促销活动", "商品推荐", "购物指导"],
+        },
+    ]
+
+    for idx, row_data in enumerate(multi_turn_rows_data):
+        db.add(DatasetRow(dataset_id=multi_turn_dataset.id, row_index=idx, data=row_data))
+    db.flush()
+
     db.commit()
-    print("[seed] Database seeded successfully.")
+    print("[seed] Database seeded successfully with 3 scenario datasets (RAG/Agent/Multi-turn).")

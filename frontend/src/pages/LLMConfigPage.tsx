@@ -59,7 +59,7 @@ const LLMConfigPage: React.FC = () => {
       name: record.name,
       provider: record.provider,
       api_base_url: record.api_base_url,
-      api_key: record.api_key,
+      api_key: '',
       model_name: record.model_name,
       temperature: record.temperature,
       max_tokens: record.max_tokens,
@@ -73,7 +73,9 @@ const LLMConfigPage: React.FC = () => {
       const values = await form.validateFields();
       setSubmitting(true);
       if (editingConfig) {
-        await api.updateLLMConfig(editingConfig.id, values);
+        const { api_key, ...rest } = values;
+        const updateData = api_key ? { ...rest, api_key } : rest;
+        await api.updateLLMConfig(editingConfig.id, updateData);
         message.success('更新成功');
       } else {
         await api.createLLMConfig(values);
@@ -223,10 +225,10 @@ const LLMConfigPage: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="api_key"
-            label="API Key"
-            rules={[{ required: true, message: '请输入 API Key' }]}
+            label={editingConfig ? 'API Key（留空则不修改）' : 'API Key'}
+            rules={editingConfig ? [] : [{ required: true, message: '请输入 API Key' }]}
           >
-            <Input.Password placeholder="sk-..." />
+            <Input.Password placeholder={editingConfig ? '留空保持不变' : 'sk-...'} />
           </Form.Item>
           <Form.Item
             name="model_name"

@@ -22,6 +22,7 @@ class EvalTask(Base):
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
     summary_scores = Column(JSON, nullable=True)
+    logs = Column(Text, default="")
 
     dataset = relationship("Dataset")
     scenario = relationship("EvalScenario")

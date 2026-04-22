@@ -25,7 +25,43 @@ import { useParams, useNavigate } from 'react-router-dom';
 import type { Dataset, DatasetRow, FieldDefinition, PaginatedResponse } from '../types';
 import * as api from '../services/api';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
+
+const JSON_FIELD_TYPES = new Set(['conversation', 'tool_call_list', 'text_list', 'tags', 'json']);
+
+const isJsonValue = (val: any): boolean =>
+  val !== null && val !== undefined && typeof val === 'object';
+
+const JsonPreviewModal: React.FC<{
+  open: boolean;
+  title: string;
+  data: any;
+  onClose: () => void;
+}> = ({ open, title, data, onClose }) => (
+  <Modal
+    title={<Space><Tag color="blue">JSON</Tag>{title}</Space>}
+    open={open}
+    onCancel={onClose}
+    footer={<Button onClick={onClose}>关闭</Button>}
+    width={720}
+  >
+    <pre
+      style={{
+        background: '#f5f5f5',
+        padding: 16,
+        borderRadius: 8,
+        maxHeight: 500,
+        overflow: 'auto',
+        fontSize: 13,
+        lineHeight: 1.6,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      }}
+    >
+      {JSON.stringify(data, null, 2)}
+    </pre>
+  </Modal>
+);
 
 const DatasetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -43,6 +79,9 @@ const DatasetDetailPage: React.FC = () => {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [rowForm] = Form.useForm();
+  const [jsonPreview, setJsonPreview] = useState<{ open: boolean; title: string; data: any }>({
+    open: false, title: '', data: null,
+  });
 
   const fetchDataset = useCallback(async () => {
     setLoading(true);
@@ -128,7 +167,27 @@ const DatasetDetailPage: React.FC = () => {
     dataIndex: ['data', field.name],
     key: field.name,
     ellipsis: true,
-    render: (val: any) => truncate(val),
+    render: (val: any) => {
+      if (val === null || val === undefined) return <Text type="secondary">-</Text>;
+      if (JSON_FIELD_TYPES.has(field.type) || isJsonValue(val)) {
+        const label = Array.isArray(val)
+          ? `[${val.length} 项]`
+          : typeof val === 'object'
+            ? '{...}'
+            : truncate(val, 40);
+        return (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0 }}
+            onClick={() => setJsonPreview({ open: true, title: field.name, data: val })}
+          >
+            📋 {label} 点击查看
+          </Button>
+        );
+      }
+      return truncate(val);
+    },
   }));
 
   const columns = [
@@ -263,6 +322,13 @@ const DatasetDetailPage: React.FC = () => {
           ))}
         </Form>
       </Modal>
+
+      <JsonPreviewModal
+        open={jsonPreview.open}
+        title={jsonPreview.title}
+        data={jsonPreview.data}
+        onClose={() => setJsonPreview({ open: false, title: '', data: null })}
+      />
 
       <Modal
         title="导入数据"

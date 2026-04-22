@@ -361,46 +361,45 @@ async def run_evaluation(task_id: int, session_factory) -> None:
     from app.models.scenario import EvalScenario, ScenarioMetric
 
     db = session_factory()
+
+    def _log(task_obj, msg: str):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}] {msg}\n"
+        task_obj.logs = (task_obj.logs or "") + line
+        logger.info(msg)
+
     try:
-        # ------------------------------------------------------------------
-        # Step 1: Load task with relationships
-        # ------------------------------------------------------------------
         task = db.query(EvalTask).get(task_id)
         if task is None:
             logger.error("EvalTask %d not found -- aborting", task_id)
             return
 
-        # Force-load relationships while the session is open
         dataset = task.dataset
         scenario = task.scenario
         llm_config = task.llm_config
 
-        # Eagerly load scenario -> metrics -> metric_definition
         scenario_metrics: t.List[ScenarioMetric] = (
             db.query(ScenarioMetric)
             .filter(ScenarioMetric.scenario_id == scenario.id)
             .all()
         )
         for sm in scenario_metrics:
-            _ = sm.metric_definition  # trigger lazy load inside session
+            _ = sm.metric_definition
 
-        logger.info(
-            "Starting evaluation: task=%d scenario=%s dataset=%s llm=%s",
-            task_id,
-            scenario.name,
-            dataset.name,
-            llm_config.model_name,
-        )
+        _log(task, f"========== 评测任务启动 ==========")
+        _log(task, f"任务: {task.name} (ID={task_id})")
+        _log(task, f"数据集: {dataset.name} ({dataset.row_count} 条)")
+        _log(task, f"场景: {scenario.name}")
+        _log(task, f"LLM: {llm_config.model_name} @ {llm_config.api_base_url}")
+        _log(task, f"指标数: {len(scenario_metrics)} 个")
+        db.commit()
 
-        # ------------------------------------------------------------------
-        # Step 2: Build ragas LLM
-        # ------------------------------------------------------------------
+        _log(task, f"正在构建 LLM 实例...")
+        db.commit()
         ragas_llm = build_ragas_llm(llm_config)
+        _log(task, f"✓ LLM 构建成功")
+        db.commit()
 
-        # ------------------------------------------------------------------
-        # Step 3: Build all metric instances
-        # ------------------------------------------------------------------
-        # Each entry: (metric_name, metric_instance, scenario_metric)
         legacy_metrics: t.List[t.Tuple[str, t.Any, ScenarioMetric]] = []
         simple_metrics: t.List[t.Tuple[str, t.Any, ScenarioMetric]] = []
 
@@ -408,8 +407,9 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             metric_def: MetricDefinition = sm.metric_definition
             try:
                 kind, metric_instance = build_metric(metric_def, ragas_llm)
+                _log(task, f"✓ 指标 [{metric_def.display_name}] 构建成功 (类型: {kind})")
             except Exception as exc:
-                logger.error("Failed to build metric %s: %s", metric_def.name, exc)
+                _log(task, f"✗ 指标 [{metric_def.display_name}] 构建失败: {exc}")
                 continue
 
             if kind == "legacy":
@@ -418,25 +418,18 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 simple_metrics.append((metric_def.name, metric_instance, sm))
 
         if not legacy_metrics and not simple_metrics:
+            _log(task, "✗ 错误: 没有任何指标构建成功，无法执行评测")
+            db.commit()
             raise RuntimeError("No metrics could be built for this scenario")
 
-        # ------------------------------------------------------------------
-        # Step 4: Initialize legacy metrics with RunConfig
-        # ------------------------------------------------------------------
         from ragas.run_config import RunConfig
-
         run_config = RunConfig(timeout=180, max_retries=3, max_wait=60)
         for metric_name, metric_instance, _sm in legacy_metrics:
             try:
                 metric_instance.init(run_config)
             except Exception as exc:
-                logger.warning(
-                    "Failed to init metric %s (continuing): %s", metric_name, exc
-                )
+                _log(task, f"⚠ 指标 [{metric_name}] 初始化警告: {exc}")
 
-        # ------------------------------------------------------------------
-        # Step 5: Load all dataset rows
-        # ------------------------------------------------------------------
         dataset_rows: t.List[DatasetRow] = (
             db.query(DatasetRow)
             .filter(DatasetRow.dataset_id == dataset.id)
@@ -445,19 +438,17 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         )
         total_rows = len(dataset_rows)
         if total_rows == 0:
+            _log(task, "✗ 数据集没有数据行")
+            db.commit()
             raise RuntimeError(f"Dataset {dataset.id} has no rows")
 
-        # ------------------------------------------------------------------
-        # Step 6: Update task status to "running"
-        # ------------------------------------------------------------------
         task.status = "running"
         task.total_rows = total_rows
         task.completed_rows = 0
         task.progress = 0.0
         task.started_at = datetime.now(timezone.utc)
+        _log(task, f"========== 开始逐行评测 ({total_rows} 条) ==========")
         db.commit()
-
-        logger.info("Evaluation running: %d rows to process", total_rows)
 
         # ------------------------------------------------------------------
         # Step 7: Process each row
@@ -479,12 +470,9 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     sample = build_single_turn_sample(row_data)
             except Exception as exc:
                 row_error = f"Failed to build sample: {exc}"
-                logger.error("Row %d: %s", dataset_row.row_index, row_error)
+                _log(task, f"  ✗ 行 #{idx}: 构建样本失败 - {exc}")
                 execution_time_ms = int((time.time() - row_start) * 1000)
-                _persist_row_result(
-                    db, task, dataset_row, metric_scores,
-                    row_error, False, execution_time_ms,
-                )
+                _persist_row_result(db, task, dataset_row, metric_scores, row_error, False, execution_time_ms)
                 task.completed_rows = idx + 1
                 task.progress = round((idx + 1) / total_rows, 4)
                 db.commit()
@@ -492,29 +480,34 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 await asyncio.sleep(0)
                 continue
 
-            # -- Check cancellation --
             db.refresh(task)
             if task.status == "cancelled":
-                logger.info("Evaluation %d cancelled by user at row %d", task_id, idx)
+                _log(task, f"⚠ 用户取消评测，已完成 {idx}/{total_rows} 行")
+                db.commit()
                 break
 
-            # -- Score legacy metrics --
+            user_input_preview = str(row_data.get("user_input", ""))[:60]
+            _log(task, f"── 行 #{idx+1}/{total_rows}: {user_input_preview}...")
+            db.commit()
+
             for metric_name, metric_instance, _sm in legacy_metrics:
+                _log(task, f"  ▸ 评测指标 [{metric_name}]...")
+                db.commit()
                 try:
                     if sample_type == "multi_turn":
                         score = await metric_instance.multi_turn_ascore(sample)
                     else:
                         score = await metric_instance.single_turn_ascore(sample)
                     metric_scores[metric_name] = {"score": round(float(score), 4), "reason": ""}
+                    _log(task, f"  ✓ [{metric_name}] = {round(float(score), 4)}")
                 except Exception as exc:
-                    logger.error(
-                        "Row %d metric %s error: %s",
-                        dataset_row.row_index, metric_name, exc,
-                    )
                     metric_scores[metric_name] = {"score": None, "reason": str(exc)[:500]}
+                    _log(task, f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
+                db.commit()
 
-            # -- Score simple metrics --
             for metric_name, metric_instance, _sm in simple_metrics:
+                _log(task, f"  ▸ 评测指标 [{metric_name}]...")
+                db.commit()
                 try:
                     variables = metric_instance.get_variables()
                     score_kwargs: dict = {"llm": ragas_llm}
@@ -527,59 +520,49 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     if isinstance(val, (int, float)):
                         val = round(float(val), 4)
                     metric_scores[metric_name] = {"score": val, "reason": reason[:500]}
+                    _log(task, f"  ✓ [{metric_name}] = {val}")
                 except Exception as exc:
-                    logger.error(
-                        "Row %d metric %s error: %s",
-                        dataset_row.row_index, metric_name, exc,
-                    )
                     metric_scores[metric_name] = {"score": None, "reason": str(exc)[:500]}
+                    _log(task, f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
+                db.commit()
 
-            # -- Determine pass/fail --
-            is_pass = _determine_pass(
-                metric_scores, legacy_metrics, simple_metrics
-            )
-
+            is_pass = _determine_pass(metric_scores, legacy_metrics, simple_metrics)
             execution_time_ms = int((time.time() - row_start) * 1000)
 
-            _persist_row_result(
-                db, task, dataset_row, metric_scores,
-                row_error, is_pass, execution_time_ms,
-            )
+            _persist_row_result(db, task, dataset_row, metric_scores, row_error, is_pass, execution_time_ms)
 
             task.completed_rows = idx + 1
             task.progress = round((idx + 1) / total_rows, 4)
+
+            status_icon = "✓ 通过" if is_pass else "✗ 不通过"
+            _log(task, f"  → 结果: {status_icon} ({execution_time_ms}ms)")
             db.commit()
 
             all_row_scores.append(metric_scores)
-
-            logger.info(
-                "Row %d/%d done (%.0fms): %s",
-                idx + 1, total_rows, execution_time_ms,
-                {k: v for k, v in metric_scores.items()},
-            )
-
-            # Yield control to the event loop so the server stays responsive
             await asyncio.sleep(0)
 
-        # ------------------------------------------------------------------
-        # Step 8: Compute summary scores
-        # ------------------------------------------------------------------
-        summary_scores = _compute_summary_scores(
-            all_row_scores, legacy_metrics, simple_metrics
-        )
+        db.refresh(task)
+        if task.status == "cancelled":
+            _log(task, f"========== 评测已取消 ==========")
+            task.finished_at = datetime.now(timezone.utc)
+            db.commit()
+        else:
+            _log(task, f"========== 计算汇总统计 ==========")
+            db.commit()
+            summary_scores = _compute_summary_scores(all_row_scores, legacy_metrics, simple_metrics)
+            task.status = "completed"
+            task.finished_at = datetime.now(timezone.utc)
+            task.summary_scores = summary_scores
+            task.progress = 1.0
 
-        # ------------------------------------------------------------------
-        # Step 9: Mark task completed
-        # ------------------------------------------------------------------
-        task.status = "completed"
-        task.finished_at = datetime.now(timezone.utc)
-        task.summary_scores = summary_scores
-        task.progress = 100.0
-        db.commit()
-
-        logger.info(
-            "Evaluation completed: task=%d summary=%s", task_id, summary_scores
-        )
+            pass_count = sum(1 for s in all_row_scores if _determine_pass(s, legacy_metrics, simple_metrics))
+            _log(task, f"通过: {pass_count}/{total_rows} ({round(pass_count/total_rows*100, 1)}%)")
+            for m_name, info in summary_scores.items():
+                mean = info.get("mean")
+                pr = info.get("pass_rate")
+                _log(task, f"  {m_name}: 均值={mean}, 通过率={pr}")
+            _log(task, f"========== 评测完成 ==========")
+            db.commit()
 
     except Exception as exc:
         logger.exception("Evaluation failed for task %d", task_id)
@@ -590,6 +573,8 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 task.status = "failed"
                 task.error_message = str(exc)[:2000]
                 task.finished_at = datetime.now(timezone.utc)
+                _log(task, f"✗✗✗ 评测失败: {str(exc)[:500]}")
+                _log(task, f"========== 评测异常终止 ==========")
                 db.commit()
         except Exception:
             logger.exception(
@@ -637,8 +622,7 @@ def _determine_pass(
     from the ``ScenarioMetric`` association.
 
     A row passes when **all** metrics that have a defined threshold meet or
-    exceed that threshold.  Metrics without a threshold (``None``) or with a
-    ``None`` score value are ignored (they do not cause failure).
+    exceed that threshold.  Metrics with errors (score=None) cause failure.
     """
     all_metrics = list(legacy_metrics) + list(simple_metrics)
     for metric_name, _metric_instance, scenario_metric in all_metrics:
@@ -647,10 +631,10 @@ def _determine_pass(
             continue
         raw = metric_scores.get(metric_name)
         if raw is None:
-            continue
+            return False
         score = raw.get("score") if isinstance(raw, dict) else raw
         if score is None:
-            continue
+            return False
         if isinstance(score, str):
             numeric_score = 1.0 if score.lower() in ("pass", "yes", "true", "1") else 0.0
         else:

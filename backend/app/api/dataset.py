@@ -1,6 +1,6 @@
 import io
 import json
-from typing import List
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
@@ -15,6 +15,50 @@ from app.schemas.dataset import (
     DatasetRowResponse,
     DatasetRowsResponse,
 )
+
+
+def _validate_row_data(data: Dict[str, Any], field_schema: list) -> List[str]:
+    errors = []
+    schema_fields = {f["name"]: f for f in field_schema}
+    for f in field_schema:
+        if f.get("required") and f["name"] not in data:
+            errors.append(f"缺少必填字段: {f['name']}")
+    for key in data:
+        if key not in schema_fields:
+            continue
+        field_type = schema_fields[key].get("type", "text")
+        value = data[key]
+        if value is None:
+            continue
+        if field_type == "number" and not isinstance(value, (int, float)):
+            try:
+                float(value)
+            except (ValueError, TypeError):
+                errors.append(f"字段 {key} 应为数值类型")
+        if field_type in ("text_list", "tags") and isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if not isinstance(parsed, list):
+                    errors.append(f"字段 {key} 应为列表")
+                else:
+                    data[key] = parsed
+            except json.JSONDecodeError:
+                pass
+        if field_type == "conversation" and isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    data[key] = parsed
+            except json.JSONDecodeError:
+                errors.append(f"字段 {key} 应为 JSON 对话数组")
+        if field_type == "tool_call_list" and isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    data[key] = parsed
+            except json.JSONDecodeError:
+                errors.append(f"字段 {key} 应为 JSON 工具调用数组")
+    return errors
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
@@ -118,6 +162,11 @@ def add_dataset_row(
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if dataset.field_schema:
+        errors = _validate_row_data(payload.data, dataset.field_schema)
+        if errors:
+            raise HTTPException(status_code=422, detail="; ".join(errors))
 
     # Determine next row_index
     max_index = (

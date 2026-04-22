@@ -47,6 +47,7 @@ export const getPresetScenarios = () => api.get('/scenarios/presets').then(r => 
 export const listEvaluations = () => api.get('/evaluations').then(r => r.data);
 export const createEvaluation = (data: any) => api.post('/evaluations', data).then(r => r.data);
 export const getEvaluation = (id: number) => api.get(`/evaluations/${id}`).then(r => r.data);
+export const getEvaluationLogs = (id: number) => api.get(`/evaluations/${id}/logs`).then(r => r.data);
 export const cancelEvaluation = (id: number) => api.post(`/evaluations/${id}/cancel`);
 
 // ======================== Report ========================

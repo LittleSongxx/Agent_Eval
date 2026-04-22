@@ -61,6 +61,14 @@ def get_evaluation(task_id: int, db: Session = Depends(get_db)):
     return task
 
 
+@router.get("/{task_id}/logs")
+def get_evaluation_logs(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(EvalTask).filter(EvalTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Evaluation task not found")
+    return {"task_id": task_id, "status": task.status, "logs": task.logs or ""}
+
+
 @router.post("/{task_id}/cancel", response_model=EvalTaskResponse)
 def cancel_evaluation(task_id: int, db: Session = Depends(get_db)):
     task = db.query(EvalTask).filter(EvalTask.id == task_id).first()

@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons';
 import type { EvalScenario, MetricDefinition } from '../types';
 import * as api from '../services/api';
+import { MetricHelpButton, MetricHelpIcon, MetricHelpDrawer } from '../components/MetricHelpDrawer';
 
 const { Title, Paragraph } = Typography;
 
@@ -82,6 +83,7 @@ const ScenarioListPage: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
+  const [helpMetric, setHelpMetric] = useState<string | null>(null);
   const [selectedSceneType, setSelectedSceneType] = useState<string>('rag');
   const [selectedMetrics, setSelectedMetrics] = useState<SelectedMetric[]>([]);
 
@@ -148,41 +150,64 @@ const ScenarioListPage: React.FC = () => {
     (m) => m.category === selectedSceneType || m.category === 'custom' || m.category === 'general'
   );
 
+  const getMetricDisplayName = (metricDefId: number) => {
+    const def = metrics.find((m) => m.id === metricDefId);
+    return def?.display_name || `指标#${metricDefId}`;
+  };
+
   const columns = [
-    { title: '名称', dataIndex: 'name', key: 'name' },
+    { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
     { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
     {
       title: '场景类型',
       dataIndex: 'scene_type',
       key: 'scene_type',
-      width: 120,
+      width: 100,
       render: (v: string) => <Tag color="blue">{v}</Tag>,
     },
     {
       title: '样本类型',
       dataIndex: 'sample_type',
       key: 'sample_type',
-      width: 120,
-      render: (v: string) => <Tag color="purple">{v}</Tag>,
+      width: 100,
+      render: (v: string) => <Tag color="purple">{v === 'single_turn' ? '单轮' : '多轮'}</Tag>,
     },
     {
-      title: '指标数',
+      title: '评测指标',
       dataIndex: 'metrics',
-      key: 'metric_count',
-      width: 80,
-      render: (m: any[]) => m?.length || 0,
+      key: 'metrics_display',
+      render: (metricList: any[]) => {
+        if (!metricList || metricList.length === 0) return <Tag>无指标</Tag>;
+        return (
+          <Space size={[4, 4]} wrap>
+            {metricList.map((sm: any) => {
+              const mName = sm.metric_definition?.name || '';
+              const mDisplayName = sm.metric_definition?.display_name || getMetricDisplayName(sm.metric_definition_id);
+              return (
+                <Tag key={sm.id} color="cyan" style={{ marginRight: 0 }}>
+                  {mDisplayName}
+                  {sm.pass_threshold != null && (
+                    <span style={{ color: '#999', marginLeft: 4 }}>≥{sm.pass_threshold}</span>
+                  )}
+                  <MetricHelpIcon metricName={mName} onClick={() => setHelpMetric(mName)} />
+                </Tag>
+              );
+            })}
+          </Space>
+        );
+      },
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 180,
+      width: 160,
       render: (v: string) => new Date(v).toLocaleString('zh-CN'),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 80,
       render: (_: unknown, record: EvalScenario) => (
         <Popconfirm title="确认删除此场景？" onConfirm={() => handleDelete(record.id)}>
           <Button size="small" danger icon={<DeleteOutlined />}>
@@ -195,7 +220,11 @@ const ScenarioListPage: React.FC = () => {
 
   return (
     <Spin spinning={loading}>
-      <Title level={4}>场景管理</Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={4} style={{ margin: 0 }}>场景管理</Title>
+        <MetricHelpButton />
+      </div>
+      <MetricHelpDrawer open={!!helpMetric} metricName={helpMetric} onClose={() => setHelpMetric(null)} />
 
       <Title level={5} style={{ marginTop: 24 }}>预置模板</Title>
       <Row gutter={16} style={{ marginBottom: 32 }}>
@@ -287,10 +316,25 @@ const ScenarioListPage: React.FC = () => {
             mode="multiple"
             placeholder="选择评测指标"
             style={{ width: '100%', marginTop: 8, marginBottom: 12 }}
-            options={filteredMetrics.map((m) => ({
-              label: `${m.display_name} (${m.category})`,
-              value: m.id,
-            }))}
+            optionLabelProp="label"
+            options={filteredMetrics.map((m) => {
+              const desc = m.config?.description || '';
+              return {
+                label: m.display_name,
+                value: m.id,
+                desc,
+              };
+            })}
+            optionRender={(option) => (
+              <div>
+                <div style={{ fontWeight: 500 }}>{option.label}</div>
+                {option.data.desc && (
+                  <div style={{ fontSize: 12, color: '#888', lineHeight: 1.4 }}>
+                    {option.data.desc}
+                  </div>
+                )}
+              </div>
+            )}
             onChange={(ids: number[]) => {
               setSelectedMetrics(
                 ids.map((mid) => {
@@ -307,7 +351,10 @@ const ScenarioListPage: React.FC = () => {
                 const def = metrics.find((m) => m.id === sm.metric_definition_id);
                 return (
                   <div key={sm.metric_definition_id} style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 12 }}>
-                    <span style={{ width: 140 }}>{def?.display_name ?? sm.metric_definition_id}</span>
+                    <span style={{ width: 220, flexShrink: 0 }}>
+                      {def?.display_name ?? sm.metric_definition_id}
+                      {def?.name && <MetricHelpIcon metricName={def.name} onClick={() => setHelpMetric(def.name)} />}
+                    </span>
                     <span>权重:</span>
                     <InputNumber
                       min={0} max={10} step={0.1}
