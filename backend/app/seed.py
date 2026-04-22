@@ -15,6 +15,71 @@ from app.models import (
 )
 
 
+RAG_METRIC_LAYER_META = {
+    "context_recall": {
+        "layer": "检索质量",
+        "layer_key": "retrieval_quality",
+        "default_enabled": True,
+        "required_fields": ["user_input", "retrieved_contexts", "reference"],
+    },
+    "context_precision": {
+        "layer": "检索质量",
+        "layer_key": "retrieval_quality",
+        "default_enabled": True,
+        "required_fields": ["user_input", "retrieved_contexts", "reference"],
+    },
+    "faithfulness": {
+        "layer": "生成可信度",
+        "layer_key": "generation_trust",
+        "default_enabled": True,
+        "required_fields": ["user_input", "response", "retrieved_contexts"],
+    },
+    "factual_correctness": {
+        "layer": "生成可信度",
+        "layer_key": "generation_trust",
+        "default_enabled": True,
+        "required_fields": ["response", "reference"],
+    },
+    "answer_relevancy": {
+        "layer": "回答质量",
+        "layer_key": "answer_quality",
+        "default_enabled": True,
+        "required_fields": ["user_input", "response"],
+    },
+    "answer_completeness": {
+        "layer": "回答质量",
+        "layer_key": "answer_quality",
+        "default_enabled": True,
+        "required_fields": ["user_input", "response", "reference"],
+    },
+    "retrieval_hit_rate": {
+        "layer": "检索单测扩展",
+        "layer_key": "retrieval_unit",
+        "default_enabled": False,
+        "required_fields": ["retrieved_context_ids", "reference_context_ids"],
+    },
+    "retrieval_mrr": {
+        "layer": "检索单测扩展",
+        "layer_key": "retrieval_unit",
+        "default_enabled": False,
+        "required_fields": ["retrieved_context_ids", "reference_context_ids"],
+    },
+}
+
+
+def _with_metric_layer_meta(data: dict) -> dict:
+    """Attach stable UI/report grouping metadata to known RAG metrics."""
+    layer_meta = RAG_METRIC_LAYER_META.get(data["name"])
+    if not layer_meta:
+        return data
+
+    enriched = dict(data)
+    config = dict(enriched.get("config") or {})
+    config.update(layer_meta)
+    enriched["config"] = config
+    return enriched
+
+
 def sync_default_llm_config(db: Session) -> tuple[LLMConfig, bool]:
     """Create or update the default LLM config from environment settings."""
 
@@ -53,6 +118,7 @@ def sync_default_llm_config(db: Session) -> tuple[LLMConfig, bool]:
 
 
 def _ensure_metric_definition(db: Session, data: dict) -> MetricDefinition:
+    data = _with_metric_layer_meta(data)
     metric = db.query(MetricDefinition).filter(MetricDefinition.name == data["name"]).first()
     if metric is None:
         metric = MetricDefinition(**data)
@@ -102,6 +168,22 @@ def _upgrade_existing_rag_seed(db: Session) -> None:
 
     metric_data = [
         {
+            "name": "faithfulness",
+            "display_name": "忠实度 (Faithfulness)",
+            "metric_type": "builtin_faithfulness",
+            "config": {"description": "回答是否忠实于检索到的上下文，不捏造信息（无幻觉）。需要字段：user_input, response, retrieved_contexts"},
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "context_recall",
+            "display_name": "上下文召回率 (Context Recall)",
+            "metric_type": "builtin_context_recall",
+            "config": {"description": "参考答案中的要点是否都能在检索到的上下文中找到。需要字段：user_input, retrieved_contexts, reference"},
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
             "name": "context_precision",
             "display_name": "上下文精确度 (Context Precision)",
             "metric_type": "builtin_context_precision",
@@ -114,6 +196,14 @@ def _upgrade_existing_rag_seed(db: Session) -> None:
             "display_name": "回答相关性 (Answer Relevancy)",
             "metric_type": "builtin_answer_relevancy",
             "config": {"description": "回答与用户问题的相关程度。需要字段：user_input, response"},
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "factual_correctness",
+            "display_name": "事实正确性 (Factual Correctness)",
+            "metric_type": "builtin_factual_correctness",
+            "config": {"description": "回答与参考答案在事实层面是否一致。需要字段：response, reference"},
             "category": "rag",
             "is_builtin": True,
         },
@@ -164,7 +254,7 @@ def _upgrade_existing_rag_seed(db: Session) -> None:
     )
     if rag_scenario is not None:
         rag_scenario.description = "RAG 单轮问答 P0 核心评测模板，覆盖检索召回、检索精确、回答忠实、回答相关、事实正确和答案完整性。"
-        for metric_name in ["context_precision", "answer_relevancy", "answer_completeness"]:
+        for metric_name in ["faithfulness", "context_recall", "context_precision", "factual_correctness", "answer_relevancy", "answer_completeness"]:
             _ensure_scenario_metric(db, rag_scenario.id, metrics[metric_name].id, pass_threshold=0.7)
 
     rag_dataset = db.query(Dataset).filter(Dataset.name == "RAG 示例数据集").first()
@@ -380,6 +470,7 @@ def run_seed(db: Session) -> None:
 
     metric_objects = {}
     for m in metrics_data:
+        m = _with_metric_layer_meta(m)
         metric = MetricDefinition(**m)
         db.add(metric)
         db.flush()

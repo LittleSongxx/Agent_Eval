@@ -19,7 +19,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   faithfulness: {
     name: 'faithfulness',
     displayName: '忠实度 (Faithfulness)',
-    category: 'RAG',
+    category: '生成可信度',
     compareSubject: 'response（模型回答）  vs  retrieved_contexts（检索到的上下文）',
     compareMethod: '1. LLM 将 response 分解成多个原子陈述（如："Python是解释型语言"）\n2. 对每个陈述，LLM 判断该陈述能否从 retrieved_contexts 中推导出来\n3. 分数 = 能推导的陈述数 / 总陈述数',
     scoreRange: '0.0 ~ 1.0（1.0 表示回答完全基于检索内容，无幻觉）',
@@ -29,7 +29,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   context_recall: {
     name: 'context_recall',
     displayName: '上下文召回率 (Context Recall)',
-    category: 'RAG',
+    category: '检索质量',
     compareSubject: 'retrieved_contexts（检索到的上下文）  vs  reference（标准参考答案）',
     compareMethod: '1. LLM 将 reference（标准答案）分解成多个关键要点\n2. 对每个要点，LLM 判断 retrieved_contexts 中是否有对应的信息支撑\n3. 分数 = 被检索覆盖的要点数 / 标准答案的总要点数',
     scoreRange: '0.0 ~ 1.0（1.0 表示检索内容完全覆盖了标准答案的所有要点）',
@@ -39,7 +39,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   context_precision: {
     name: 'context_precision',
     displayName: '上下文精确度 (Context Precision)',
-    category: 'RAG',
+    category: '检索质量',
     compareSubject: 'retrieved_contexts（检索到的上下文）  vs  reference（标准参考答案）',
     compareMethod: '1. LLM 逐一检查每段检索到的上下文是否对回答问题有用\n2. 有用的上下文排在前面得分更高（考虑排序权重）\n3. 分数 = 加权的有用上下文占比',
     scoreRange: '0.0 ~ 1.0（1.0 表示检索到的全是有用信息，且排序正确）',
@@ -49,7 +49,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   answer_relevancy: {
     name: 'answer_relevancy',
     displayName: '回答相关性 (Answer Relevancy)',
-    category: 'RAG',
+    category: '回答质量',
     compareSubject: 'response（模型回答）  vs  user_input（用户问题）',
     compareMethod: '1. LLM 根据 response 反向生成 N 个可能的问题\n2. 计算这些生成问题与原始 user_input 的语义相似度（embedding 余弦距离）\n3. 分数 = 平均相似度',
     scoreRange: '0.0 ~ 1.0（1.0 表示回答完全切题，没有跑题内容）',
@@ -59,7 +59,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   factual_correctness: {
     name: 'factual_correctness',
     displayName: '事实正确性 (Factual Correctness)',
-    category: 'RAG',
+    category: '生成可信度',
     compareSubject: 'response（模型回答）  vs  reference（标准参考答案）',
     compareMethod: '1. LLM 将 response 和 reference 分别分解为原子事实陈述\n2. 对每个 response 中的陈述，判断是否与 reference 中的陈述一致\n3. 分数 = 一致的陈述数 / response 中的总陈述数',
     scoreRange: '0.0 ~ 1.0（1.0 表示回答在事实层面与标准答案完全一致）',
@@ -69,7 +69,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   answer_completeness: {
     name: 'answer_completeness',
     displayName: '答案完整性 (Answer Completeness)',
-    category: 'RAG',
+    category: '回答质量',
     compareSubject: 'response（模型回答）  vs  reference（标准参考答案）',
     compareMethod: '1. LLM 将 reference 拆解成必须覆盖的关键要点\n2. 检查 response 是否覆盖这些要点，以及是否遗漏关键条件、例外或操作步骤\n3. 分数 = 已覆盖关键要点的比例，并结合遗漏严重程度做扣分\n\n它更关注“有没有答全”，与 factual_correctness 的“事实是否说对”互补。',
     scoreRange: '0.0 ~ 1.0（1.0 表示回答覆盖标准答案的全部关键要点）',
@@ -79,7 +79,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   retrieval_hit_rate: {
     name: 'retrieval_hit_rate',
     displayName: '召回命中率 (HitRate@K)',
-    category: 'RAG 检索',
+    category: '检索单测扩展',
     compareSubject: 'retrieved_context_ids（实际召回文档ID）  vs  reference_context_ids（期望文档ID）',
     compareMethod: '1. 取 Top-K 的 retrieved_context_ids\n2. 判断其中是否至少命中 1 个 reference_context_ids\n3. 命中返回 1，未命中返回 0\n4. 多条样本求平均后得到整体召回成功率\n\n这是确定性代码指标，不依赖 LLM 评判。',
     scoreRange: '0 或 1；报告平均值为 0.0 ~ 1.0（越高表示检索越容易召回正确文档）',
@@ -89,7 +89,7 @@ const METRIC_HELP: Record<string, MetricHelpInfo> = {
   retrieval_mrr: {
     name: 'retrieval_mrr',
     displayName: '检索排序质量 (MRR)',
-    category: 'RAG 检索',
+    category: '检索单测扩展',
     compareSubject: 'retrieved_context_ids（实际召回文档ID及排序）  vs  reference_context_ids（期望文档ID）',
     compareMethod: '1. 按顺序扫描 retrieved_context_ids\n2. 找到第一个命中的 reference_context_ids\n3. 分数 = 1 / 命中位置排名\n4. 如果没有命中，则分数为 0\n\n它不仅看是否召回，还看正确文档是否排在前面。',
     scoreRange: '0.0 ~ 1.0（1.0 表示第 1 位就是正确文档；0 表示完全未命中）',

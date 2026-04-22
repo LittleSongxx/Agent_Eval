@@ -11,26 +11,18 @@ import { useParams, useNavigate } from 'react-router-dom';
 import type { ReportSummary, EvalRowResult, PaginatedResponse } from '../types';
 import * as api from '../services/api';
 import { MetricHelpDrawer, MetricHelpIcon } from '../components/MetricHelpDrawer';
+import { getMetricInfo, groupMetricNames, type MetricLayer } from '../utils/metricLayers';
 
 const { Title, Text, Paragraph } = Typography;
 
-const METRIC_CN: Record<string, { name: string; short: string; subjects: string }> = {
-  faithfulness:        { name: '忠实度', short: 'AI回答 vs AI检索的上下文', subjects: '评测LLM检查：被测系统的回答(response)里说的每句话，是否都能从被测系统检索到的文档(retrieved_contexts)里找到依据' },
-  context_recall:      { name: '上下文召回率', short: 'AI检索的上下文 vs 你写的标准答案', subjects: '评测LLM检查：你写的标准答案(reference)里的要点，是否都在被测系统检索的文档(retrieved_contexts)里出现了' },
-  context_precision:   { name: '上下文精确度', short: 'AI检索的上下文 vs 你写的标准答案', subjects: '评测LLM检查：被测系统检索到的文档(retrieved_contexts)里有多少对回答问题真正有用' },
-  answer_relevancy:    { name: '回答相关性', short: 'AI回答 vs 用户问题', subjects: '评测LLM检查：被测系统的回答(response)是否切题、与用户提问(user_input)相关' },
-  factual_correctness: { name: '事实正确性', short: 'AI回答 vs 你写的标准答案', subjects: '评测LLM检查：被测系统的回答(response)在事实层面与你写的标准答案(reference)是否一致' },
-  answer_completeness: { name: '答案完整性', short: 'AI回答 vs 你写的标准答案', subjects: '评测LLM检查：被测系统的回答(response)是否覆盖标准答案(reference)中的关键要点、条件和步骤' },
-  retrieval_hit_rate:  { name: '召回命中率', short: '召回文档ID vs 期望文档ID', subjects: '代码指标检查：被测系统召回的文档ID(retrieved_context_ids)是否命中你标注的期望文档ID(reference_context_ids)' },
-  retrieval_mrr:       { name: '检索排序质量', short: '召回排序 vs 期望文档ID', subjects: '代码指标检查：第一个正确文档在召回列表中的排名，越靠前分数越高' },
-  tool_call_accuracy:  { name: '工具调用准确度', short: 'AI实际调用 vs 你写的期望调用', subjects: '直接对比：被测Agent在对话中实际调用的工具，与你标注的期望工具(reference_tool_calls)的名称和参数是否一致' },
-  agent_goal_accuracy: { name: '目标达成度', short: '对话结果 vs 你写的期望目标', subjects: '评测LLM阅读整段对话，判断被测Agent最终是否达成了你标注的期望目标(reference)' },
-  topic_adherence:     { name: '话题遵守度', short: '对话话题 vs 你写的允许话题', subjects: '评测LLM检查：对话中讨论的话题是否在你标注的允许范围(reference_topics)内' },
-  harmfulness:         { name: '有害性检测', short: '评测LLM独立判断AI回答', subjects: '评测LLM阅读被测系统的回答(response)，判断内容是否有害' },
-  coherence:           { name: '连贯性', short: '评测LLM独立判断AI回答', subjects: '评测LLM阅读被测系统的回答(response)，判断是否逻辑通顺' },
-};
-
-const getMetricCN = (name: string) => METRIC_CN[name] || { name: name, short: '', subjects: '' };
+const layerHeaderCell = (group: MetricLayer, level: 'group' | 'metric' = 'group') => ({
+  style: {
+    background: level === 'group' ? group.headerBg : group.subHeaderBg,
+    borderBottom: `2px solid ${group.headerBorder}`,
+    color: group.headerText,
+    fontWeight: 600,
+  },
+});
 
 const formatScore = (score: any, metricName: string): { display: string; color: string; explain: string } => {
   if (score === null || score === undefined) return { display: 'N/A', color: '#999', explain: '指标计算出错，无法得出分数' };
@@ -183,20 +175,32 @@ const ReportDetailPage: React.FC = () => {
         r.is_pass === true ? <Tag color="success">通过</Tag> :
         r.is_pass === false ? <Tag color="error">不通过</Tag> : <Tag>-</Tag>,
     },
-    ...metricNames.map((metric) => ({
+    ...groupMetricNames(metricNames).map((group) => ({
       title: (
         <Space size={4}>
-          <span>{getMetricCN(metric).name}</span>
-          {metricHelp(metric)}
+          <Tag color={group.color}>{group.name}</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>{group.description}</Text>
         </Space>
       ),
-      key: metric, width: 130,
-      render: (_: unknown, record: EvalRowResult) => {
-        const ms = record.metric_scores?.[metric];
-        if (!ms) return <Text type="secondary">-</Text>;
-        const { display, color } = formatScore(ms.score, metric);
-        return <Text style={{ color, fontWeight: 500 }}>{display}</Text>;
-      },
+      key: group.key,
+      onHeaderCell: () => layerHeaderCell(group, 'group'),
+      children: group.metrics.map((metric) => ({
+        title: (
+          <Space size={4}>
+            <span>{getMetricInfo(metric).shortName}</span>
+            {metricHelp(metric)}
+          </Space>
+        ),
+        key: metric,
+        width: 130,
+        onHeaderCell: () => layerHeaderCell(group, 'metric'),
+        render: (_: unknown, record: EvalRowResult) => {
+          const ms = record.metric_scores?.[metric];
+          if (!ms) return <Text type="secondary">-</Text>;
+          const { display, color } = formatScore(ms.score, metric);
+          return <Text style={{ color, fontWeight: 500 }}>{display}</Text>;
+        },
+      })),
     })),
     { title: '耗时', dataIndex: 'execution_time_ms', key: 'time', width: 70, render: (v: number | null) => v != null ? `${v}ms` : '-' },
     {
@@ -207,7 +211,8 @@ const ReportDetailPage: React.FC = () => {
 
   const renderOverview = () => {
     if (!summary) return null;
-    const metricData = Object.entries(summary.metric_summary || {}).map(([name, s]) => ({ key: name, metric: name, ...s }));
+    const metricSummary = summary.metric_summary || {};
+    const metricGroups = groupMetricNames(Object.keys(metricSummary));
     const duration = evalTask?.started_at && evalTask?.finished_at
       ? Math.round((new Date(evalTask.finished_at).getTime() - new Date(evalTask.started_at).getTime()) / 1000) : null;
 
@@ -220,22 +225,40 @@ const ReportDetailPage: React.FC = () => {
           <Col span={6}><Card><Statistic title="不通过" value={summary.fail_count} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
         </Row>
 
-        <Card title="各指标得分概览" extra={<Text type="secondary">分数范围 0~1，越高越好</Text>} style={{ marginBottom: 24 }}>
-          <Table rowKey="metric" dataSource={metricData} pagination={false} size="small" columns={[
-            {
-              title: '指标', dataIndex: 'metric', key: 'metric', width: 200,
-              render: (name: string) => (
-                <Space>
-                  <Text strong>{getMetricCN(name).name}</Text>
-                  {metricHelp(name)}
-                </Space>
-              ),
-            },
-            { title: '比较方式', key: 'compare', render: (_: unknown, r: any) => <Text type="secondary">{getMetricCN(r.metric).short}</Text> },
-            { title: '平均分', dataIndex: 'mean', key: 'mean', width: 100, render: (v: number) => v != null ? <Text strong>{(v * 100).toFixed(1)}%</Text> : '-' },
-            { title: '最低 / 最高', key: 'range', width: 120, render: (_: unknown, r: any) => r.min != null ? `${(r.min*100).toFixed(1)}% ~ ${(r.max*100).toFixed(1)}%` : '-' },
-            { title: '通过率', dataIndex: 'pass_rate', key: 'pass_rate', width: 100, render: (v: number) => v != null ? <Text style={{ color: passRateColor(v) }}>{(v*100).toFixed(1)}%</Text> : '-' },
-          ]} />
+        <Card title="各指标得分概览" extra={<Text type="secondary">按 RAG 评测层级归类，分数范围 0~1，越高越好</Text>} style={{ marginBottom: 24 }}>
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            {metricGroups.map((group) => {
+              const dataSource = group.metrics.map((name) => ({
+                key: name,
+                metric: name,
+                ...metricSummary[name],
+              }));
+              return (
+                <Card
+                  key={group.key}
+                  size="small"
+                  title={<Space><Tag color={group.color}>{group.name}</Tag><Text type="secondary">{group.description}</Text></Space>}
+                >
+                  <Table rowKey="metric" dataSource={dataSource} pagination={false} size="small" columns={[
+                    {
+                      title: '指标', dataIndex: 'metric', key: 'metric', width: 200,
+                      onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                      render: (name: string) => (
+                        <Space>
+                          <Text strong>{getMetricInfo(name).shortName}</Text>
+                          {metricHelp(name)}
+                        </Space>
+                      ),
+                    },
+                    { title: '比较方式', key: 'compare', onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (_: unknown, r: any) => <Text type="secondary">{getMetricInfo(r.metric).short}</Text> },
+                    { title: '平均分', dataIndex: 'mean', key: 'mean', width: 100, onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (v: number) => v != null ? <Text strong>{(v * 100).toFixed(1)}%</Text> : '-' },
+                    { title: '最低 / 最高', key: 'range', width: 120, onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (_: unknown, r: any) => r.min != null ? `${(r.min*100).toFixed(1)}% ~ ${(r.max*100).toFixed(1)}%` : '-' },
+                    { title: '通过率', dataIndex: 'pass_rate', key: 'pass_rate', width: 100, onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (v: number) => v != null ? <Text style={{ color: passRateColor(v) }}>{(v*100).toFixed(1)}%</Text> : '-' },
+                  ]} />
+                </Card>
+              );
+            })}
+          </Space>
         </Card>
 
         <Card title="基本信息">
@@ -255,6 +278,7 @@ const ReportDetailPage: React.FC = () => {
   const renderDrawer = () => {
     if (!selectedRow) return null;
     const scores = selectedRow.metric_scores || {};
+    const scoreGroups = groupMetricNames(Object.keys(scores));
 
     return (
       <>
@@ -267,59 +291,76 @@ const ReportDetailPage: React.FC = () => {
         <Title level={5}>📊 指标评分详情</Title>
         <Alert message="每个指标由评测 LLM（如通义千问）作为评判者，阅读您的数据后独立打分。" type="info" showIcon style={{ marginBottom: 12 }} />
 
-        <Table
-          rowKey="metric"
-          dataSource={Object.entries(scores).map(([metric, result]) => {
-            const cn = getMetricCN(metric);
-            const { display, color, explain } = formatScore(result.score, metric);
-            return { metric, cn, result, display, color, explain };
-          })}
-          pagination={false}
-          size="small"
-          bordered
-          columns={[
-            {
-              title: '指标', width: 140, dataIndex: 'metric',
-              render: (_: unknown, r: any) => (
-                <Space size={4} align="start">
-                  <div>
-                    <Text strong>{r.cn.name || r.metric}</Text>
-                    <div style={{ fontSize: 11, color: '#999', lineHeight: 1.3, marginTop: 2 }}>{r.cn.short}</div>
-                  </div>
-                  {metricHelp(r.metric)}
-                </Space>
-              ),
-            },
-            {
-              title: '得分', width: 90, dataIndex: 'display',
-              render: (_: unknown, r: any) => (
-                <Text style={{ color: r.color, fontWeight: 600, fontSize: 15 }}>{r.display}</Text>
-              ),
-            },
-            {
-              title: '等级', width: 70, dataIndex: 'explain',
-              render: (_: unknown, r: any) => {
-                const level = r.explain.split('（')[0];
-                const tagColor = r.color === '#52c41a' ? 'success' : r.color === '#ff4d4f' ? 'error' : r.color === '#faad14' ? 'warning' : 'processing';
-                return <Tag color={tagColor}>{level}</Tag>;
-              },
-            },
-            {
-              title: '评判标准', dataIndex: 'subjects', ellipsis: false,
-              render: (_: unknown, r: any) => (
-                <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>{r.cn.subjects || '自定义指标'}</Text>
-              ),
-            },
-            {
-              title: 'LLM 评判理由', dataIndex: 'reason',
-              render: (_: unknown, r: any) => (
-                r.result.reason
-                  ? <Text style={{ fontSize: 12, lineHeight: 1.5 }}>{r.result.reason}</Text>
-                  : <Text type="secondary" style={{ fontSize: 12 }}>未返回理由</Text>
-              ),
-            },
-          ]}
-        />
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          {scoreGroups.map((group) => (
+            <Card
+              key={group.key}
+              size="small"
+              title={<Space><Tag color={group.color}>{group.name}</Tag><Text type="secondary">{group.description}</Text></Space>}
+            >
+              <Table
+                rowKey="metric"
+                dataSource={group.metrics.map((metric) => {
+                  const result = scores[metric];
+                  const info = getMetricInfo(metric);
+                  const { display, color, explain } = formatScore(result.score, metric);
+                  return { metric, info, result, display, color, explain };
+                })}
+                pagination={false}
+                size="small"
+                bordered
+                columns={[
+                  {
+                    title: '指标', width: 140, dataIndex: 'metric',
+                    onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                    render: (_: unknown, r: any) => (
+                      <Space size={4} align="start">
+                        <div>
+                          <Text strong>{r.info.shortName || r.metric}</Text>
+                          <div style={{ fontSize: 11, color: '#999', lineHeight: 1.3, marginTop: 2 }}>{r.info.short}</div>
+                        </div>
+                        {metricHelp(r.metric)}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: '得分', width: 90, dataIndex: 'display',
+                    onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                    render: (_: unknown, r: any) => (
+                      <Text style={{ color: r.color, fontWeight: 600, fontSize: 15 }}>{r.display}</Text>
+                    ),
+                  },
+                  {
+                    title: '等级', width: 70, dataIndex: 'explain',
+                    onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                    render: (_: unknown, r: any) => {
+                      const level = r.explain.split('（')[0];
+                      const tagColor = r.color === '#52c41a' ? 'success' : r.color === '#ff4d4f' ? 'error' : r.color === '#faad14' ? 'warning' : 'processing';
+                      return <Tag color={tagColor}>{level}</Tag>;
+                    },
+                  },
+                  {
+                    title: '评判标准', dataIndex: 'subjects', ellipsis: false,
+                    onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                    render: (_: unknown, r: any) => (
+                      <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>{r.info.subjects || '自定义指标'}</Text>
+                    ),
+                  },
+                  {
+                    title: group.key === 'retrieval_unit' ? '计算说明' : 'LLM 评判理由',
+                    dataIndex: 'reason',
+                    onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                    render: (_: unknown, r: any) => (
+                      r.result.reason
+                        ? <Text style={{ fontSize: 12, lineHeight: 1.5 }}>{r.result.reason}</Text>
+                        : <Text type="secondary" style={{ fontSize: 12 }}>未返回理由</Text>
+                    ),
+                  },
+                ]}
+              />
+            </Card>
+          ))}
+        </Space>
 
         <Divider />
 

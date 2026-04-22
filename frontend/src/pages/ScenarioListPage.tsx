@@ -28,8 +28,9 @@ import {
 import type { EvalScenario, MetricDefinition } from '../types';
 import * as api from '../services/api';
 import { MetricHelpButton, MetricHelpIcon, MetricHelpDrawer } from '../components/MetricHelpDrawer';
+import { getMetricInfo, getMetricLayer, getMetricLayerIndex, groupMetricNames, isMetricAvailableForScene } from '../utils/metricLayers';
 
-const { Title, Paragraph } = Typography;
+const { Title, Paragraph, Text } = Typography;
 
 interface SelectedMetric {
   metric_definition_id: number;
@@ -146,13 +147,62 @@ const ScenarioListPage: React.FC = () => {
     }
   };
 
-  const filteredMetrics = metrics.filter(
-    (m) => m.category === selectedSceneType || m.category === 'custom' || m.category === 'general'
-  );
+  const filteredMetrics = metrics
+    .filter((m) => isMetricAvailableForScene(m, selectedSceneType))
+    .sort((a, b) => {
+      const layerDiff = getMetricLayerIndex(a.name) - getMetricLayerIndex(b.name);
+      if (layerDiff !== 0) {
+        return layerDiff;
+      }
+      return a.display_name.localeCompare(b.display_name, 'zh-CN');
+    });
 
   const getMetricDisplayName = (metricDefId: number) => {
     const def = metrics.find((m) => m.id === metricDefId);
     return def?.display_name || `指标#${metricDefId}`;
+  };
+
+  const getScenarioMetricName = (scenarioMetric: any) =>
+    scenarioMetric.metric_definition?.name || `metric_${scenarioMetric.metric_definition_id}`;
+
+  const getScenarioMetricLabel = (scenarioMetric: any) => {
+    const metricName = getScenarioMetricName(scenarioMetric);
+    const info = getMetricInfo(metricName);
+    if (info.displayName !== metricName) {
+      return info.shortName;
+    }
+    return scenarioMetric.metric_definition?.display_name || getMetricDisplayName(scenarioMetric.metric_definition_id);
+  };
+
+  const renderScenarioMetricGroups = (metricList: any[], compact = false) => {
+    if (!metricList || metricList.length === 0) return <Tag>无指标</Tag>;
+    const metricByName = new Map(
+      metricList.map((scenarioMetric: any) => [getScenarioMetricName(scenarioMetric), scenarioMetric])
+    );
+
+    return (
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        {groupMetricNames(metricList.map(getScenarioMetricName)).map((group) => (
+          <div key={group.key}>
+            <Tag color={group.color} style={{ marginRight: 8 }}>{group.name}</Tag>
+            <Space size={[4, 4]} wrap>
+              {group.metrics.map((metricName) => {
+                const scenarioMetric: any = metricByName.get(metricName);
+                return (
+                  <Tag key={scenarioMetric?.id || metricName} color="cyan" style={{ marginRight: 0 }}>
+                    {getScenarioMetricLabel(scenarioMetric)}
+                    {!compact && scenarioMetric?.pass_threshold != null && (
+                      <span style={{ color: '#999', marginLeft: 4 }}>≥{scenarioMetric.pass_threshold}</span>
+                    )}
+                    <MetricHelpIcon metricName={metricName} onClick={() => setHelpMetric(metricName)} />
+                  </Tag>
+                );
+              })}
+            </Space>
+          </div>
+        ))}
+      </Space>
+    );
   };
 
   const columns = [
@@ -176,26 +226,7 @@ const ScenarioListPage: React.FC = () => {
       title: '评测指标',
       dataIndex: 'metrics',
       key: 'metrics_display',
-      render: (metricList: any[]) => {
-        if (!metricList || metricList.length === 0) return <Tag>无指标</Tag>;
-        return (
-          <Space size={[4, 4]} wrap>
-            {metricList.map((sm: any) => {
-              const mName = sm.metric_definition?.name || '';
-              const mDisplayName = sm.metric_definition?.display_name || getMetricDisplayName(sm.metric_definition_id);
-              return (
-                <Tag key={sm.id} color="cyan" style={{ marginRight: 0 }}>
-                  {mDisplayName}
-                  {sm.pass_threshold != null && (
-                    <span style={{ color: '#999', marginLeft: 4 }}>≥{sm.pass_threshold}</span>
-                  )}
-                  <MetricHelpIcon metricName={mName} onClick={() => setHelpMetric(mName)} />
-                </Tag>
-              );
-            })}
-          </Space>
-        );
-      },
+      render: (metricList: any[]) => renderScenarioMetricGroups(metricList),
     },
     {
       title: '创建时间',
@@ -239,10 +270,13 @@ const ScenarioListPage: React.FC = () => {
                   {preset.description}
                 </Paragraph>
                 {matched && (
-                  <Badge
-                    count={`${matched.metrics?.length || 0} 个指标`}
-                    style={{ backgroundColor: '#1677ff' }}
-                  />
+                  <Space direction="vertical" size={8}>
+                    <Badge
+                      count={`${matched.metrics?.length || 0} 个指标`}
+                      style={{ backgroundColor: '#1677ff' }}
+                    />
+                    {renderScenarioMetricGroups(matched.metrics || [], true)}
+                  </Space>
                 )}
               </Card>
             </Col>
@@ -319,15 +353,27 @@ const ScenarioListPage: React.FC = () => {
             optionLabelProp="label"
             options={filteredMetrics.map((m) => {
               const desc = m.config?.description || '';
+              const layer = getMetricLayer(m.name);
+              const info = getMetricInfo(m.name);
               return {
                 label: m.display_name,
                 value: m.id,
                 desc,
+                layer,
+                info,
               };
             })}
             optionRender={(option) => (
               <div>
-                <div style={{ fontWeight: 500 }}>{option.label}</div>
+                <div style={{ fontWeight: 500 }}>
+                  <Tag color={option.data.layer.color} style={{ marginRight: 6 }}>
+                    {option.data.layer.name}
+                  </Tag>
+                  {option.label}
+                  {option.data.info.defaultEnabled === false && (
+                    <Text type="secondary" style={{ marginLeft: 6, fontSize: 12 }}>默认不启用</Text>
+                  )}
+                </div>
                 {option.data.desc && (
                   <div style={{ fontSize: 12, color: '#888', lineHeight: 1.4 }}>
                     {option.data.desc}
@@ -347,36 +393,48 @@ const ScenarioListPage: React.FC = () => {
           />
           {selectedMetrics.length > 0 && (
             <Card size="small" title="指标配置">
-              {selectedMetrics.map((sm) => {
-                const def = metrics.find((m) => m.id === sm.metric_definition_id);
-                return (
-                  <div key={sm.metric_definition_id} style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 12 }}>
-                    <span style={{ width: 220, flexShrink: 0 }}>
-                      {def?.display_name ?? sm.metric_definition_id}
-                      {def?.name && <MetricHelpIcon metricName={def.name} onClick={() => setHelpMetric(def.name)} />}
-                    </span>
-                    <span>权重:</span>
-                    <InputNumber
-                      min={0} max={10} step={0.1}
-                      value={sm.weight}
-                      onChange={(v) => setSelectedMetrics((prev) =>
-                        prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, weight: v ?? 1 } : m)
-                      )}
-                      style={{ width: 80 }}
-                    />
-                    <span>通过阈值:</span>
-                    <InputNumber
-                      min={0} max={1} step={0.05}
-                      value={sm.pass_threshold ?? undefined}
-                      onChange={(v) => setSelectedMetrics((prev) =>
-                        prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, pass_threshold: v } : m)
-                      )}
-                      placeholder="可选"
-                      style={{ width: 80 }}
-                    />
+              <Space direction="vertical" style={{ width: '100%' }} size={12}>
+                {groupMetricNames(selectedMetrics.map((sm) => metrics.find((m) => m.id === sm.metric_definition_id)?.name || '').filter(Boolean)).map((group) => (
+                  <div key={group.key}>
+                    <div style={{ marginBottom: 8 }}>
+                      <Tag color={group.color}>{group.name}</Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{group.description}</Text>
+                    </div>
+                    {group.metrics.map((metricName) => {
+                      const def = metrics.find((m) => m.name === metricName);
+                      const sm = selectedMetrics.find((m) => m.metric_definition_id === def?.id);
+                      if (!def || !sm) return null;
+                      return (
+                        <div key={sm.metric_definition_id} style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 12 }}>
+                          <span style={{ width: 220, flexShrink: 0 }}>
+                            {def.display_name}
+                            <MetricHelpIcon metricName={def.name} onClick={() => setHelpMetric(def.name)} />
+                          </span>
+                          <span>权重:</span>
+                          <InputNumber
+                            min={0} max={10} step={0.1}
+                            value={sm.weight}
+                            onChange={(v) => setSelectedMetrics((prev) =>
+                              prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, weight: v ?? 1 } : m)
+                            )}
+                            style={{ width: 80 }}
+                          />
+                          <span>通过阈值:</span>
+                          <InputNumber
+                            min={0} max={1} step={0.05}
+                            value={sm.pass_threshold ?? undefined}
+                            onChange={(v) => setSelectedMetrics((prev) =>
+                              prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, pass_threshold: v } : m)
+                            )}
+                            placeholder="可选"
+                            style={{ width: 80 }}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                ))}
+              </Space>
             </Card>
           )}
         </div>
