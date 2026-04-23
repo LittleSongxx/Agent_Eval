@@ -145,6 +145,49 @@ def test_seed_rag_template_has_p0_metric_layer(client, db):
     assert "reference_context_ids" in field_names
 
 
+def test_seed_agent_and_multi_turn_templates_have_core_metric_layers(client, db):
+    """Preset Agent and multi-turn scenarios should include the new core metrics."""
+    from app.models.dataset import Dataset
+    from app.models.scenario import EvalScenario
+    from app.seed import run_seed
+
+    run_seed(db)
+    db.commit()
+
+    agent = db.query(EvalScenario).filter(EvalScenario.scene_type == "agent").first()
+    agent_metric_names = {item.metric_definition.name for item in agent.metrics}
+    assert {
+        "task_completion",
+        "tool_call_accuracy",
+        "argument_correctness",
+        "step_efficiency",
+        "agent_goal_accuracy",
+    }.issubset(agent_metric_names)
+
+    multi_turn = db.query(EvalScenario).filter(EvalScenario.scene_type == "multi_turn").first()
+    multi_turn_metric_names = {item.metric_definition.name for item in multi_turn.metrics}
+    assert {
+        "topic_adherence",
+        "turn_relevancy",
+        "conversation_completeness",
+        "knowledge_retention",
+        "role_adherence",
+    }.issubset(multi_turn_metric_names)
+
+    dataset = db.query(Dataset).filter(Dataset.name == "多轮对话示例数据集").first()
+    field_names = {field["name"] for field in dataset.field_schema}
+    assert "reference_role" in field_names
+    assert "retrieved_contexts" in field_names
+    assert all(row.data.get("reference_role") for row in dataset.rows)
+    assert all(row.data.get("retrieved_contexts") for row in dataset.rows)
+
+    agent_dataset = db.query(Dataset).filter(Dataset.name == "Agent 工具调用示例数据集").first()
+    agent_field_names = {field["name"] for field in agent_dataset.field_schema}
+    assert "retrieved_contexts" in agent_field_names
+    assert "reference_role" in agent_field_names
+    assert all(row.data.get("retrieved_contexts") for row in agent_dataset.rows)
+
+
 def test_deterministic_retrieval_metrics_score_without_llm():
     """ID-based retrieval metrics should close the loop when document IDs exist."""
     from types import SimpleNamespace
@@ -176,3 +219,120 @@ def test_deterministic_retrieval_metrics_score_without_llm():
     )
     assert kind == "simple"
     assert result.value == 0.3333
+
+
+def test_agent_deterministic_metrics_score_without_llm():
+    """Agent tool/argument/step metrics should produce explainable deterministic scores."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import build_metric
+
+    row_data = {
+        "user_input": [
+            {"type": "human", "content": "查订单并提交退货"},
+            {"type": "ai", "content": "", "tool_calls": [{"name": "query_order", "args": {"order_id": "ORD-1"}}]},
+            {"type": "tool", "content": "{}"},
+            {"type": "ai", "content": "", "tool_calls": [{"name": "create_return", "args": {"order_id": "ORD-2", "item": "手机壳"}}]},
+            {"type": "ai", "content": "", "tool_calls": [{"name": "query_order", "args": {"order_id": "ORD-1"}}]},
+        ],
+        "reference_tool_calls": [
+            {"name": "query_order", "args": {"order_id": "ORD-1"}},
+            {"name": "create_return", "args": {"order_id": "ORD-1", "item": "手机壳"}},
+        ],
+    }
+
+    metric_def = SimpleNamespace(
+        name="tool_call_accuracy",
+        metric_type="builtin_tool_call_accuracy",
+        config={},
+    )
+    kind, metric = build_metric(metric_def, llm=None)
+    assert kind == "simple"
+    result = asyncio.run(metric.ascore(row_data, None))
+    assert result.value == 0.5
+    assert "完全匹配 1 个" in result.reason
+
+    metric_def = SimpleNamespace(
+        name="argument_correctness",
+        metric_type="builtin_argument_correctness",
+        config={},
+    )
+    kind, metric = build_metric(metric_def, llm=None)
+    result = asyncio.run(metric.ascore(row_data, None))
+    assert kind == "simple"
+    assert result.value == 0.75
+    assert "参数平均匹配度" in result.reason
+
+    metric_def = SimpleNamespace(
+        name="step_efficiency",
+        metric_type="builtin_step_efficiency",
+        config={},
+    )
+    kind, metric = build_metric(metric_def, llm=None)
+    result = asyncio.run(metric.ascore(row_data, None))
+    assert kind == "simple"
+    assert result.value == 0.6667
+    assert "实际工具步骤 3 个" in result.reason
+
+
+def test_new_llm_metrics_validate_required_fields_and_use_judge_payload():
+    """New Judge metrics should validate required fields and send concrete payloads."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import build_metric
+
+    class FakeJudge:
+        def __init__(self):
+            self.payloads = []
+
+        async def judge_json(self, payload):
+            self.payloads.append(payload)
+            return {"score": 0.82, "reason": "根据样本字段，回复满足该指标的大部分要求。"}
+
+    metric_def = SimpleNamespace(
+        name="role_adherence",
+        display_name="角色遵守度 (Role Adherence)",
+        metric_type="builtin_role_adherence",
+        config={},
+    )
+    kind, metric = build_metric(metric_def, llm=None)
+    assert kind == "llm"
+
+    missing_result = asyncio.run(metric.ascore({"user_input": []}, FakeJudge()))
+    assert missing_result.value is None
+    assert "reference_role" in missing_result.reason
+
+    judge = FakeJudge()
+    result = asyncio.run(
+        metric.ascore(
+            {
+                "user_input": [{"type": "human", "content": "能帮我直接付款吗？"}],
+                "reference_role": "客服助手，不能替用户付款。",
+            },
+            judge,
+        )
+    )
+    assert result.value == 0.82
+    assert result.reason
+    assert judge.payloads[0]["metric"]["required_fields"] == ["user_input", "reference_role"]
+    assert "reference_role" in judge.payloads[0]["sample"]
+
+    metric_def = SimpleNamespace(
+        name="contextual_relevancy",
+        display_name="上下文相关性 (Contextual Relevancy)",
+        metric_type="builtin_contextual_relevancy",
+        config={},
+    )
+    kind, metric = build_metric(metric_def, llm=None)
+    assert kind == "llm"
+    judge = FakeJudge()
+    result = asyncio.run(
+        metric.ascore(
+            {"user_input": "退货政策是什么？", "retrieved_contexts": ["7 天内可退货。"]},
+            judge,
+        )
+    )
+    assert result.value == 0.82
+    assert judge.payloads[0]["metric"]["name"] == "contextual_relevancy"

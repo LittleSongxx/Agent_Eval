@@ -28,6 +28,12 @@ RAG_METRIC_LAYER_META = {
         "default_enabled": True,
         "required_fields": ["user_input", "retrieved_contexts", "reference"],
     },
+    "contextual_relevancy": {
+        "layer": "检索质量",
+        "layer_key": "retrieval_quality",
+        "default_enabled": False,
+        "required_fields": ["user_input", "retrieved_contexts"],
+    },
     "faithfulness": {
         "layer": "生成可信度",
         "layer_key": "generation_trust",
@@ -204,15 +210,29 @@ def _upgrade_existing_sample_datasets(db: Session) -> None:
                 {"name": "reference", "type": "text", "required": True, "description": "期望 Agent 最终应达成的目标"},
                 {"name": "reference_tool_calls", "type": "tool_call_list", "required": True, "description": "期望 Agent 应该调用的工具列表，每个含 name 和 args"},
                 {"name": "reference_topics", "type": "text_list", "required": False, "description": "该 Agent 任务允许围绕的话题列表，用于 Topic Adherence 等多轮对话指标"},
+                {"name": "reference_role", "type": "text", "required": False, "description": "Agent 在任务中应遵守的角色和职责边界"},
+                {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "任务相关的工具/业务背景资料，用于 Turn Faithfulness 等可信度指标"},
             ],
         )
         _merge_dataset_row_data(
             db,
             agent_dataset,
             [
-                {"reference_topics": ["订单查询", "物流跟踪", "客服售后"]},
-                {"reference_topics": ["订单查询", "退货申请", "售后服务"]},
-                {"reference_topics": ["天气查询", "消息发送", "任务执行"]},
+                {
+                    "reference_topics": ["订单查询", "物流跟踪", "客服售后"],
+                    "reference_role": "客服 Agent：只能基于工具返回结果答复订单状态，不编造物流信息。",
+                    "retrieved_contexts": ["订单查询工具 query_order 返回订单状态和快递单号后，Agent 应把状态、快递单号和预计送达时间告知用户。"],
+                },
+                {
+                    "reference_topics": ["订单查询", "退货申请", "售后服务"],
+                    "reference_role": "客服 Agent：先查询订单，再按工具结果提交退货申请，不越权承诺即时退款。",
+                    "retrieved_contexts": ["退货流程要求先 query_order 确认订单和商品，再 create_return 创建退货申请；退款以工具返回和售后规则为准。"],
+                },
+                {
+                    "reference_topics": ["天气查询", "消息发送", "任务执行"],
+                    "reference_role": "任务 Agent：按用户要求查询天气并发送消息，只报告工具返回的天气和发送结果。",
+                    "retrieved_contexts": ["天气查询工具返回城市、日期、天气、温度和风力；发送消息工具返回 success=true 时才可告知已发送。"],
+                },
             ],
         )
 
@@ -224,17 +244,147 @@ def _upgrade_existing_sample_datasets(db: Session) -> None:
                 {"name": "user_input", "type": "conversation", "required": True, "description": "完整多轮对话记录（Human 和 AI 交替对话）"},
                 {"name": "reference", "type": "text", "required": False, "description": "期望的对话最终结果"},
                 {"name": "reference_topics", "type": "text_list", "required": True, "description": "对话应围绕的话题列表，Topic Adherence 指标必需"},
+                {"name": "reference_role", "type": "text", "required": True, "description": "AI 在对话中应遵守的角色、职责边界和语气要求"},
+                {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "多轮对话可依据的业务资料，用于 Turn Faithfulness 等可信度指标"},
             ],
         )
         _merge_dataset_row_data(
             db,
             multi_turn_dataset,
             [
-                {"reference_topics": ["退货政策", "售后服务"]},
-                {"reference_topics": ["产品故障", "保修政策", "维修服务"]},
-                {"reference_topics": ["促销活动", "商品推荐", "购物指导"]},
+                {
+                    "reference_topics": ["退货政策", "售后服务"],
+                    "reference_role": "电商客服助手：专业、礼貌，只处理售前售后咨询，不越权承诺无法确认的结果。",
+                    "retrieved_contexts": ["退货政策：商品签收后 7 天内可无理由退货，需保持商品完好；退货申请提交后退款通常 3 个工作日内原路返回。"],
+                },
+                {
+                    "reference_topics": ["产品故障", "保修政策", "维修服务"],
+                    "reference_role": "电商客服助手：专业、安抚用户，依据保修和三包规则提供维修或换货建议。",
+                    "retrieved_contexts": ["三包政策：购买 15 天内出现性能故障可换货；超过 15 天但在保修期内，可安排免费维修服务。"],
+                },
+                {
+                    "reference_topics": ["促销活动", "商品推荐", "购物指导"],
+                    "reference_role": "电商客服助手：介绍优惠和商品信息，引导用户自助下单，不直接代替用户完成支付。",
+                    "retrieved_contexts": ["促销规则：618 活动全场满 300 减 50，新用户首单 9 折，会员积分可兑换优惠券；客服助手可发送商品链接但不能直接代用户付款。"],
+                },
             ],
         )
+
+
+def _upgrade_existing_agent_conversation_metrics(db: Session) -> None:
+    """Idempotently add Agent and multi-turn core metrics to existing local DBs."""
+
+    metric_data = [
+        {
+            "name": "task_completion",
+            "display_name": "任务完成度 (Task Completion)",
+            "metric_type": "builtin_task_completion",
+            "config": {"description": "Agent 是否完成用户要求的任务闭环。需要字段：user_input(对话), reference"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "tool_call_accuracy",
+            "display_name": "工具正确性 (Tool Correctness)",
+            "metric_type": "builtin_tool_call_accuracy",
+            "config": {"description": "Agent 是否调用了期望的工具且参数完全匹配。需要字段：user_input(对话), reference_tool_calls"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "argument_correctness",
+            "display_name": "参数正确性 (Argument Correctness)",
+            "metric_type": "builtin_argument_correctness",
+            "config": {"description": "在工具名称匹配的前提下，检查工具调用参数与期望参数的匹配度。需要字段：user_input(对话), reference_tool_calls"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "step_efficiency",
+            "display_name": "步骤效率 (Step Efficiency)",
+            "metric_type": "builtin_step_efficiency",
+            "config": {"description": "Agent 实际工具步骤数是否接近期望步骤数，惩罚多余或缺失步骤。需要字段：user_input(对话), reference_tool_calls"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "agent_goal_accuracy",
+            "display_name": "目标准确度 (Goal Accuracy)",
+            "metric_type": "builtin_agent_goal_accuracy",
+            "config": {"description": "Agent 最终结果与期望目标是否一致。需要字段：user_input(对话), reference"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "turn_relevancy",
+            "display_name": "轮次相关性 (Turn Relevancy)",
+            "metric_type": "builtin_turn_relevancy",
+            "config": {"description": "多轮对话中每轮 AI 回复是否回应当前用户输入。需要字段：user_input(对话)"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "conversation_completeness",
+            "display_name": "对话完成度 (Conversation Completeness)",
+            "metric_type": "builtin_conversation_completeness",
+            "config": {"description": "整段对话是否满足用户需求并完成期望结果。需要字段：user_input(对话), reference"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "knowledge_retention",
+            "display_name": "上下文记忆 (Knowledge Retention)",
+            "metric_type": "builtin_knowledge_retention",
+            "config": {"description": "AI 是否在多轮对话中记住用户已经提供的事实、偏好和约束。需要字段：user_input(对话)"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "role_adherence",
+            "display_name": "角色遵守度 (Role Adherence)",
+            "metric_type": "builtin_role_adherence",
+            "config": {"description": "AI 是否遵守指定角色、职责边界和语气要求。需要字段：user_input(对话), reference_role"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "turn_faithfulness",
+            "display_name": "轮次忠实度 (Turn Faithfulness)",
+            "metric_type": "builtin_turn_faithfulness",
+            "config": {"description": "多轮回复是否基于检索上下文或给定资料。需要字段：user_input(对话), retrieved_contexts"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+    ]
+    metrics = {item["name"]: _ensure_metric_definition(db, item) for item in metric_data}
+
+    agent_scenario = (
+        db.query(EvalScenario)
+        .filter(EvalScenario.scene_type == "agent", EvalScenario.is_preset.is_(True))
+        .first()
+    )
+    if agent_scenario is not None:
+        agent_scenario.description = "Agent 核心评测模板，覆盖任务完成、工具正确性、参数正确性、步骤效率和目标准确度。"
+        for metric_name in ["task_completion", "tool_call_accuracy", "argument_correctness", "step_efficiency", "agent_goal_accuracy"]:
+            _ensure_scenario_metric(db, agent_scenario.id, metrics[metric_name].id, pass_threshold=0.7)
+
+    multi_turn_scenario = (
+        db.query(EvalScenario)
+        .filter(EvalScenario.scene_type == "multi_turn", EvalScenario.is_preset.is_(True))
+        .first()
+    )
+    if multi_turn_scenario is not None:
+        multi_turn_scenario.description = "多轮对话核心评测模板，覆盖话题、轮次相关性、完成度、上下文记忆和角色一致性。"
+        desired_metric_names = {"topic_adherence", "turn_relevancy", "conversation_completeness", "knowledge_retention", "role_adherence"}
+        for metric_name in ["topic_adherence", "turn_relevancy", "conversation_completeness", "knowledge_retention", "role_adherence"]:
+            metric = metrics.get(metric_name) or db.query(MetricDefinition).filter(MetricDefinition.name == metric_name).first()
+            if metric is not None:
+                _ensure_scenario_metric(db, multi_turn_scenario.id, metric.id, pass_threshold=0.7)
+        for scenario_metric in list(multi_turn_scenario.metrics):
+            metric_name = scenario_metric.metric_definition.name if scenario_metric.metric_definition else None
+            if metric_name == "coherence" or (metric_name and metric_name not in desired_metric_names):
+                db.delete(scenario_metric)
+        db.flush()
 
 
 def _upgrade_existing_rag_seed(db: Session) -> None:
@@ -262,6 +412,14 @@ def _upgrade_existing_rag_seed(db: Session) -> None:
             "display_name": "上下文精确度 (Context Precision)",
             "metric_type": "builtin_context_precision",
             "config": {"description": "检索到的上下文中有多少是与回答真正相关的有用信息。需要字段：user_input, retrieved_contexts, reference"},
+            "category": "rag",
+            "is_builtin": True,
+        },
+        {
+            "name": "contextual_relevancy",
+            "display_name": "上下文相关性 (Contextual Relevancy)",
+            "metric_type": "builtin_contextual_relevancy",
+            "config": {"description": "检索到的上下文整体是否与用户问题直接相关。需要字段：user_input, retrieved_contexts"},
             "category": "rag",
             "is_builtin": True,
         },
@@ -402,6 +560,7 @@ def run_seed(db: Session) -> None:
     llm_config, _ = sync_default_llm_config(db)
     if existing is not None:
         _upgrade_existing_rag_seed(db)
+        _upgrade_existing_agent_conversation_metrics(db)
         _upgrade_existing_sample_datasets(db)
         db.commit()
         print("[seed] Tables already contain data; synced default LLM config, metric layer, and sample datasets.")
@@ -496,16 +655,40 @@ def run_seed(db: Session) -> None:
             "is_builtin": True,
         },
         {
+            "name": "task_completion",
+            "display_name": "任务完成度 (Task Completion)",
+            "metric_type": "builtin_task_completion",
+            "config": {"description": "Agent 是否完成用户要求的任务闭环。需要字段：user_input(对话), reference"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
             "name": "tool_call_accuracy",
-            "display_name": "工具调用准确度 (Tool Call Accuracy)",
+            "display_name": "工具正确性 (Tool Correctness)",
             "metric_type": "builtin_tool_call_accuracy",
-            "config": {"description": "Agent 调用的工具名称和参数是否与期望一致。需要字段：user_input(对话), reference_tool_calls"},
+            "config": {"description": "Agent 是否调用了期望的工具且参数完全匹配。需要字段：user_input(对话), reference_tool_calls"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "argument_correctness",
+            "display_name": "参数正确性 (Argument Correctness)",
+            "metric_type": "builtin_argument_correctness",
+            "config": {"description": "在工具名称匹配的前提下，检查工具调用参数与期望参数的匹配度。需要字段：user_input(对话), reference_tool_calls"},
+            "category": "agent",
+            "is_builtin": True,
+        },
+        {
+            "name": "step_efficiency",
+            "display_name": "步骤效率 (Step Efficiency)",
+            "metric_type": "builtin_step_efficiency",
+            "config": {"description": "Agent 实际工具步骤数是否接近期望步骤数，惩罚多余或缺失步骤。需要字段：user_input(对话), reference_tool_calls"},
             "category": "agent",
             "is_builtin": True,
         },
         {
             "name": "agent_goal_accuracy",
-            "display_name": "目标达成度 (Agent Goal Accuracy)",
+            "display_name": "目标准确度 (Goal Accuracy)",
             "metric_type": "builtin_agent_goal_accuracy",
             "config": {"description": "Agent 是否完成了用户要求的目标。需要字段：user_input(对话), reference"},
             "category": "agent",
@@ -516,6 +699,46 @@ def run_seed(db: Session) -> None:
             "display_name": "话题遵守度 (Topic Adherence)",
             "metric_type": "builtin_topic_adherence",
             "config": {"description": "对话是否始终围绕预定义的话题范围。需要字段：user_input(对话), reference_topics"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "turn_relevancy",
+            "display_name": "轮次相关性 (Turn Relevancy)",
+            "metric_type": "builtin_turn_relevancy",
+            "config": {"description": "多轮对话中每轮 AI 回复是否回应当前用户输入。需要字段：user_input(对话)"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "conversation_completeness",
+            "display_name": "对话完成度 (Conversation Completeness)",
+            "metric_type": "builtin_conversation_completeness",
+            "config": {"description": "整段对话是否满足用户需求并完成期望结果。需要字段：user_input(对话), reference"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "knowledge_retention",
+            "display_name": "上下文记忆 (Knowledge Retention)",
+            "metric_type": "builtin_knowledge_retention",
+            "config": {"description": "AI 是否在多轮对话中记住用户已经提供的事实、偏好和约束。需要字段：user_input(对话)"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "role_adherence",
+            "display_name": "角色遵守度 (Role Adherence)",
+            "metric_type": "builtin_role_adherence",
+            "config": {"description": "AI 是否遵守指定角色、职责边界和语气要求。需要字段：user_input(对话), reference_role"},
+            "category": "multi_turn",
+            "is_builtin": True,
+        },
+        {
+            "name": "turn_faithfulness",
+            "display_name": "轮次忠实度 (Turn Faithfulness)",
+            "metric_type": "builtin_turn_faithfulness",
+            "config": {"description": "多轮回复是否基于检索上下文或给定资料。需要字段：user_input(对话), retrieved_contexts"},
             "category": "multi_turn",
             "is_builtin": True,
         },
@@ -610,7 +833,7 @@ def run_seed(db: Session) -> None:
     # 3b. Agent Evaluation Template
     agent_scenario = EvalScenario(
         name="Agent \u8bc4\u6d4b\u6a21\u677f",
-        description="Agent \u667a\u80fd\u4f53\u8bc4\u6d4b\u573a\u666f\uff0c\u5305\u542b\u5de5\u5177\u8c03\u7528\u51c6\u786e\u7387\u548c\u76ee\u6807\u5b8c\u6210\u51c6\u786e\u7387\u6307\u6807",
+        description="Agent 核心评测模板，覆盖任务完成、工具正确性、参数正确性、步骤效率和目标准确度。",
         scene_type="agent",
         sample_type="multi_turn",
         is_preset=True,
@@ -621,15 +844,33 @@ def run_seed(db: Session) -> None:
     agent_metrics = [
         ScenarioMetric(
             scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["task_completion"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
             metric_definition_id=metric_objects["tool_call_accuracy"].id,
             weight=1.0,
-            pass_threshold=0.8,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["argument_correctness"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["step_efficiency"].id,
+            weight=1.0,
+            pass_threshold=0.7,
         ),
         ScenarioMetric(
             scenario_id=agent_scenario.id,
             metric_definition_id=metric_objects["agent_goal_accuracy"].id,
             weight=1.0,
-            pass_threshold=0.8,
+            pass_threshold=0.7,
         ),
     ]
     db.add_all(agent_metrics)
@@ -638,7 +879,7 @@ def run_seed(db: Session) -> None:
     # 3c. Multi-turn Conversation Evaluation Template
     multi_turn_scenario = EvalScenario(
         name="\u591a\u8f6e\u5bf9\u8bdd\u8bc4\u6d4b\u6a21\u677f",
-        description="\u591a\u8f6e\u5bf9\u8bdd\u8bc4\u6d4b\u573a\u666f\uff0c\u5305\u542b\u4e3b\u9898\u8d34\u5408\u5ea6\u548c\u8fde\u8d2f\u6027\u6307\u6807",
+        description="多轮对话核心评测模板，覆盖话题、轮次相关性、完成度、上下文记忆和角色一致性。",
         scene_type="multi_turn",
         sample_type="multi_turn",
         is_preset=True,
@@ -655,9 +896,27 @@ def run_seed(db: Session) -> None:
         ),
         ScenarioMetric(
             scenario_id=multi_turn_scenario.id,
-            metric_definition_id=metric_objects["coherence"].id,
+            metric_definition_id=metric_objects["turn_relevancy"].id,
             weight=1.0,
-            pass_threshold=0.5,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=multi_turn_scenario.id,
+            metric_definition_id=metric_objects["conversation_completeness"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=multi_turn_scenario.id,
+            metric_definition_id=metric_objects["knowledge_retention"].id,
+            weight=1.0,
+            pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=multi_turn_scenario.id,
+            metric_definition_id=metric_objects["role_adherence"].id,
+            weight=1.0,
+            pass_threshold=0.7,
         ),
     ]
     db.add_all(multi_turn_metrics)
@@ -965,6 +1224,8 @@ def run_seed(db: Session) -> None:
             {"name": "reference", "type": "text", "required": True, "description": "期望Agent最终应达成的目标（如：成功查询到订单状态）"},
             {"name": "reference_tool_calls", "type": "tool_call_list", "required": True, "description": "期望Agent应该调用的工具列表，每个含name和args"},
             {"name": "reference_topics", "type": "text_list", "required": False, "description": "该 Agent 任务允许围绕的话题列表，用于 Topic Adherence 等多轮对话指标"},
+            {"name": "reference_role", "type": "text", "required": False, "description": "Agent 在任务中应遵守的角色和职责边界"},
+            {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "任务相关的工具/业务背景资料，用于 Turn Faithfulness 等可信度指标"},
         ],
         row_count=3,
     )
@@ -984,6 +1245,8 @@ def run_seed(db: Session) -> None:
                 {"name": "query_order", "args": {"order_id": "ORD-20240101"}},
             ],
             "reference_topics": ["订单查询", "物流跟踪", "客服售后"],
+            "reference_role": "客服 Agent：只能基于工具返回结果答复订单状态，不编造物流信息。",
+            "retrieved_contexts": ["订单查询工具 query_order 返回订单状态和快递单号后，Agent 应把状态、快递单号和预计送达时间告知用户。"],
         },
         {
             "user_input": [
@@ -1000,6 +1263,8 @@ def run_seed(db: Session) -> None:
                 {"name": "create_return", "args": {"order_id": "ORD-20240202", "item": "手机壳", "reason": "用户要求退货"}},
             ],
             "reference_topics": ["订单查询", "退货申请", "售后服务"],
+            "reference_role": "客服 Agent：先查询订单，再按工具结果提交退货申请，不越权承诺即时退款。",
+            "retrieved_contexts": ["退货流程要求先 query_order 确认订单和商品，再 create_return 创建退货申请；退款以工具返回和售后规则为准。"],
         },
         {
             "user_input": [
@@ -1016,6 +1281,8 @@ def run_seed(db: Session) -> None:
                 {"name": "send_message", "args": {"to": "张经理", "content": "北京明天天气：晴，15-25℃，北风3级"}},
             ],
             "reference_topics": ["天气查询", "消息发送", "任务执行"],
+            "reference_role": "任务 Agent：按用户要求查询天气并发送消息，只报告工具返回的天气和发送结果。",
+            "retrieved_contexts": ["天气查询工具返回城市、日期、天气、温度和风力；发送消息工具返回 success=true 时才可告知已发送。"],
         },
     ]
 
@@ -1034,6 +1301,8 @@ def run_seed(db: Session) -> None:
             {"name": "user_input", "type": "conversation", "required": True, "description": "完整多轮对话记录（Human和AI交替对话）"},
             {"name": "reference", "type": "text", "required": False, "description": "期望的对话最终结果"},
             {"name": "reference_topics", "type": "text_list", "required": True, "description": "对话应围绕的话题列表，Topic Adherence 指标必需"},
+            {"name": "reference_role", "type": "text", "required": True, "description": "AI 在对话中应遵守的角色、职责边界和语气要求"},
+            {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "多轮对话可依据的业务资料，用于 Turn Faithfulness 等可信度指标"},
         ],
         row_count=3,
     )
@@ -1054,6 +1323,8 @@ def run_seed(db: Session) -> None:
             ],
             "reference": "完成退货咨询和申请提交",
             "reference_topics": ["退货政策", "售后服务"],
+            "reference_role": "电商客服助手：专业、礼貌，只处理售前售后咨询，不越权承诺无法确认的结果。",
+            "retrieved_contexts": ["退货政策：商品签收后 7 天内可无理由退货，需保持商品完好；退货申请提交后退款通常 3 个工作日内原路返回。"],
         },
         {
             "user_input": [
@@ -1068,6 +1339,8 @@ def run_seed(db: Session) -> None:
             ],
             "reference": "诊断硬件问题并安排维修服务",
             "reference_topics": ["产品故障", "保修政策", "维修服务"],
+            "reference_role": "电商客服助手：专业、安抚用户，依据保修和三包规则提供维修或换货建议。",
+            "retrieved_contexts": ["三包政策：购买 15 天内出现性能故障可换货；超过 15 天但在保修期内，可安排免费维修服务。"],
         },
         {
             "user_input": [
@@ -1082,6 +1355,8 @@ def run_seed(db: Session) -> None:
             ],
             "reference": "推荐商品并引导用户完成购买",
             "reference_topics": ["促销活动", "商品推荐", "购物指导"],
+            "reference_role": "电商客服助手：介绍优惠和商品信息，引导用户自助下单，不直接代替用户完成支付。",
+            "retrieved_contexts": ["促销规则：618 活动全场满 300 减 50，新用户首单 9 折，会员积分可兑换优惠券；客服助手可发送商品链接但不能直接代用户付款。"],
         },
     ]
 

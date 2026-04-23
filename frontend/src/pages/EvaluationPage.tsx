@@ -13,6 +13,7 @@ import {
   Progress,
   Popconfirm,
   Spin,
+  Alert,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -43,6 +44,29 @@ const statusLabelMap: Record<string, string> = {
   cancelled: '已取消',
 };
 
+const metricRequiredFields: Record<string, string[]> = {
+  faithfulness: ['response', 'retrieved_contexts'],
+  context_recall: ['retrieved_contexts', 'reference'],
+  context_precision: ['user_input', 'retrieved_contexts'],
+  contextual_relevancy: ['user_input', 'retrieved_contexts'],
+  factual_correctness: ['response', 'reference'],
+  answer_relevancy: ['user_input', 'response'],
+  answer_completeness: ['response', 'reference'],
+  retrieval_hit_rate: ['retrieved_context_ids', 'reference_context_ids'],
+  retrieval_mrr: ['retrieved_context_ids', 'reference_context_ids'],
+  task_completion: ['user_input', 'reference'],
+  tool_call_accuracy: ['user_input', 'reference_tool_calls'],
+  argument_correctness: ['user_input', 'reference_tool_calls'],
+  step_efficiency: ['user_input', 'reference_tool_calls'],
+  agent_goal_accuracy: ['user_input', 'reference'],
+  topic_adherence: ['user_input', 'reference_topics'],
+  turn_relevancy: ['user_input'],
+  conversation_completeness: ['user_input', 'reference'],
+  knowledge_retention: ['user_input'],
+  role_adherence: ['user_input', 'reference_role'],
+  turn_faithfulness: ['user_input', 'retrieved_contexts'],
+};
+
 const EvaluationPage: React.FC = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<EvalTask[]>([]);
@@ -60,6 +84,8 @@ const EvaluationPage: React.FC = () => {
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const consoleBoxRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
+  const selectedDatasetId = Form.useWatch('dataset_id', form);
+  const selectedScenarioId = Form.useWatch('scenario_id', form);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -157,6 +183,11 @@ const EvaluationPage: React.FC = () => {
   const handleCreate = async () => {
     try {
       const values = await form.validateFields();
+      const compatibility = getSelectionCompatibility(values.dataset_id, values.scenario_id);
+      if (!compatibility.ok) {
+        message.error(compatibility.message);
+        return;
+      }
       setSubmitting(true);
       const created = await api.createEvaluation(values);
       message.success('评测任务已创建');
@@ -204,6 +235,40 @@ const EvaluationPage: React.FC = () => {
   const progressTask =
     (consoleTaskId ? tasks.find((t) => t.id === consoleTaskId) : undefined) ||
     tasks.find((t) => t.status === 'running' || t.status === 'pending');
+
+  const getSelectionCompatibility = (datasetId?: number, scenarioId?: number) => {
+    const dataset = datasets.find((d) => d.id === datasetId);
+    const scenario = scenarios.find((s) => s.id === scenarioId);
+    if (!dataset || !scenario) {
+      return { ok: true, message: '' };
+    }
+
+    if (dataset.sample_type !== scenario.sample_type) {
+      return {
+        ok: false,
+        message: `样本类型不匹配：数据集是 ${dataset.sample_type}，场景需要 ${scenario.sample_type}`,
+      };
+    }
+
+    const datasetFields = new Set((dataset.field_schema || []).map((field) => field.name));
+    const requiredFields = new Set<string>();
+    (scenario.metrics || []).forEach((scenarioMetric) => {
+      const metricName = scenarioMetric.metric_definition?.name;
+      const fields = metricName ? metricRequiredFields[metricName] || [] : [];
+      fields.forEach((field) => requiredFields.add(field));
+    });
+    const missingFields = Array.from(requiredFields).filter((field) => !datasetFields.has(field));
+    if (missingFields.length > 0) {
+      return {
+        ok: false,
+        message: `数据集缺少当前场景必需字段：${missingFields.join(', ')}`,
+      };
+    }
+
+    return { ok: true, message: '数据集字段满足当前场景的核心指标要求。' };
+  };
+
+  const selectionCompatibility = getSelectionCompatibility(selectedDatasetId, selectedScenarioId);
 
   const columns = [
     { title: '任务名称', dataIndex: 'name', key: 'name', width: 180 },
@@ -323,7 +388,10 @@ const EvaluationPage: React.FC = () => {
             <Select
               placeholder="选择数据集"
               style={{ width: 200 }}
-              options={datasets.map((d) => ({ label: d.name, value: d.id }))}
+              options={datasets.map((d) => ({
+                label: `${d.name} · ${d.sample_type} · ${d.row_count} 条`,
+                value: d.id,
+              }))}
             />
           </Form.Item>
           <Form.Item
@@ -333,7 +401,10 @@ const EvaluationPage: React.FC = () => {
             <Select
               placeholder="选择评测场景"
               style={{ width: 200 }}
-              options={scenarios.map((s) => ({ label: s.name, value: s.id }))}
+              options={scenarios.map((s) => ({
+                label: `${s.name} · ${s.scene_type}`,
+                value: s.id,
+              }))}
             />
           </Form.Item>
           <Form.Item
@@ -354,12 +425,22 @@ const EvaluationPage: React.FC = () => {
               type="primary"
               icon={<PlayCircleOutlined />}
               loading={submitting}
+              disabled={!selectionCompatibility.ok}
               onClick={handleCreate}
             >
               开始评测
             </Button>
           </Form.Item>
         </Form>
+        {selectedDatasetId && selectedScenarioId && (
+          <Alert
+            style={{ marginTop: 12 }}
+            type={selectionCompatibility.ok ? 'success' : 'warning'}
+            showIcon
+            message={selectionCompatibility.ok ? '数据集与场景字段匹配' : '数据集与场景不匹配'}
+            description={selectionCompatibility.message}
+          />
+        )}
       </Card>
 
       {progressTask && (

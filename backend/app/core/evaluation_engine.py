@@ -44,6 +44,13 @@ _BUILTIN_LLM_METRIC_SPECS: dict[str, dict[str, t.Any]] = {
             "分数越低。"
         ),
     },
+    "builtin_contextual_relevancy": {
+        "required_fields": ["user_input", "retrieved_contexts"],
+        "criteria": (
+            "判断检索上下文整体是否与用户问题直接相关。上下文应围绕用户问题提供可用信息；无关、泛化、"
+            "只沾边或无法帮助回答的问题片段需要扣分。"
+        ),
+    },
     "builtin_factual_correctness": {
         "required_fields": ["response", "reference"],
         "criteria": (
@@ -64,11 +71,52 @@ _BUILTIN_LLM_METRIC_SPECS: dict[str, dict[str, t.Any]] = {
             "和中间步骤都可以作为证据。"
         ),
     },
+    "builtin_task_completion": {
+        "required_fields": ["user_input", "reference"],
+        "criteria": (
+            "判断 Agent 是否完成了用户要达成的任务闭环。重点看最终状态是否已经满足 reference 描述的任务目标，"
+            "而不只看是否给出看似合理的回复。"
+        ),
+    },
     "builtin_topic_adherence": {
         "required_fields": ["user_input", "reference_topics"],
         "criteria": (
             "判断多轮对话是否始终围绕 reference_topics 指定的话题范围展开。明显偏离主题、引入无关内容或没有"
             "回应当前轮次主题需要扣分。"
+        ),
+    },
+    "builtin_turn_relevancy": {
+        "required_fields": ["user_input"],
+        "criteria": (
+            "逐轮判断 AI 回复是否回应了当前轮用户输入，并且没有忽略用户追问、答非所问或把上一轮上下文错误带入。"
+        ),
+    },
+    "builtin_conversation_completeness": {
+        "required_fields": ["user_input", "reference"],
+        "criteria": (
+            "判断整段多轮对话是否满足用户需求并完成 reference 描述的对话目标。遗漏关键步骤、没有收束问题或"
+            "未给出可执行结论需要扣分。"
+        ),
+    },
+    "builtin_knowledge_retention": {
+        "required_fields": ["user_input"],
+        "criteria": (
+            "判断 AI 是否在多轮对话中持续记住用户已经提供的事实、约束、偏好、订单号、时间等信息。忘记、混淆"
+            "或自相矛盾需要扣分。"
+        ),
+    },
+    "builtin_role_adherence": {
+        "required_fields": ["user_input", "reference_role"],
+        "criteria": (
+            "判断 AI 是否始终遵守 reference_role 描述的角色、职责边界和语气要求。越权承诺、角色漂移、"
+            "使用不合适语气或执行角色不允许的动作需要扣分。"
+        ),
+    },
+    "builtin_turn_faithfulness": {
+        "required_fields": ["user_input", "retrieved_contexts"],
+        "criteria": (
+            "判断多轮对话中每轮 AI 回复是否基于对应的检索上下文或已给定资料。跨轮捏造事实、与上下文冲突或"
+            "无法从资料支持的回答需要扣分。"
         ),
     },
 }
@@ -367,6 +415,60 @@ class ToolCallAccuracyMetric:
         )
 
 
+class ArgumentCorrectnessMetric:
+    """Deterministic Agent metric focused on arguments after the tool name matches."""
+
+    async def ascore(self, row_data: dict[str, t.Any], _judge: OpenAIJudgeClient) -> _MetricResult:
+        expected = list(row_data.get("reference_tool_calls") or [])
+        actual = _extract_actual_tool_calls(row_data.get("user_input"))
+        if not expected:
+            return _MetricResult(None, "缺少 reference_tool_calls，无法计算参数正确性。")
+
+        unmatched = list(actual)
+        per_call_scores: list[float] = []
+        matched_names = 0
+        for expected_call in expected:
+            match_idx, arg_score = _find_best_tool_name_match(expected_call, unmatched)
+            if match_idx is not None:
+                matched_names += 1
+                per_call_scores.append(arg_score)
+                unmatched.pop(match_idx)
+            else:
+                per_call_scores.append(0.0)
+
+        score = round(sum(per_call_scores) / len(expected), 4)
+        return _MetricResult(
+            score,
+            f"期望工具调用 {len(expected)} 个，找到同名实际调用 {matched_names} 个，参数平均匹配度 {score}。",
+        )
+
+
+class StepEfficiencyMetric:
+    """Deterministic Agent metric penalizing missing or unnecessary tool steps."""
+
+    async def ascore(self, row_data: dict[str, t.Any], _judge: OpenAIJudgeClient) -> _MetricResult:
+        expected = list(row_data.get("reference_tool_calls") or [])
+        actual = _extract_actual_tool_calls(row_data.get("user_input"))
+        if not expected:
+            return _MetricResult(None, "缺少 reference_tool_calls，无法计算步骤效率。")
+
+        expected_count = len(expected)
+        actual_count = len(actual)
+        if actual_count == 0:
+            return _MetricResult(0.0, f"期望 {expected_count} 个工具步骤，但实际没有调用工具。")
+        if actual_count == expected_count:
+            score = 1.0
+        elif actual_count > expected_count:
+            score = expected_count / actual_count
+        else:
+            score = actual_count / expected_count
+        score = round(score, 4)
+        return _MetricResult(
+            score,
+            f"期望工具步骤 {expected_count} 个，实际工具步骤 {actual_count} 个；步骤数量越接近期望越高分。",
+        )
+
+
 def build_metric(metric_def, llm=None) -> tuple[str, t.Any]:
     """
     Instantiate a metric executor from a MetricDefinition database row.
@@ -390,6 +492,12 @@ def build_metric(metric_def, llm=None) -> tuple[str, t.Any]:
 
     if metric_type == "builtin_tool_call_accuracy":
         return ("simple", ToolCallAccuracyMetric())
+
+    if metric_type == "builtin_argument_correctness":
+        return ("simple", ArgumentCorrectnessMetric())
+
+    if metric_type == "builtin_step_efficiency":
+        return ("simple", StepEfficiencyMetric())
 
     if metric_type in {"numeric", "discrete", "aspect_critic"}:
         return ("llm", NativePromptMetric(metric_def, mode=metric_type))
@@ -771,6 +879,7 @@ def _sample_payload(row_data: dict[str, t.Any]) -> dict[str, t.Any]:
         "reference_context_ids",
         "reference_tool_calls",
         "reference_topics",
+        "reference_role",
         "rubrics",
     ]
     payload = {
@@ -865,3 +974,30 @@ def _find_tool_call_match(
         if (actual_call.get("args") or {}) == expected_args:
             return idx
     return None
+
+
+def _find_best_tool_name_match(
+    expected_call: dict[str, t.Any],
+    actual_calls: list[dict[str, t.Any]],
+) -> tuple[int | None, float]:
+    expected_name = expected_call.get("name")
+    best_idx: int | None = None
+    best_score = 0.0
+    for idx, actual_call in enumerate(actual_calls):
+        if actual_call.get("name") != expected_name:
+            continue
+        score = _argument_match_score(expected_call.get("args") or {}, actual_call.get("args") or {})
+        if best_idx is None or score > best_score:
+            best_idx = idx
+            best_score = score
+    return best_idx, best_score
+
+
+def _argument_match_score(expected_args: dict[str, t.Any], actual_args: dict[str, t.Any]) -> float:
+    if not expected_args:
+        return 1.0 if not actual_args else 0.8
+    matched = 0
+    for key, expected_value in expected_args.items():
+        if key in actual_args and actual_args[key] == expected_value:
+            matched += 1
+    return matched / len(expected_args)

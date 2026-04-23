@@ -1,6 +1,6 @@
 # AI 评测平台
 
-基于 Ragas 框架的 AI 应用评测平台，支持 RAG、AI Agent、多轮对话等场景的评测。
+面向 RAG、AI Agent、多轮对话等场景的 AI 应用评测平台。评测内核由平台原生执行器负责，直接使用 OpenAI 兼容模型返回评分和评判理由。
 
 ## 快速启动（3 分钟）
 
@@ -97,5 +97,5 @@ cd frontend && npx tsc --noEmit
 |----|------|
 | 后端 | FastAPI + SQLAlchemy + SQLite |
 | 前端 | React 18 + TypeScript + Ant Design 5 + Vite |
-| 评测内核 | Ragas (metrics / llms / prompt) |
+| 评测内核 | 原生 Metric Executor + OpenAI 兼容 Judge |
 | 评测 LLM | 通义千问 Qwen Plus (DashScope，OpenAI 兼容) |
