@@ -20,6 +20,10 @@ class ScenarioCreate(BaseModel):
     metrics: List[ScenarioMetricConfig] = []
 
 
+class ScenarioUpdate(ScenarioCreate):
+    pass
+
+
 class ScenarioMetricResponse(BaseModel):
     id: int
     metric_definition_id: int

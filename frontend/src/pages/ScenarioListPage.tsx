@@ -21,6 +21,7 @@ import {
 import {
   PlusOutlined,
   DeleteOutlined,
+  EditOutlined,
   RobotOutlined,
   NodeIndexOutlined,
   MessageOutlined,
@@ -89,6 +90,7 @@ const ScenarioListPage: React.FC = () => {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingScenario, setEditingScenario] = useState<EvalScenario | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [helpMetric, setHelpMetric] = useState<string | null>(null);
@@ -117,7 +119,43 @@ const ScenarioListPage: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleCreate = async () => {
+  const resetModalState = () => {
+    setModalOpen(false);
+    setEditingScenario(null);
+    form.resetFields();
+    setSelectedSceneType('rag');
+    setSelectedMetrics([]);
+  };
+
+  const openCreateModal = () => {
+    setEditingScenario(null);
+    form.resetFields();
+    form.setFieldsValue({ scene_type: 'rag', sample_type: 'single_turn' });
+    setSelectedSceneType('rag');
+    setSelectedMetrics([]);
+    setModalOpen(true);
+  };
+
+  const openEditModal = (scenario: EvalScenario) => {
+    setEditingScenario(scenario);
+    setSelectedSceneType(scenario.scene_type);
+    form.setFieldsValue({
+      name: scenario.name,
+      description: scenario.description || '',
+      scene_type: scenario.scene_type,
+      sample_type: scenario.sample_type,
+    });
+    setSelectedMetrics(
+      (scenario.metrics || []).map((scenarioMetric) => ({
+        metric_definition_id: scenarioMetric.metric_definition_id,
+        weight: scenarioMetric.weight ?? 1.0,
+        pass_threshold: scenarioMetric.pass_threshold ?? null,
+      }))
+    );
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
     try {
       const values = await form.validateFields();
       if (selectedMetrics.length === 0) {
@@ -125,20 +163,26 @@ const ScenarioListPage: React.FC = () => {
         return;
       }
       setSubmitting(true);
-      await api.createScenario({
+      const payload = {
         name: values.name,
         description: values.description || '',
         scene_type: values.scene_type,
         sample_type: values.sample_type,
         metrics: selectedMetrics,
-      });
-      message.success('场景创建成功');
-      setModalOpen(false);
-      form.resetFields();
-      setSelectedMetrics([]);
+      };
+      if (editingScenario) {
+        await api.updateScenario(editingScenario.id, payload);
+        message.success('场景已更新，新建任务会使用最新配置');
+      } else {
+        await api.createScenario(payload);
+        message.success('场景创建成功');
+      }
+      resetModalState();
       fetchData();
-    } catch {
-      message.error('创建失败');
+    } catch (error: any) {
+      if (!error?.errorFields) {
+        message.error(editingScenario ? '更新失败' : '创建失败');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -300,13 +344,18 @@ const ScenarioListPage: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 80,
+      width: 150,
       render: (_: unknown, record: EvalScenario) => (
-        <Popconfirm title="确认删除此场景？" onConfirm={() => handleDelete(record.id)}>
-          <Button size="small" danger icon={<DeleteOutlined />}>
-            删除
+        <Space size={8}>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)}>
+            编辑
           </Button>
-        </Popconfirm>
+          <Popconfirm title="确认删除此场景？" onConfirm={() => handleDelete(record.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -348,7 +397,7 @@ const ScenarioListPage: React.FC = () => {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={5} style={{ margin: 0 }}>自定义场景</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
           新建场景
         </Button>
       </div>
@@ -356,19 +405,20 @@ const ScenarioListPage: React.FC = () => {
       <Table rowKey="id" columns={columns} dataSource={scenarios} pagination={false} />
 
       <Modal
-        title="新建评测场景"
+        title={editingScenario ? '编辑评测场景' : '新建评测场景'}
         open={modalOpen}
-        onOk={handleCreate}
+        onOk={handleSave}
         confirmLoading={submitting}
-        onCancel={() => {
-          setModalOpen(false);
-          form.resetFields();
-          setSelectedMetrics([]);
-        }}
-        okText="创建"
+        onCancel={resetModalState}
+        okText={editingScenario ? '保存' : '创建'}
         cancelText="取消"
         width={720}
       >
+        {editingScenario && (
+          <Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
+            修改只影响之后新建的评测任务；已有任务会继续使用创建任务时保存的场景快照。
+          </Paragraph>
+        )}
         <Form
           form={form}
           layout="vertical"

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.models.evaluation import EvalTask, EvalRowResult
+from app.core.evaluation_engine import DEFAULT_SUMMARY_PASS_THRESHOLD
 from app.schemas.evaluation import (
     EvalTaskResponse,
     EvalRowResultResponse,
@@ -40,7 +41,7 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
     error_count = sum(1 for r in row_results if r.error is not None)
     pass_rate = (pass_count / total_count) if total_count > 0 else 0.0
 
-    metric_summary = task.summary_scores if task.summary_scores else {}
+    metric_summary = _normalize_metric_summary(task.summary_scores or {}, row_results)
 
     return ReportSummary(
         eval_task=EvalTaskResponse.model_validate(task),
@@ -51,6 +52,46 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
         pass_rate=round(pass_rate, 4),
         metric_summary=metric_summary,
     )
+
+
+def _normalize_metric_summary(metric_summary: dict, row_results: list[EvalRowResult]) -> dict:
+    """Fill display pass rates for old reports whose metrics had no threshold."""
+
+    normalized = {
+        name: dict(info or {})
+        for name, info in (metric_summary or {}).items()
+    }
+    if not normalized:
+        return normalized
+
+    for metric_name, info in normalized.items():
+        if info.get("pass_rate") is not None:
+            continue
+        threshold = info.get("effective_pass_threshold")
+        if threshold is None:
+            threshold = info.get("pass_threshold")
+        if threshold is None:
+            threshold = DEFAULT_SUMMARY_PASS_THRESHOLD
+
+        values = []
+        for row in row_results:
+            raw = (row.metric_scores or {}).get(metric_name)
+            score = raw.get("score") if isinstance(raw, dict) else raw
+            if score is None:
+                continue
+            if isinstance(score, str):
+                values.append(1.0 if score.lower() in ("pass", "yes", "true", "1") else 0.0)
+            else:
+                values.append(float(score))
+
+        if values:
+            pass_count = sum(1 for value in values if value >= threshold)
+            info["pass_rate"] = round(pass_count / len(values), 4)
+            info["effective_pass_threshold"] = threshold
+        else:
+            info["pass_rate"] = None
+
+    return normalized
 
 
 @router.get("/{eval_id}/rows", response_model=ReportRowsResponse)

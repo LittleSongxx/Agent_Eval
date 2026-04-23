@@ -94,6 +94,275 @@ def test_list_evaluations(client, test_llm_payload):
     assert len(items) >= 2
 
 
+def test_create_evaluation_uses_actual_dataset_row_count(client, db, test_llm_payload):
+    """Task total_rows should use actual DatasetRow count, not stale Dataset.row_count."""
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    client.post(
+        f"/api/datasets/{dataset['id']}/rows",
+        json={"data": {"user_input": "Second row", "response": "Another answer"}},
+    )
+
+    from app.models.dataset import Dataset
+
+    db_dataset = db.query(Dataset).filter(Dataset.id == dataset["id"]).first()
+    db_dataset.row_count = 1
+    db.commit()
+
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Count Sync Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["total_rows"] == 2
+
+
+def test_update_custom_scenario_does_not_mutate_existing_task_snapshot(client, test_llm_payload):
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    replacement_metric = client.post(
+        "/api/metrics",
+        json={
+            "name": "replacement_metric",
+            "display_name": "Replacement Metric",
+            "metric_type": "aspect_critic",
+            "config": {"definition": "Replacement"},
+            "category": "custom",
+        },
+    ).json()
+
+    task_resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Snapshot Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    assert task["scenario_snapshot"]["name"] == "Test Scenario"
+    assert task["scenario_snapshot"]["metrics"][0]["metric_definition"]["name"] == "test_metric"
+
+    update_resp = client.put(
+        f"/api/scenarios/{scenario['id']}",
+        json={
+            "name": "Edited Scenario",
+            "description": "edited",
+            "scene_type": "rag",
+            "sample_type": "single_turn",
+            "metrics": [
+                {
+                    "metric_definition_id": replacement_metric["id"],
+                    "weight": 1.0,
+                    "pass_threshold": 0.7,
+                }
+            ],
+        },
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["name"] == "Edited Scenario"
+
+    existing_task = client.get(f"/api/evaluations/{task['id']}").json()
+    assert existing_task["scenario_snapshot"]["name"] == "Test Scenario"
+    assert existing_task["scenario_snapshot"]["metrics"][0]["metric_definition"]["name"] == "test_metric"
+
+
+def test_run_evaluation_uses_scenario_snapshot_after_scenario_edit(client, db, test_llm_payload):
+    import asyncio
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.evaluation_engine import run_evaluation
+    from app.models.evaluation import EvalRowResult, EvalTask
+
+    llm = client.post("/api/llm-configs", json=test_llm_payload).json()
+    hit_rate_metric = client.post(
+        "/api/metrics",
+        json={
+            "name": "snapshot_hit_rate",
+            "display_name": "Snapshot Hit Rate",
+            "metric_type": "code_retrieval_hit_rate",
+            "config": {"k": 3},
+            "category": "rag",
+        },
+    ).json()
+    mrr_metric = client.post(
+        "/api/metrics",
+        json={
+            "name": "snapshot_mrr",
+            "display_name": "Snapshot MRR",
+            "metric_type": "code_retrieval_mrr",
+            "config": {},
+            "category": "rag",
+        },
+    ).json()
+    scenario = client.post(
+        "/api/scenarios",
+        json={
+            "name": "Snapshot Scenario",
+            "description": "snapshot",
+            "scene_type": "rag",
+            "sample_type": "single_turn",
+            "metrics": [
+                {
+                    "metric_definition_id": hit_rate_metric["id"],
+                    "weight": 1.0,
+                    "pass_threshold": 0.5,
+                }
+            ],
+        },
+    ).json()
+    dataset = client.post(
+        "/api/datasets",
+        json={
+            "name": "Retrieval Dataset",
+            "sample_type": "single_turn",
+            "field_schema": [
+                {"name": "user_input", "type": "text", "required": True, "description": ""},
+                {"name": "retrieved_context_ids", "type": "text_list", "required": True, "description": ""},
+                {"name": "reference_context_ids", "type": "text_list", "required": True, "description": ""},
+            ],
+        },
+    ).json()
+    client.post(
+        f"/api/datasets/{dataset['id']}/rows",
+        json={
+            "data": {
+                "user_input": "Which doc answers the question?",
+                "retrieved_context_ids": ["doc-1", "doc-2"],
+                "reference_context_ids": ["doc-1"],
+            }
+        },
+    )
+    task = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Snapshot Run",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    ).json()
+
+    client.put(
+        f"/api/scenarios/{scenario['id']}",
+        json={
+            "name": "Edited Snapshot Scenario",
+            "description": "edited",
+            "scene_type": "rag",
+            "sample_type": "single_turn",
+            "metrics": [
+                {
+                    "metric_definition_id": mrr_metric["id"],
+                    "weight": 1.0,
+                    "pass_threshold": 0.5,
+                }
+            ],
+        },
+    )
+
+    SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=db.bind)
+    asyncio.run(run_evaluation(task["id"], SessionFactory))
+
+    db.expire_all()
+    db_task = db.query(EvalTask).filter(EvalTask.id == task["id"]).first()
+    row_result = db.query(EvalRowResult).filter(EvalRowResult.eval_task_id == task["id"]).first()
+    assert db_task.status == "completed"
+    assert "snapshot_hit_rate" in row_result.metric_scores
+    assert "snapshot_mrr" not in row_result.metric_scores
+
+
+def test_report_summary_backfills_metric_pass_rate_without_threshold(client, db):
+    """Old reports without per-metric thresholds should still display pass rates."""
+    from app.models.dataset import Dataset, DatasetRow
+    from app.models.evaluation import EvalTask, EvalRowResult
+    from app.models.llm_config import LLMConfig
+    from app.models.metric_definition import MetricDefinition
+    from app.models.scenario import EvalScenario, ScenarioMetric
+
+    llm = LLMConfig(
+        name="Judge",
+        api_base_url="https://example.com/v1",
+        api_key="key",
+        model_name="model",
+    )
+    metric = MetricDefinition(
+        name="turn_relevancy",
+        display_name="轮次相关性",
+        metric_type="builtin_turn_relevancy",
+        config={},
+        category="multi_turn",
+        is_builtin=True,
+    )
+    scenario = EvalScenario(
+        name="No Threshold Scenario",
+        scene_type="multi_turn",
+        sample_type="multi_turn",
+        is_preset=False,
+    )
+    dataset = Dataset(name="Rows", sample_type="multi_turn", field_schema=[], row_count=2)
+    db.add_all([llm, metric, scenario, dataset])
+    db.flush()
+    db.add(ScenarioMetric(scenario_id=scenario.id, metric_definition_id=metric.id, pass_threshold=None))
+    rows = [
+        DatasetRow(dataset_id=dataset.id, row_index=0, data={"user_input": []}),
+        DatasetRow(dataset_id=dataset.id, row_index=1, data={"user_input": []}),
+    ]
+    db.add_all(rows)
+    db.flush()
+    task = EvalTask(
+        name="Old Report",
+        dataset_id=dataset.id,
+        scenario_id=scenario.id,
+        llm_config_id=llm.id,
+        status="completed",
+        total_rows=2,
+        completed_rows=2,
+        summary_scores={
+            "turn_relevancy": {
+                "mean": 0.75,
+                "min": 0.6,
+                "max": 0.9,
+                "pass_rate": None,
+                "count": 2,
+                "error_count": 0,
+            }
+        },
+    )
+    db.add(task)
+    db.flush()
+    db.add_all(
+        [
+            EvalRowResult(
+                eval_task_id=task.id,
+                dataset_row_id=rows[0].id,
+                row_index=0,
+                metric_scores={"turn_relevancy": {"score": 0.6, "reason": "低于默认阈值"}},
+                is_pass=True,
+            ),
+            EvalRowResult(
+                eval_task_id=task.id,
+                dataset_row_id=rows[1].id,
+                row_index=1,
+                metric_scores={"turn_relevancy": {"score": 0.9, "reason": "高于默认阈值"}},
+                is_pass=True,
+            ),
+        ]
+    )
+    db.commit()
+
+    resp = client.get(f"/api/reports/{task.id}/summary")
+    assert resp.status_code == 200
+    metric_summary = resp.json()["metric_summary"]["turn_relevancy"]
+    assert metric_summary["pass_rate"] == 0.5
+    assert metric_summary["effective_pass_threshold"] == 0.7
+
+
 def test_get_report_summary(client, db):
     """Test report summary using seed data inserted directly into the test DB."""
     from app.seed import run_seed

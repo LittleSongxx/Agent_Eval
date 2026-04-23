@@ -310,6 +310,7 @@ const EvaluationPage: React.FC = () => {
       key: 'scenario',
       width: 140,
       render: (_: unknown, record: EvalTask) =>
+        record.scenario_snapshot?.name ||
         record.scenario?.name ||
         scenarios.find((s) => s.id === record.scenario_id)?.name ||
         '-',

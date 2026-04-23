@@ -3,13 +3,14 @@ import threading
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
+from app.core.scenario_snapshot import build_scenario_snapshot
 from app.models.evaluation import EvalTask
-from app.models.dataset import Dataset
-from app.models.scenario import EvalScenario
+from app.models.dataset import Dataset, DatasetRow
+from app.models.scenario import EvalScenario, ScenarioMetric
 from app.models.llm_config import LLMConfig
 from app.schemas.evaluation import EvalTaskCreate, EvalTaskResponse
 
@@ -41,12 +42,26 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
     # Validate foreign keys
     if not db.query(Dataset).filter(Dataset.id == payload.dataset_id).first():
         raise HTTPException(status_code=404, detail="Dataset not found")
-    if not db.query(EvalScenario).filter(EvalScenario.id == payload.scenario_id).first():
+    scenario = (
+        db.query(EvalScenario)
+        .options(
+            joinedload(EvalScenario.metrics).joinedload(ScenarioMetric.metric_definition)
+        )
+        .filter(EvalScenario.id == payload.scenario_id)
+        .first()
+    )
+    if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     if not db.query(LLMConfig).filter(LLMConfig.id == payload.llm_config_id).first():
         raise HTTPException(status_code=404, detail="LLM config not found")
 
     dataset = db.query(Dataset).filter(Dataset.id == payload.dataset_id).first()
+    actual_row_count = (
+        db.query(DatasetRow)
+        .filter(DatasetRow.dataset_id == payload.dataset_id)
+        .count()
+    )
+    dataset.row_count = actual_row_count
 
     task = EvalTask(
         name=payload.name,
@@ -54,7 +69,8 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         scenario_id=payload.scenario_id,
         llm_config_id=payload.llm_config_id,
         status="pending",
-        total_rows=dataset.row_count,
+        total_rows=actual_row_count,
+        scenario_snapshot=build_scenario_snapshot(scenario),
     )
     db.add(task)
     db.commit()

@@ -97,6 +97,7 @@ export interface EvalTask {
   completed_rows: number;
   error_message: string | null;
   summary_scores: Record<string, any> | null;
+  scenario_snapshot?: Record<string, any> | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;

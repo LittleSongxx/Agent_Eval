@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, ensure_runtime_schema
 
 # Import all models so they register with Base before create_all
 import app.models  # noqa: F401
@@ -16,6 +16,7 @@ import app.models  # noqa: F401
 async def lifespan(application: FastAPI):
     # Startup: create all tables
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema()
 
     # Ensure upload directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -30,9 +31,50 @@ async def lifespan(application: FastAPI):
         finally:
             db.close()
 
+    _backfill_eval_task_scenario_snapshots()
+
     yield
 
     # Shutdown: nothing to clean up for now
+
+
+def _backfill_eval_task_scenario_snapshots() -> None:
+    """Freeze current scenario configs for historical tasks created before snapshots."""
+
+    from sqlalchemy.orm import joinedload
+
+    from app.core.database import SessionLocal
+    from app.core.scenario_snapshot import build_scenario_snapshot
+    from app.models.evaluation import EvalTask
+    from app.models.scenario import EvalScenario, ScenarioMetric
+
+    db = SessionLocal()
+    try:
+        tasks = (
+            db.query(EvalTask)
+            .filter(EvalTask.scenario_snapshot.is_(None))
+            .all()
+        )
+        if not tasks:
+            return
+
+        scenario_ids = {task.scenario_id for task in tasks}
+        scenarios = (
+            db.query(EvalScenario)
+            .options(
+                joinedload(EvalScenario.metrics).joinedload(ScenarioMetric.metric_definition)
+            )
+            .filter(EvalScenario.id.in_(scenario_ids))
+            .all()
+        )
+        scenario_by_id = {scenario.id: scenario for scenario in scenarios}
+        for task in tasks:
+            scenario = scenario_by_id.get(task.scenario_id)
+            if scenario is not None:
+                task.scenario_snapshot = build_scenario_snapshot(scenario)
+        db.commit()
+    finally:
+        db.close()
 
 
 app = FastAPI(

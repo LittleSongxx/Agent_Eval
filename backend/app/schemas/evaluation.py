@@ -28,6 +28,7 @@ class EvalTaskBrief(BaseModel):
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime
+    scenario_snapshot: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

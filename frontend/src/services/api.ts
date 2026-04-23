@@ -38,6 +38,7 @@ export const deleteMetric = (id: number) => api.delete(`/metrics/${id}`);
 
 export const listScenarios = () => api.get('/scenarios').then(r => r.data);
 export const createScenario = (data: any) => api.post('/scenarios', data).then(r => r.data);
+export const updateScenario = (id: number, data: any) => api.put(`/scenarios/${id}`, data).then(r => r.data);
 export const getScenario = (id: number) => api.get(`/scenarios/${id}`).then(r => r.data);
 export const deleteScenario = (id: number) => api.delete(`/scenarios/${id}`);
 export const getPresetScenarios = () => api.get('/scenarios/presets').then(r => r.data);

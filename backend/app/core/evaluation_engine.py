@@ -16,10 +16,13 @@ import time
 import typing as t
 from datetime import datetime, timezone
 
+from app.core.scenario_snapshot import snapshot_to_scenario_metrics
+
 logger = logging.getLogger(__name__)
 
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+DEFAULT_SUMMARY_PASS_THRESHOLD = 0.7
 
 
 _BUILTIN_LLM_METRIC_SPECS: dict[str, dict[str, t.Any]] = {
@@ -534,15 +537,18 @@ async def run_evaluation(task_id: int, session_factory) -> None:
 
         dataset = task.dataset
         scenario = task.scenario
+        scenario_snapshot = task.scenario_snapshot or {}
         llm_config = task.llm_config
 
-        scenario_metrics: list[ScenarioMetric] = (
-            db.query(ScenarioMetric)
-            .filter(ScenarioMetric.scenario_id == scenario.id)
-            .all()
-        )
-        for sm in scenario_metrics:
-            _ = sm.metric_definition
+        scenario_metrics = snapshot_to_scenario_metrics(scenario_snapshot)
+        if not scenario_metrics:
+            scenario_metrics = (
+                db.query(ScenarioMetric)
+                .filter(ScenarioMetric.scenario_id == scenario.id)
+                .all()
+            )
+            for sm in scenario_metrics:
+                _ = sm.metric_definition
 
         dataset_rows: list[DatasetRow] = (
             db.query(DatasetRow)
@@ -569,7 +575,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         _log(task, "========== 评测任务启动 ==========")
         _log(task, f"任务: {task.name} (ID={task_id})")
         _log(task, f"数据集: {dataset.name} ({total_rows} 条)")
-        _log(task, f"场景: {scenario.name}")
+        _log(task, f"场景: {scenario_snapshot.get('name') or scenario.name}")
         _log(task, f"评判 LLM: {llm_config.model_name} @ {llm_config.api_base_url}")
         _log(task, f"指标数: {len(scenario_metrics)} 个")
         _log(task, f"进度: 0/{total_rows} (0%)")
@@ -800,11 +806,9 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
             max_val = max(numeric_values)
 
             threshold = thresholds.get(metric_name)
-            if threshold is not None:
-                pass_count = sum(1 for v in numeric_values if v >= threshold)
-                pass_rate = pass_count / len(numeric_values)
-            else:
-                pass_rate = None
+            effective_threshold = threshold if threshold is not None else DEFAULT_SUMMARY_PASS_THRESHOLD
+            pass_count = sum(1 for v in numeric_values if v >= effective_threshold)
+            pass_rate = pass_count / len(numeric_values)
         else:
             mean_val = None
             min_val = None
@@ -816,6 +820,12 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
             "min": round(min_val, 4) if min_val is not None else None,
             "max": round(max_val, 4) if max_val is not None else None,
             "pass_rate": round(pass_rate, 4) if pass_rate is not None else None,
+            "pass_threshold": thresholds.get(metric_name),
+            "effective_pass_threshold": (
+                thresholds.get(metric_name)
+                if thresholds.get(metric_name) is not None
+                else DEFAULT_SUMMARY_PASS_THRESHOLD
+            ),
             "count": len(numeric_values),
             "error_count": error_count,
         }

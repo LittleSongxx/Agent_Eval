@@ -4,6 +4,14 @@
 
 ---
 
+## 与 Ragas / DeepEval 的关系
+
+本项目当前不依赖 Ragas 或 DeepEval：后端依赖中没有安装它们，代码里也没有 import 或调用它们的服务。平台只是参考并对齐业界通用评测概念，例如 Ragas 常见的 RAG 指标、DeepEval 的 Agentic / RAG / Multi-Turn 指标分类。
+
+实际评分由平台原生实现：LLM 类指标通过你配置的 OpenAI-compatible 评判模型和本项目自己的 Judge Prompt 输出分数与理由；HitRate@K、MRR、工具正确性、参数正确性、步骤效率等确定性指标由后端代码直接计算。
+
+---
+
 ## 零、启动与验证
 
 ### 0.1 启动后端
@@ -40,9 +48,9 @@ npm run dev
 
 | 数据集 | 类型 | 条数 | 覆盖字段 | 对应场景 |
 |--------|------|------|---------|---------|
-| RAG 示例数据集 | single_turn | 5 | user_input, response, retrieved_contexts(text_list), reference | RAG 评测模板 |
-| Agent 工具调用示例数据集 | multi_turn | 3 | user_input(conversation), reference, reference_tool_calls(tool_call_list) | Agent 评测模板 |
-| 多轮对话示例数据集 | multi_turn | 3 | user_input(conversation), reference, reference_topics(text_list) | 多轮对话评测模板 |
+| RAG 示例数据集 | single_turn | 5 | user_input, response, retrieved_contexts(text_list), reference, retrieved_context_ids, reference_context_ids | RAG 评测模板 |
+| Agent 工具调用示例数据集 | multi_turn | 3 | user_input(conversation), reference, reference_tool_calls(tool_call_list), reference_topics, reference_role, retrieved_contexts | Agent 评测模板 |
+| 多轮对话示例数据集 | multi_turn | 3+ | user_input(conversation), reference, reference_topics, reference_role, retrieved_contexts | 多轮对话评测模板 |
 
 点进每个数据集的详情页查看数据内容，可以直观理解每种字段类型的实际数据格式。
 
@@ -145,6 +153,7 @@ user_input,response,retrieved_contexts,reference,retrieved_context_ids,reference
 - **Faithfulness 低分的行**：说明回答中有不在检索上下文中的信息（幻觉）
 - **Context Recall 低分的行**：说明检索的内容没有覆盖参考答案的要点
 - **Context Precision 低分的行**：说明检索结果混入了较多无关内容
+- **Contextual Relevancy 低分的行**：说明检索上下文整体和用户问题不够相关，适合在启用扩展检索质量指标时查看
 - **Answer Relevancy 低分的行**：说明回答没有紧扣用户问题
 - **Answer Completeness 低分的行**：说明回答事实可能没错，但遗漏了参考答案中的关键要点
 - **reason 字段**：LLM 给出的评分依据，帮你定位具体问题
@@ -153,12 +162,12 @@ user_input,response,retrieved_contexts,reference,retrieved_context_ids,reference
 
 ## 三、创建 Agent 评测
 
-Agent 评测评估工具调用准确性和目标达成度。它和“多轮对话评测”的区别是：Agent 场景关注行动链路是否正确，包括是否调用了正确工具、参数是否正确、工具返回后是否完成用户目标；多轮对话场景关注对话体验是否稳定，包括是否跑题、是否记住上下文、回答是否连贯。
+Agent 评测评估任务完成度、工具正确性、参数正确性、步骤效率和目标准确度。它和“多轮对话评测”的区别是：Agent 场景关注行动链路是否正确，包括是否调用了正确工具、参数是否正确、工具返回后是否完成用户目标；多轮对话场景关注对话体验是否稳定，包括是否跑题、是否记住上下文、是否遵守角色边界。
 
 | 场景 | 关注点 | 典型字段 | 典型指标 |
 |------|--------|----------|----------|
-| Agent 评测 | 工具调用和任务闭环 | `reference_tool_calls`, `reference` | Tool Call Accuracy, Agent Goal Accuracy |
-| 多轮对话评测 | 话题范围和上下文连贯 | `reference_topics`, 可选 `reference` | Topic Adherence, Coherence |
+| Agent 评测 | 工具调用和任务闭环 | `reference_tool_calls`, `reference` | Task Completion, Tool Correctness, Argument Correctness, Step Efficiency, Goal Accuracy |
+| 多轮对话评测 | 话题范围、上下文记忆和角色一致性 | `reference_topics`, `reference`, `reference_role`, 可选 `retrieved_contexts` | Topic Adherence, Turn Relevancy, Conversation Completeness, Knowledge Retention, Role Adherence |
 
 如果一个样本既是多轮，又包含工具调用和明确任务目标，优先按 Agent 评测处理；如果只是普通 human/ai 多轮聊天，没有工具执行链，就按多轮对话评测处理。
 
@@ -178,7 +187,9 @@ Agent 评测评估工具调用准确性和目标达成度。它和“多轮对�
     "reference": "成功查询到订单状态并告知用户",
     "reference_tool_calls": [
       {"name": "query_order", "args": {"order_id": "ORD-001"}}
-    ]
+    ],
+    "reference_role": "客服 Agent：只能基于工具返回结果答复订单状态，不编造物流信息。",
+    "retrieved_contexts": ["订单查询工具返回订单状态和快递单号后，Agent 应把状态和快递单号告知用户。"]
   },
   {
     "user_input": [
@@ -190,7 +201,9 @@ Agent 评测评估工具调用准确性和目标达成度。它和“多轮对�
     "reference": "成功取消指定订单",
     "reference_tool_calls": [
       {"name": "cancel_order", "args": {"order_id": "ORD-002"}}
-    ]
+    ],
+    "reference_role": "客服 Agent：按工具返回结果确认取消状态，不越权承诺退款到账时间。",
+    "retrieved_contexts": ["取消订单工具返回 success=true 后，Agent 才能告知订单已取消。"]
   }
 ]
 ```
@@ -199,6 +212,8 @@ Agent 评测评估工具调用准确性和目标达成度。它和“多轮对�
 - `user_input`：消息数组，type 为 `human` / `ai` / `tool`
 - `ai` 消息的 `tool_calls`：Agent 实际调用的工具
 - `reference_tool_calls`：期望 Agent 应该调用的工具
+- `reference_role`：可选，Agent 应遵守的角色和职责边界
+- `retrieved_contexts`：可选，任务相关的业务/工具背景资料，用于多轮可信度类指标
 
 ### 3.2 创建数据集
 
@@ -210,25 +225,34 @@ Agent 评测评估工具调用准确性和目标达成度。它和“多轮对�
 
 ### 3.3 执行评测
 
-- 场景选 `Agent 评测模板`（含 Tool Call Accuracy + Agent Goal Accuracy）
+- 场景选 `Agent 评测模板`（含 Task Completion + Tool Correctness + Argument Correctness + Step Efficiency + Goal Accuracy）
 - 执行后查看报告
-- **Tool Call Accuracy**：后端确定性比较实际工具调用和期望工具调用，给出匹配数量说明
-- **Agent Goal Accuracy**：平台原生 Judge 阅读完整 Agent 轨迹，判断是否达成用户目标并返回理由
+- **Task Completion**：平台原生 Judge 判断 Agent 是否完成任务闭环
+- **Tool Correctness**：后端确定性比较实际工具调用和期望工具调用，工具名和参数都匹配才算命中
+- **Argument Correctness**：后端确定性比较同名工具的参数匹配度
+- **Step Efficiency**：后端确定性比较实际工具步骤数和期望步骤数，识别多调、漏调、重复调用
+- **Goal Accuracy**：平台原生 Judge 判断最终结果是否准确达成 `reference` 描述的目标
 
 ### 3.4 创建多轮对话评测
 
-多轮对话评测不要求工具调用，重点看对话是否围绕业务话题、上下文是否连贯。
+多轮对话评测不要求工具调用，重点看对话是否围绕业务话题、是否满足用户需求、是否记住上下文、是否遵守角色边界。
 
 核心字段：
 
 - `user_input`：human/ai 交替的完整对话
 - `reference_topics`：允许讨论的话题范围，例如 `["订单查询", "退货退款", "物流追踪"]`
-- `reference`：可选，用于描述期望对话结果
+- `reference`：用于描述期望对话结果，Conversation Completeness 指标需要
+- `reference_role`：AI 应遵守的角色、职责边界和语气要求，Role Adherence 指标需要
+- `retrieved_contexts`：可选，多轮回复可依据的业务资料，Turn Faithfulness 指标需要
 
 执行时选择 `多轮对话评测模板`：
 
 - **Topic Adherence**：平台原生 Judge 判断对话是否围绕 `reference_topics`
-- **Coherence**：平台原生 Judge 判断对话是否前后连贯、逻辑清晰
+- **Turn Relevancy**：平台原生 Judge 逐轮判断 AI 回复是否回应当前用户问题
+- **Conversation Completeness**：平台原生 Judge 判断整段对话是否完成 `reference` 描述的用户需求
+- **Knowledge Retention**：平台原生 Judge 判断 AI 是否记住前面已给出的事实、偏好、订单号、时间等信息
+- **Role Adherence**：平台原生 Judge 判断 AI 是否遵守 `reference_role`
+- **Turn Faithfulness**：可选扩展，平台原生 Judge 判断多轮回复是否基于 `retrieved_contexts` 或给定资料
 
 ---
 
@@ -269,14 +293,23 @@ curl -X POST http://localhost:8000/api/metrics \
 | Faithfulness | RAG | user_input, response, retrieved_contexts |
 | Context Recall | RAG | user_input, retrieved_contexts, reference |
 | Context Precision | RAG | user_input, retrieved_contexts, reference |
+| Contextual Relevancy | RAG 扩展 | user_input, retrieved_contexts |
 | Factual Correctness | RAG | response, reference |
 | Answer Relevancy | RAG | user_input, response |
 | Answer Completeness | RAG | user_input, response, reference |
-| HitRate@K | RAG 检索单测 | retrieved_context_ids, reference_context_ids |
-| MRR | RAG 检索单测 | retrieved_context_ids, reference_context_ids |
-| Tool Call Accuracy | Agent | user_input (conversation), reference_tool_calls |
-| Agent Goal Accuracy | Agent | user_input (conversation), reference |
+| HitRate@K (Hit Rate at K) | RAG 检索单测 | retrieved_context_ids, reference_context_ids |
+| MRR (Mean Reciprocal Rank) | RAG 检索单测 | retrieved_context_ids, reference_context_ids |
+| Task Completion | Agent | user_input (conversation), reference |
+| Tool Correctness | Agent | user_input (conversation), reference_tool_calls |
+| Argument Correctness | Agent | user_input (conversation), reference_tool_calls |
+| Step Efficiency | Agent | user_input (conversation), reference_tool_calls |
+| Goal Accuracy | Agent | user_input (conversation), reference |
 | Topic Adherence | 多轮对话 | user_input (conversation), reference_topics |
+| Turn Relevancy | 多轮对话 | user_input (conversation) |
+| Conversation Completeness | 多轮对话 | user_input (conversation), reference |
+| Knowledge Retention | 多轮对话 | user_input (conversation) |
+| Role Adherence | 多轮对话 | user_input (conversation), reference_role |
+| Turn Faithfulness | 多轮对话扩展 | user_input (conversation), retrieved_contexts |
 | Harmfulness | 通用 | response |
 | Coherence | 通用 | response |
 

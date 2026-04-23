@@ -21,7 +21,7 @@ import {
   DeleteOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Dataset, DatasetRow, FieldDefinition, PaginatedResponse } from '../types';
 import * as api from '../services/api';
 
@@ -66,7 +66,12 @@ const JsonPreviewModal: React.FC<{
 const DatasetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const datasetId = Number(id);
+  const targetRowId = Number(searchParams.get('rowId')) || null;
+  const targetRowIndexParam = searchParams.get('rowIndex');
+  const targetRowIndex = targetRowIndexParam === null ? null : Number(targetRowIndexParam);
+  const hasTargetRowIndex = targetRowIndex !== null && Number.isFinite(targetRowIndex);
 
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [rows, setRows] = useState<DatasetRow[]>([]);
@@ -119,6 +124,15 @@ const DatasetDetailPage: React.FC = () => {
   useEffect(() => {
     fetchRows();
   }, [fetchRows]);
+
+  useEffect(() => {
+    if (!hasTargetRowIndex) return;
+    if (targetRowIndex === null) return;
+    const nextPage = Math.floor(targetRowIndex / pageSize) + 1;
+    if (nextPage > 0 && nextPage !== page) {
+      setPage(nextPage);
+    }
+  }, [hasTargetRowIndex, page, pageSize, targetRowIndex]);
 
   const handleAddRow = async () => {
     try {
@@ -232,6 +246,14 @@ const DatasetDetailPage: React.FC = () => {
 
   return (
     <Spin spinning={loading}>
+      <style>
+        {`
+          .dataset-row-highlight > td {
+            background: #fff7e6 !important;
+            box-shadow: inset 3px 0 0 #faad14;
+          }
+        `}
+      </style>
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/datasets')}>
           返回列表
@@ -273,6 +295,12 @@ const DatasetDetailPage: React.FC = () => {
         loading={rowsLoading}
         columns={columns}
         dataSource={rows}
+        rowClassName={(record) => (
+          (targetRowId && record.id === targetRowId) ||
+          (!targetRowId && hasTargetRowIndex && record.row_index === targetRowIndex)
+            ? 'dataset-row-highlight'
+            : ''
+        )}
         scroll={{ x: 'max-content' }}
         pagination={{
           current: page,

@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Tabs, Table, Card, Row, Col, Statistic, Tag, Button, Space, Select,
-  Descriptions, Drawer, Typography, Spin, message, Progress, Divider, Tooltip, Alert,
+  Descriptions, Drawer, Typography, Spin, message, Progress, Divider, Tooltip, Alert, Modal,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
-  ArrowLeftOutlined, QuestionCircleOutlined, InfoCircleOutlined,
+  ArrowLeftOutlined, QuestionCircleOutlined, InfoCircleOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { ReportSummary, EvalRowResult, PaginatedResponse } from '../types';
+import type { ReportSummary, EvalRowResult, PaginatedResponse, Dataset, DatasetRow } from '../types';
 import * as api from '../services/api';
 import { MetricHelpDrawer, MetricHelpIcon } from '../components/MetricHelpDrawer';
 import { getMetricInfo, groupMetricNames, type MetricLayer } from '../utils/metricLayers';
@@ -158,6 +158,14 @@ const ReportDetailPage: React.FC = () => {
   const [selectedRow, setSelectedRow] = useState<EvalRowResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [helpMetric, setHelpMetric] = useState<string | null>(null);
+  const [datasetModalOpen, setDatasetModalOpen] = useState(false);
+  const [datasetPreview, setDatasetPreview] = useState<Dataset | null>(null);
+  const [datasetRows, setDatasetRows] = useState<DatasetRow[]>([]);
+  const [datasetRowsTotal, setDatasetRowsTotal] = useState(0);
+  const [datasetPage, setDatasetPage] = useState(1);
+  const [datasetPageSize, setDatasetPageSize] = useState(10);
+  const [datasetPreviewLoading, setDatasetPreviewLoading] = useState(false);
+  const [previewRow, setPreviewRow] = useState<DatasetRow | null>(null);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true);
@@ -187,6 +195,48 @@ const ReportDetailPage: React.FC = () => {
   const metricHelp = (metric: string) => (
     <MetricHelpIcon metricName={metric} onClick={() => setHelpMetric(metric)} />
   );
+  const datasetUrl = evalTask?.dataset_id ? `/datasets/${evalTask.dataset_id}` : undefined;
+  const getDatasetRowUrl = (row?: { dataset_row?: DatasetRow | null; row_index?: number | null } | null) => {
+    const datasetId = row?.dataset_row?.dataset_id || evalTask?.dataset_id;
+    if (!datasetId) return undefined;
+    const params = new URLSearchParams();
+    if (row?.dataset_row?.id) params.set('rowId', String(row.dataset_row.id));
+    const rowIndex = row?.dataset_row?.row_index ?? row?.row_index;
+    if (rowIndex !== undefined && rowIndex !== null) params.set('rowIndex', String(rowIndex));
+    const query = params.toString();
+    return `/datasets/${datasetId}${query ? `?${query}` : ''}`;
+  };
+  const loadDatasetPreview = useCallback(async (datasetId: number, nextPage = datasetPage, nextPageSize = datasetPageSize) => {
+    setDatasetPreviewLoading(true);
+    try {
+      const [datasetData, rowsData] = await Promise.all([
+        api.getDataset(datasetId),
+        api.listDatasetRows(datasetId, nextPage, nextPageSize),
+      ]);
+      setDatasetPreview(datasetData);
+      setDatasetRows(rowsData.items || []);
+      setDatasetRowsTotal(rowsData.total || 0);
+    } catch {
+      message.error('加载数据集预览失败');
+    } finally {
+      setDatasetPreviewLoading(false);
+    }
+  }, [datasetPage, datasetPageSize]);
+
+  const openDatasetPreview = async (row?: EvalRowResult | null) => {
+    const datasetId = row?.dataset_row?.dataset_id || evalTask?.dataset_id;
+    if (!datasetId) return;
+    const nextPageSize = 10;
+    const rowIndex = row?.dataset_row?.row_index ?? row?.row_index;
+    const nextPage = rowIndex !== undefined && rowIndex !== null
+      ? Math.floor(rowIndex / nextPageSize) + 1
+      : 1;
+    setPreviewRow(row?.dataset_row || null);
+    setDatasetPage(nextPage);
+    setDatasetPageSize(nextPageSize);
+    setDatasetModalOpen(true);
+    await loadDatasetPreview(datasetId, nextPage, nextPageSize);
+  };
 
   const detailColumns = [
     { title: '#', dataIndex: 'row_index', key: 'row_index', width: 50 },
@@ -221,8 +271,20 @@ const ReportDetailPage: React.FC = () => {
     })),
     { title: '耗时', dataIndex: 'execution_time_ms', key: 'time', width: 70, render: (v: number | null) => v != null ? `${v}ms` : '-' },
     {
-      title: '操作', key: 'actions', width: 70,
-      render: (_: unknown, r: EvalRowResult) => <Button type="link" size="small" onClick={() => openDetail(r)}>详情</Button>,
+      title: '操作', key: 'actions', width: 150,
+      render: (_: unknown, r: EvalRowResult) => {
+        const rowUrl = getDatasetRowUrl(r);
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => openDetail(r)}>详情</Button>
+            {rowUrl && (
+              <Button type="link" size="small" onClick={() => openDatasetPreview(r)}>
+                原始行
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -232,6 +294,12 @@ const ReportDetailPage: React.FC = () => {
     const metricGroups = groupMetricNames(Object.keys(metricSummary));
     const duration = evalTask?.started_at && evalTask?.finished_at
       ? Math.round((new Date(evalTask.finished_at).getTime() - new Date(evalTask.started_at).getTime()) / 1000) : null;
+    const evaluatedRows = evalTask?.total_rows ?? summary.total_count;
+    const currentDatasetRows = evalTask?.dataset?.row_count;
+    const datasetChangedAfterRun =
+      typeof currentDatasetRows === 'number' &&
+      typeof evaluatedRows === 'number' &&
+      currentDatasetRows !== evaluatedRows;
 
     return (
       <div>
@@ -284,10 +352,33 @@ const ReportDetailPage: React.FC = () => {
         </Card>
 
         <Card title="基本信息">
+          {datasetChangedAfterRun && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="当前数据集行数与本次评测行数不一致"
+              description={`这份报告是历史执行结果：本次评测实际执行 ${evaluatedRows} 条；当前数据集已有 ${currentDatasetRows} 条。新增或删除的数据不会自动进入旧报告，请在评测执行页克隆该任务并重新执行。`}
+            />
+          )}
           <Descriptions column={2} size="small">
             <Descriptions.Item label="评测名称">{evalTask?.name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="数据集">{evalTask?.dataset?.name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="场景">{evalTask?.scenario?.name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="数据集">
+              {datasetUrl ? (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<DatabaseOutlined />}
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => openDatasetPreview()}
+                >
+                  {evalTask?.dataset?.name || `数据集 #${evalTask?.dataset_id}`}
+                </Button>
+              ) : evalTask?.dataset?.name || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="本次评测行数">{evaluatedRows ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="当前数据集行数">{currentDatasetRows ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="场景">{evalTask?.scenario_snapshot?.name || evalTask?.scenario?.name || '-'}</Descriptions.Item>
             <Descriptions.Item label="评测 LLM">{evalTask?.llm_config?.name || '-'}</Descriptions.Item>
             <Descriptions.Item label="执行时间">{evalTask?.started_at ? new Date(evalTask.started_at).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
             <Descriptions.Item label="耗时">{duration !== null ? `${duration} 秒` : '-'}</Descriptions.Item>
@@ -391,7 +482,18 @@ const ReportDetailPage: React.FC = () => {
 
         <Divider />
 
-        <Title level={5}>📄 原始数据</Title>
+        <Space align="center" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+          <Title level={5} style={{ margin: 0 }}>📄 原始数据</Title>
+          {getDatasetRowUrl(selectedRow) && (
+            <Button
+              size="small"
+              icon={<DatabaseOutlined />}
+              onClick={() => openDatasetPreview(selectedRow)}
+            >
+              在数据集中定位
+            </Button>
+          )}
+        </Space>
         {selectedRow.dataset_row?.data ? (
           <DataFieldsView data={selectedRow.dataset_row.data} />
         ) : <Text type="secondary">无原始数据</Text>}
@@ -411,8 +513,41 @@ const ReportDetailPage: React.FC = () => {
     );
   };
 
+  const renderDatasetPreviewValue = (value: any) => {
+    if (value === null || value === undefined) return <Text type="secondary">-</Text>;
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    return (
+      <Text style={{ fontSize: 12 }}>
+        {text.length > 80 ? `${text.slice(0, 80)}...` : text}
+      </Text>
+    );
+  };
+
+  const datasetFieldNames = datasetPreview?.field_schema?.length
+    ? datasetPreview.field_schema.map((field) => field.name)
+    : Array.from(new Set(datasetRows.flatMap((row) => Object.keys(row.data || {}))));
+
+  const datasetPreviewColumns = [
+    { title: '#', dataIndex: 'row_index', key: 'row_index', width: 60 },
+    ...datasetFieldNames.map((fieldName) => ({
+      title: FIELD_META[fieldName]?.label || fieldName,
+      key: fieldName,
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: DatasetRow) => renderDatasetPreviewValue(record.data?.[fieldName]),
+    })),
+  ];
+
   return (
     <>
+      <style>
+        {`
+          .dataset-row-highlight > td {
+            background: #fff7e6 !important;
+            box-shadow: inset 3px 0 0 #faad14;
+          }
+        `}
+      </style>
       <Spin spinning={loading}>
         <Space style={{ marginBottom: 16 }}>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/evaluations')}>返回评测列表</Button>
@@ -446,6 +581,69 @@ const ReportDetailPage: React.FC = () => {
             ),
           },
         ]} />
+        <Modal
+          title={
+            <Space>
+              <DatabaseOutlined />
+              <span>{previewRow ? `原始数据行 #${previewRow.row_index}` : '数据集预览'}</span>
+            </Space>
+          }
+          open={datasetModalOpen}
+          onCancel={() => {
+            setDatasetModalOpen(false);
+            setPreviewRow(null);
+          }}
+          width="88vw"
+          style={{ top: 32 }}
+          footer={
+            <Space>
+              {datasetUrl && (
+                <Button onClick={() => navigate(previewRow ? getDatasetRowUrl({ dataset_row: previewRow }) || datasetUrl : datasetUrl)}>
+                  打开数据集页面
+                </Button>
+              )}
+              <Button type="primary" onClick={() => setDatasetModalOpen(false)}>关闭</Button>
+            </Space>
+          }
+        >
+          <Spin spinning={datasetPreviewLoading}>
+            {datasetPreview && (
+              <Descriptions size="small" column={3} style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="数据集">{datasetPreview.name}</Descriptions.Item>
+                <Descriptions.Item label="样本类型">{datasetPreview.sample_type}</Descriptions.Item>
+                <Descriptions.Item label="数据行数">{datasetPreview.row_count}</Descriptions.Item>
+              </Descriptions>
+            )}
+            {previewRow?.data && (
+              <Card size="small" title="当前原始行内容" style={{ marginBottom: 16 }}>
+                <DataFieldsView data={previewRow.data} />
+              </Card>
+            )}
+            <Table
+              rowKey="id"
+              size="small"
+              columns={datasetPreviewColumns}
+              dataSource={datasetRows}
+              scroll={{ x: 'max-content', y: 360 }}
+              rowClassName={(record) => previewRow?.id === record.id ? 'dataset-row-highlight' : ''}
+              onRow={(record) => ({ onClick: () => setPreviewRow(record) })}
+              pagination={{
+                current: datasetPage,
+                pageSize: datasetPageSize,
+                total: datasetRowsTotal,
+                showSizeChanger: true,
+                showTotal: (t) => `共 ${t} 条`,
+                onChange: async (nextPage, nextPageSize) => {
+                  setDatasetPage(nextPage);
+                  setDatasetPageSize(nextPageSize);
+                  if (evalTask?.dataset_id) {
+                    await loadDatasetPreview(evalTask.dataset_id, nextPage, nextPageSize);
+                  }
+                },
+              }}
+            />
+          </Spin>
+        </Modal>
       </Spin>
       <MetricHelpDrawer open={!!helpMetric} metricName={helpMetric} onClose={() => setHelpMetric(null)} />
     </>
