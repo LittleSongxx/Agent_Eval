@@ -21,6 +21,7 @@ import {
   FileTextOutlined,
   CodeOutlined,
   CloseOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { EvalTask, Dataset, EvalScenario, LLMConfig } from '../types';
@@ -76,6 +77,7 @@ const EvaluationPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
+  const formCardRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [consoleTaskId, setConsoleTaskId] = useState<number | null>(null);
   const [consoleLogs, setConsoleLogs] = useState('');
@@ -84,6 +86,7 @@ const EvaluationPage: React.FC = () => {
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const consoleBoxRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
+  const [cloneSourceTask, setCloneSourceTask] = useState<EvalTask | null>(null);
   const selectedDatasetId = Form.useWatch('dataset_id', form);
   const selectedScenarioId = Form.useWatch('scenario_id', form);
 
@@ -192,6 +195,7 @@ const EvaluationPage: React.FC = () => {
       const created = await api.createEvaluation(values);
       message.success('评测任务已创建');
       form.resetFields();
+      setCloneSourceTask(null);
       setTasks((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
       fetchTasks();
       openConsole(created.id);
@@ -210,6 +214,26 @@ const EvaluationPage: React.FC = () => {
     } catch {
       message.error('取消失败');
     }
+  };
+
+  const handleClone = (task: EvalTask) => {
+    const timestamp = new Date().toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    form.setFieldsValue({
+      name: `${task.name} 复跑 ${timestamp}`,
+      dataset_id: task.dataset_id,
+      scenario_id: task.scenario_id,
+      llm_config_id: task.llm_config_id,
+    });
+    setCloneSourceTask(task);
+    message.success('已复制任务配置，可修改后重新执行');
+    setTimeout(() => {
+      formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
   };
 
   const getTaskPercent = (task: EvalTask) => {
@@ -329,9 +353,17 @@ const EvaluationPage: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 180,
+      width: 240,
       render: (_: unknown, record: EvalTask) => (
         <Space>
+          <Button
+            size="small"
+            type="link"
+            icon={<CopyOutlined />}
+            onClick={() => handleClone(record)}
+          >
+            克隆
+          </Button>
           <Button
             size="small"
             type="link"
@@ -369,7 +401,31 @@ const EvaluationPage: React.FC = () => {
     <Spin spinning={loading}>
       <Title level={4}>评测执行</Title>
 
-      <Card title="新建评测" style={{ marginBottom: 24 }}>
+      <div ref={formCardRef}>
+      <Card
+        title={cloneSourceTask ? `克隆评测任务 #${cloneSourceTask.id}` : '新建评测'}
+        style={{ marginBottom: 24 }}
+        extra={cloneSourceTask && (
+          <Button
+            size="small"
+            onClick={() => {
+              form.resetFields();
+              setCloneSourceTask(null);
+            }}
+          >
+            取消克隆
+          </Button>
+        )}
+      >
+        {cloneSourceTask && (
+          <Alert
+            style={{ marginBottom: 12 }}
+            type="info"
+            showIcon
+            message="已从历史任务复制配置"
+            description={`来源任务：${cloneSourceTask.name}。你可以修改任务名称、数据集、场景或 LLM 配置，点击“开始评测”后会生成一条新的历史记录。`}
+          />
+        )}
         <Form
           form={form}
           layout="inline"
@@ -442,6 +498,7 @@ const EvaluationPage: React.FC = () => {
           />
         )}
       </Card>
+      </div>
 
       {progressTask && (
         <Card
@@ -475,15 +532,17 @@ const EvaluationPage: React.FC = () => {
         </Card>
       )}
 
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={tasks}
-        pagination={{
-          pageSize: 10,
-          showTotal: (t) => `共 ${t} 条`,
-        }}
-      />
+      <Card title="评测历史记录" style={{ marginBottom: 24 }}>
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={tasks}
+          pagination={{
+            pageSize: 10,
+            showTotal: (t) => `共 ${t} 条`,
+          }}
+        />
+      </Card>
 
       {consoleTaskId !== null && (
         <div style={{ marginTop: 16 }}>

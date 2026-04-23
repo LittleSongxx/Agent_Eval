@@ -24,6 +24,28 @@ const layerHeaderCell = (group: MetricLayer, level: 'group' | 'metric' = 'group'
   },
 });
 
+const renderLayerHeaderTitle = (group: MetricLayer) => (
+  <div style={{ lineHeight: 1.25 }}>
+    <div>
+      <Tag color={group.color} style={{ marginRight: 6 }}>{group.name}</Tag>
+    </div>
+    {group.description && (
+      <div
+        style={{
+          marginTop: 3,
+          color: group.headerText,
+          fontSize: 11,
+          fontWeight: 400,
+          opacity: 0.82,
+          whiteSpace: 'normal',
+        }}
+      >
+        （{group.description}）
+      </div>
+    )}
+  </div>
+);
+
 const formatScore = (score: any, metricName: string): { display: string; color: string; explain: string } => {
   if (score === null || score === undefined) return { display: 'N/A', color: '#999', explain: '指标计算出错，无法得出分数' };
   if (typeof score === 'string') {
@@ -176,12 +198,7 @@ const ReportDetailPage: React.FC = () => {
         r.is_pass === false ? <Tag color="error">不通过</Tag> : <Tag>-</Tag>,
     },
     ...groupMetricNames(metricNames).map((group) => ({
-      title: (
-        <Space size={4}>
-          <Tag color={group.color}>{group.name}</Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>{group.description}</Text>
-        </Space>
-      ),
+      title: renderLayerHeaderTitle(group),
       key: group.key,
       onHeaderCell: () => layerHeaderCell(group, 'group'),
       children: group.metrics.map((metric) => ({
@@ -237,7 +254,12 @@ const ReportDetailPage: React.FC = () => {
                 <Card
                   key={group.key}
                   size="small"
-                  title={<Space><Tag color={group.color}>{group.name}</Tag><Text type="secondary">{group.description}</Text></Space>}
+                  title={
+                    <Space size={6} wrap>
+                      <Tag color={group.color}>{group.name}</Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>（{group.description}）</Text>
+                    </Space>
+                  }
                 >
                   <Table rowKey="metric" dataSource={dataSource} pagination={false} size="small" columns={[
                     {
@@ -296,7 +318,12 @@ const ReportDetailPage: React.FC = () => {
             <Card
               key={group.key}
               size="small"
-              title={<Space><Tag color={group.color}>{group.name}</Tag><Text type="secondary">{group.description}</Text></Space>}
+              title={
+                <Space size={6} wrap>
+                  <Tag color={group.color}>{group.name}</Tag>
+                  <Text type="secondary" style={{ fontSize: 12 }}>（{group.description}）</Text>
+                </Space>
+              }
             >
               <Table
                 rowKey="metric"
