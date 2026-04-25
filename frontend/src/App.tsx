@@ -12,6 +12,7 @@ import {
 import LLMConfigPage from './pages/LLMConfigPage';
 import DatasetListPage from './pages/DatasetListPage';
 import DatasetDetailPage from './pages/DatasetDetailPage';
+import RagDatasetBuilderPage from './pages/RagDatasetBuilderPage';
 import ScenarioListPage from './pages/ScenarioListPage';
 import EvaluationPage from './pages/EvaluationPage';
 import ReportDetailPage from './pages/ReportDetailPage';
@@ -80,6 +81,7 @@ const App: React.FC = () => {
               <Route path="/llm-configs" element={<LLMConfigPage />} />
               <Route path="/datasets" element={<DatasetListPage />} />
               <Route path="/datasets/:id" element={<DatasetDetailPage />} />
+              <Route path="/datasets/rag-builder" element={<RagDatasetBuilderPage />} />
               <Route path="/scenarios" element={<ScenarioListPage />} />
               <Route path="/evaluations" element={<EvaluationPage />} />
               <Route path="/reports/:id" element={<ReportDetailPage />} />

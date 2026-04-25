@@ -28,6 +28,25 @@ export const importDataset = (id: number, file: File) => {
   return api.post(`/datasets/${id}/import`, fd).then(r => r.data);
 };
 
+// ======================== RAG Dataset Jobs ========================
+
+export const listRagDatasetJobs = () => api.get('/rag-dataset-jobs').then(r => r.data);
+export const createRagDatasetJob = (data: any) => api.post('/rag-dataset-jobs', data).then(r => r.data);
+export const getRagDatasetJob = (id: number) => api.get(`/rag-dataset-jobs/${id}`).then(r => r.data);
+export const uploadRagDatasetJobDocuments = (id: number, files: File[]) => {
+  const fd = new FormData();
+  files.forEach((file) => fd.append('files', file));
+  return api.post(`/rag-dataset-jobs/${id}/documents`, fd).then(r => r.data);
+};
+export const listRagDatasetJobChunks = (id: number, documentId?: number) =>
+  api.get(`/rag-dataset-jobs/${id}/chunks`, { params: documentId ? { document_id: documentId } : undefined }).then(r => r.data);
+export const listRagDatasetJobSamples = (id: number, page = 1, pageSize = 20, status?: string) =>
+  api.get(`/rag-dataset-jobs/${id}/samples`, { params: { page, page_size: pageSize, status } }).then(r => r.data);
+export const startRagDatasetJob = (id: number) => api.post(`/rag-dataset-jobs/${id}/start`).then(r => r.data);
+export const retryFailedRagDatasetJob = (id: number) => api.post(`/rag-dataset-jobs/${id}/retry-failed`).then(r => r.data);
+export const rerunRagDatasetJobSamples = (id: number, sampleIds: number[]) =>
+  api.post(`/rag-dataset-jobs/${id}/rerun-samples`, { sample_ids: sampleIds }).then(r => r.data);
+
 // ======================== Metric ========================
 
 export const listMetrics = () => api.get('/metrics').then(r => r.data);

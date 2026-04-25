@@ -15,7 +15,7 @@ import {
   Typography,
   Spin,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, MinusCircleOutlined, FileSearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Dataset, FieldDefinition } from '../types';
 import * as api from '../services/api';
@@ -180,9 +180,14 @@ const DatasetListPage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>
           数据集管理
         </Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          新建数据集
-        </Button>
+        <Space>
+          <Button icon={<FileSearchOutlined />} onClick={() => navigate('/datasets/rag-builder')}>
+            生成 RAG 数据集
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+            新建数据集
+          </Button>
+        </Space>
       </div>
 
       <Table
