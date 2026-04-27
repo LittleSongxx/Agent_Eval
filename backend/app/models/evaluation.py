@@ -42,7 +42,58 @@ class EvalRowResult(Base):
     is_pass = Column(Boolean, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)
+    manual_status = Column(String(50), nullable=True)
+    manual_score = Column(Float, nullable=True)
+    manual_tags = Column(JSON, nullable=True)
+    manual_note = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
 
     eval_task = relationship("EvalTask", back_populates="row_results")
+    dataset_row = relationship("DatasetRow")
+
+
+class BlindTestTask(Base):
+    __tablename__ = "blind_test_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    status = Column(String(50), default="pending")
+    progress = Column(Float, default=0.0)
+    total_rows = Column(Integer, nullable=True)
+    completed_rows = Column(Integer, default=0)
+    voted_rows = Column(Integer, default=0)
+    sample_limit = Column(Integer, nullable=True)
+    target_a = Column(JSON, nullable=False)
+    target_b = Column(JSON, nullable=False)
+    error_message = Column(Text, nullable=True)
+    logs = Column(Text, default="")
+    summary = Column(JSON, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    dataset = relationship("Dataset")
+    row_results = relationship("BlindTestRowResult", back_populates="blind_test_task", cascade="all, delete-orphan")
+
+
+class BlindTestRowResult(Base):
+    __tablename__ = "blind_test_row_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blind_test_task_id = Column(Integer, ForeignKey("blind_test_tasks.id", ondelete="CASCADE"), nullable=False)
+    dataset_row_id = Column(Integer, ForeignKey("dataset_rows.id"), nullable=False)
+    row_index = Column(Integer, nullable=False)
+    answer_a = Column(Text, nullable=True)
+    answer_b = Column(Text, nullable=True)
+    answer_a_error = Column(Text, nullable=True)
+    answer_b_error = Column(Text, nullable=True)
+    display_order = Column(JSON, nullable=False)
+    vote = Column(String(50), nullable=True)
+    vote_note = Column(Text, nullable=True)
+    voted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    blind_test_task = relationship("BlindTestTask", back_populates="row_results")
     dataset_row = relationship("DatasetRow")

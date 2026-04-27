@@ -28,6 +28,7 @@ const LLMConfigPage: React.FC = () => {
   const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
   const [form] = Form.useForm<LLMConfigCreate>();
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [testingDraft, setTestingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchConfigs = async () => {
@@ -118,6 +119,42 @@ const LLMConfigPage: React.FC = () => {
     }
   };
 
+  const handleTestDraft = async () => {
+    try {
+      const values = await form.validateFields(['name', 'api_base_url', 'api_key', 'model_name']);
+      setTestingDraft(true);
+      const payload = {
+        provider: form.getFieldValue('provider') || 'openai',
+        temperature: form.getFieldValue('temperature') ?? 0.01,
+        max_tokens: form.getFieldValue('max_tokens') ?? 1024,
+        is_default: form.getFieldValue('is_default') ?? false,
+        ...values,
+      };
+      const result = await api.testLLMConfigDraft(payload);
+      if (result.success) {
+        Modal.success({
+          title: '测试成功',
+          content: (
+            <div>
+              <div>延迟：{result.latency_ms ? `${result.latency_ms}ms` : '-'}</div>
+              {result.sample_output && (
+                <pre style={{ marginTop: 12, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                  {result.sample_output}
+                </pre>
+              )}
+            </div>
+          ),
+        });
+      } else {
+        message.error(`连接测试失败: ${result.message}`);
+      }
+    } catch {
+      message.error('请先补全必填配置后再测试');
+    } finally {
+      setTestingDraft(false);
+    }
+  };
+
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name', width: 160 },
     {
@@ -204,6 +241,21 @@ const LLMConfigPage: React.FC = () => {
         okText={editingConfig ? '保存' : '创建'}
         cancelText="取消"
         width={560}
+        footer={[
+          <Button key="test" icon={<ExperimentOutlined />} loading={testingDraft} onClick={handleTestDraft}>
+            测试当前配置
+          </Button>,
+          <Button key="cancel" onClick={() => {
+            setModalOpen(false);
+            form.resetFields();
+            setEditingConfig(null);
+          }}>
+            取消
+          </Button>,
+          <Button key="submit" type="primary" loading={submitting} onClick={handleSubmit}>
+            {editingConfig ? '保存' : '创建'}
+          </Button>,
+        ]}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item

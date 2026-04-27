@@ -7,6 +7,7 @@ import {
   AppstoreOutlined,
   PlayCircleOutlined,
   BarChartOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 
 import LLMConfigPage from './pages/LLMConfigPage';
@@ -16,6 +17,7 @@ import RagDatasetBuilderPage from './pages/RagDatasetBuilderPage';
 import ScenarioListPage from './pages/ScenarioListPage';
 import EvaluationPage from './pages/EvaluationPage';
 import ReportDetailPage from './pages/ReportDetailPage';
+import BlindTestPage from './pages/BlindTestPage';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -25,6 +27,7 @@ const menuItems = [
   { key: '/datasets', icon: <DatabaseOutlined />, label: '数据管理' },
   { key: '/scenarios', icon: <AppstoreOutlined />, label: '场景管理' },
   { key: '/evaluations', icon: <PlayCircleOutlined />, label: '评测执行' },
+  { key: '/blind-tests', icon: <SwapOutlined />, label: '人工盲测' },
   { key: '/reports', icon: <BarChartOutlined />, label: '评测报告' },
 ];
 
@@ -84,6 +87,7 @@ const App: React.FC = () => {
               <Route path="/datasets/rag-builder" element={<RagDatasetBuilderPage />} />
               <Route path="/scenarios" element={<ScenarioListPage />} />
               <Route path="/evaluations" element={<EvaluationPage />} />
+              <Route path="/blind-tests" element={<BlindTestPage />} />
               <Route path="/reports/:id" element={<ReportDetailPage />} />
               <Route path="*" element={<Navigate to="/datasets" replace />} />
             </Routes>

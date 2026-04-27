@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Tabs, Table, Card, Row, Col, Statistic, Tag, Button, Space, Select,
-  Descriptions, Drawer, Typography, Spin, message, Progress, Divider, Tooltip, Alert, Modal,
+  Descriptions, Drawer, Typography, Spin, message, Progress, Divider, Tooltip, Alert, Modal, Input,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
@@ -158,6 +158,7 @@ const ReportDetailPage: React.FC = () => {
   const [selectedRow, setSelectedRow] = useState<EvalRowResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [helpMetric, setHelpMetric] = useState<string | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
   const [datasetModalOpen, setDatasetModalOpen] = useState(false);
   const [datasetPreview, setDatasetPreview] = useState<Dataset | null>(null);
   const [datasetRows, setDatasetRows] = useState<DatasetRow[]>([]);
@@ -166,6 +167,12 @@ const ReportDetailPage: React.FC = () => {
   const [datasetPageSize, setDatasetPageSize] = useState(10);
   const [datasetPreviewLoading, setDatasetPreviewLoading] = useState(false);
   const [previewRow, setPreviewRow] = useState<DatasetRow | null>(null);
+  const [manualReview, setManualReview] = useState({
+    manual_status: undefined as string | undefined,
+    manual_score: undefined as number | undefined,
+    manual_tags: '',
+    manual_note: '',
+  });
 
   const fetchSummary = useCallback(async () => {
     setLoading(true);
@@ -185,8 +192,49 @@ const ReportDetailPage: React.FC = () => {
 
   const openDetail = async (row: EvalRowResult) => {
     setDrawerOpen(true); setDetailLoading(true);
-    try { setSelectedRow(await api.getReportRowDetail(evalId, row.id)); }
-    catch { setSelectedRow(row); } finally { setDetailLoading(false); }
+    try {
+      const detail = await api.getReportRowDetail(evalId, row.id);
+      setSelectedRow(detail);
+      setManualReview({
+        manual_status: detail.manual_status || undefined,
+        manual_score: detail.manual_score ?? undefined,
+        manual_tags: (detail.manual_tags || []).join(', '),
+        manual_note: detail.manual_note || '',
+      });
+    }
+    catch {
+      setSelectedRow(row);
+      setManualReview({
+        manual_status: row.manual_status || undefined,
+        manual_score: row.manual_score ?? undefined,
+        manual_tags: (row.manual_tags || []).join(', '),
+        manual_note: row.manual_note || '',
+      });
+    } finally { setDetailLoading(false); }
+  };
+
+  const saveManualReview = async () => {
+    if (!selectedRow) return;
+    setReviewSaving(true);
+    try {
+      const payload = {
+        manual_status: manualReview.manual_status || null,
+        manual_score: manualReview.manual_score ?? null,
+        manual_tags: manualReview.manual_tags
+          ? manualReview.manual_tags.split(',').map((item) => item.trim()).filter(Boolean)
+          : [],
+        manual_note: manualReview.manual_note || null,
+      };
+      const updated = await api.updateReportRowReview(evalId, selectedRow.id, payload);
+      setSelectedRow(updated);
+      setRows((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+      await fetchSummary();
+      message.success('人工复核已保存');
+    } catch {
+      message.error('保存人工复核失败');
+    } finally {
+      setReviewSaving(false);
+    }
   };
 
   const passRateColor = (r: number) => r >= 0.8 ? '#52c41a' : r >= 0.6 ? '#faad14' : '#ff4d4f';
@@ -246,6 +294,26 @@ const ReportDetailPage: React.FC = () => {
         r.error ? <Tag color="warning">异常</Tag> :
         r.is_pass === true ? <Tag color="success">通过</Tag> :
         r.is_pass === false ? <Tag color="error">不通过</Tag> : <Tag>-</Tag>,
+    },
+    {
+      title: '人工复核',
+      key: 'manual_status',
+      width: 110,
+      render: (_: unknown, r: EvalRowResult) => {
+        const colorMap: Record<string, string> = {
+          pass: 'success',
+          fail: 'error',
+          needs_fix: 'warning',
+          needs_review: 'processing',
+        };
+        const labelMap: Record<string, string> = {
+          pass: '人工通过',
+          fail: '人工驳回',
+          needs_fix: '需修复',
+          needs_review: '待复核',
+        };
+        return r.manual_status ? <Tag color={colorMap[r.manual_status] || 'default'}>{labelMap[r.manual_status] || r.manual_status}</Tag> : <Text type="secondary">未复核</Text>;
+      },
     },
     ...groupMetricNames(metricNames).map((group) => ({
       title: renderLayerHeaderTitle(group),
@@ -309,6 +377,14 @@ const ReportDetailPage: React.FC = () => {
           <Col span={6}><Card><Statistic title="通过" value={summary.pass_count} valueStyle={{ color: '#52c41a' }} /></Card></Col>
           <Col span={6}><Card><Statistic title="不通过" value={summary.fail_count} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
         </Row>
+        {summary.manual_review_summary && (
+          <Row gutter={16} style={{ marginBottom: 24 }}>
+            <Col span={6}><Card><Statistic title="已人工复核" value={summary.manual_review_summary.reviewed_count || 0} /></Card></Col>
+            <Col span={6}><Card><Statistic title="人工通过" value={summary.manual_review_summary.manual_pass_count || 0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+            <Col span={6}><Card><Statistic title="人工驳回" value={summary.manual_review_summary.manual_fail_count || 0} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
+            <Col span={6}><Card><Statistic title="待修复/待复核" value={(summary.manual_review_summary.manual_needs_fix_count || 0) + (summary.manual_review_summary.manual_needs_review_count || 0)} valueStyle={{ color: '#faad14' }} /></Card></Col>
+          </Row>
+        )}
 
         <Card title="各指标得分概览" extra={<Text type="secondary">按 RAG 评测层级归类，分数范围 0~1，越高越好</Text>} style={{ marginBottom: 24 }}>
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
@@ -398,8 +474,62 @@ const ReportDetailPage: React.FC = () => {
         <div style={{ marginBottom: 16 }}>
           {selectedRow.is_pass === true && <Tag color="success" style={{ fontSize: 14, padding: '4px 12px' }}>✓ 该条数据通过评测</Tag>}
           {selectedRow.is_pass === false && <Tag color="error" style={{ fontSize: 14, padding: '4px 12px' }}>✗ 该条数据未通过评测</Tag>}
-          {selectedRow.error && <Tag color="warning" style={{ fontSize: 14, padding: '4px 12px' }}>⚠ 评测异常</Tag>}
+        {selectedRow.error && <Tag color="warning" style={{ fontSize: 14, padding: '4px 12px' }}>⚠ 评测异常</Tag>}
         </div>
+
+        <Card size="small" title="🧑 人工复核" style={{ marginBottom: 16 }}>
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <div>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>人工结论</Text>
+              <Select
+                style={{ width: 220 }}
+                allowClear
+                placeholder="请选择人工结论"
+                value={manualReview.manual_status}
+                onChange={(value) => setManualReview((prev) => ({ ...prev, manual_status: value }))}
+                options={[
+                  { label: '人工通过', value: 'pass' },
+                  { label: '人工驳回', value: 'fail' },
+                  { label: '需要修复', value: 'needs_fix' },
+                  { label: '待复核', value: 'needs_review' },
+                ]}
+              />
+            </div>
+            <div>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>人工分数（可选）</Text>
+              <Input
+                style={{ width: 220 }}
+                placeholder="0 ~ 1，例如 0.8"
+                value={manualReview.manual_score as any}
+                onChange={(e) => setManualReview((prev) => ({
+                  ...prev,
+                  manual_score: e.target.value === '' ? undefined : Number(e.target.value),
+                }))}
+              />
+            </div>
+            <div>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>问题标签</Text>
+              <Input
+                placeholder="用逗号分隔，例如：检索漏召回, 回答不完整"
+                value={manualReview.manual_tags}
+                onChange={(e) => setManualReview((prev) => ({ ...prev, manual_tags: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>复核备注</Text>
+              <Input.TextArea
+                autoSize={{ minRows: 3, maxRows: 6 }}
+                placeholder="写下为什么自动结论不可信，或这条样本后续要怎么处理"
+                value={manualReview.manual_note}
+                onChange={(e) => setManualReview((prev) => ({ ...prev, manual_note: e.target.value }))}
+              />
+            </div>
+            <Space align="center">
+              <Button type="primary" loading={reviewSaving} onClick={saveManualReview}>保存人工复核</Button>
+              {selectedRow.reviewed_at && <Text type="secondary">上次保存：{new Date(selectedRow.reviewed_at).toLocaleString('zh-CN')}</Text>}
+            </Space>
+          </Space>
+        </Card>
 
         <Title level={5}>📊 指标评分详情</Title>
         <Alert message="LLM 类指标由平台原生 Judge 调用当前配置的评测模型打分并返回理由；确定性指标由后端代码直接计算。" type="info" showIcon style={{ marginBottom: 12 }} />

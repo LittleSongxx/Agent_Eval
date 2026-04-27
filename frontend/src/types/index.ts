@@ -114,6 +114,11 @@ export interface EvalRowResult {
   is_pass: boolean | null;
   execution_time_ms: number | null;
   error: string | null;
+  manual_status?: 'pass' | 'fail' | 'needs_fix' | 'needs_review' | null;
+  manual_score?: number | null;
+  manual_tags?: string[] | null;
+  manual_note?: string | null;
+  reviewed_at?: string | null;
   dataset_row?: DatasetRow;
   created_at: string;
 }
@@ -126,6 +131,69 @@ export interface ReportSummary {
   error_count: number;
   pass_rate: number;
   metric_summary: Record<string, { mean: number; min: number; max: number; pass_rate: number }>;
+  manual_review_summary?: Record<string, number>;
+}
+
+export interface BlindTestTarget {
+  target_type: 'llm_config' | 'endpoint';
+  name: string;
+  llm_config_id?: number | null;
+  endpoint_url?: string | null;
+  transport_mode?: 'json' | 'sse';
+  authorization?: string | null;
+  extra_headers?: string | null;
+  request_body_template?: string | null;
+  response_mode?: 'answer_only' | 'answer_with_contexts';
+}
+
+export interface BlindTestTask {
+  id: number;
+  name: string;
+  dataset_id: number;
+  status: string;
+  progress: number;
+  total_rows: number | null;
+  completed_rows: number;
+  voted_rows: number;
+  sample_limit?: number | null;
+  error_message?: string | null;
+  summary?: Record<string, any> | null;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  target_a: BlindTestTarget;
+  target_b: BlindTestTarget;
+  dataset?: Dataset;
+}
+
+export interface BlindTestRowResult {
+  id: number;
+  blind_test_task_id: number;
+  dataset_row_id: number;
+  row_index: number;
+  answer_a?: string | null;
+  answer_b?: string | null;
+  answer_a_error?: string | null;
+  answer_b_error?: string | null;
+  display_order: string[];
+  vote?: 'left' | 'right' | 'tie' | 'both_bad' | 'skip' | null;
+  vote_note?: string | null;
+  voted_at?: string | null;
+  created_at: string;
+  dataset_row?: DatasetRow;
+}
+
+export interface BlindTestSummary {
+  blind_test_task: BlindTestTask;
+  total_count: number;
+  completed_count: number;
+  voted_count: number;
+  pending_vote_count: number;
+  model_a_wins: number;
+  model_b_wins: number;
+  ties: number;
+  both_bad: number;
+  no_answer_rows: number;
 }
 
 export interface PaginatedResponse<T> {

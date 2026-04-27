@@ -49,6 +49,21 @@ def ensure_runtime_schema() -> None:
                 for sql in missing_sql:
                     connection.execute(text(sql))
 
+    if "eval_row_results" in table_names:
+        row_result_columns = {column["name"] for column in inspector.get_columns("eval_row_results")}
+        additions = {
+            "manual_status": "ALTER TABLE eval_row_results ADD COLUMN manual_status VARCHAR(50)",
+            "manual_score": "ALTER TABLE eval_row_results ADD COLUMN manual_score FLOAT",
+            "manual_tags": "ALTER TABLE eval_row_results ADD COLUMN manual_tags JSON",
+            "manual_note": "ALTER TABLE eval_row_results ADD COLUMN manual_note TEXT",
+            "reviewed_at": "ALTER TABLE eval_row_results ADD COLUMN reviewed_at DATETIME",
+        }
+        missing_sql = [sql for name, sql in additions.items() if name not in row_result_columns]
+        if missing_sql:
+            with engine.begin() as connection:
+                for sql in missing_sql:
+                    connection.execute(text(sql))
+
 
 def get_db():
     db = SessionLocal()

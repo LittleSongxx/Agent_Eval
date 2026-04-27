@@ -9,6 +9,7 @@ export const createLLMConfig = (data: any) => api.post('/llm-configs', data).the
 export const updateLLMConfig = (id: number, data: any) => api.put(`/llm-configs/${id}`, data).then(r => r.data);
 export const deleteLLMConfig = (id: number) => api.delete(`/llm-configs/${id}`);
 export const testLLMConfig = (id: number) => api.post(`/llm-configs/${id}/test`).then(r => r.data);
+export const testLLMConfigDraft = (data: any) => api.post('/llm-configs/test-draft', data).then(r => r.data);
 
 // ======================== Dataset ========================
 
@@ -84,5 +85,20 @@ export const getReportRows = (evalId: number, page = 1, pageSize = 20, status?: 
   api.get(`/reports/${evalId}/rows`, { params: { page, page_size: pageSize, status } }).then(r => r.data);
 export const getReportRowDetail = (evalId: number, rowId: number) =>
   api.get(`/reports/${evalId}/rows/${rowId}`).then(r => r.data);
+export const updateReportRowReview = (evalId: number, rowId: number, data: any) =>
+  api.patch(`/reports/${evalId}/rows/${rowId}/review`, data).then(r => r.data);
+
+// ======================== Blind Test ========================
+
+export const listBlindTests = () => api.get('/blind-tests').then(r => r.data);
+export const createBlindTest = (data: any) => api.post('/blind-tests', data).then(r => r.data);
+export const getBlindTest = (id: number) => api.get(`/blind-tests/${id}`).then(r => r.data);
+export const getBlindTestSummary = (id: number) => api.get(`/blind-tests/${id}/summary`).then(r => r.data);
+export const getBlindTestRows = (id: number, page = 1, pageSize = 20, status?: string) =>
+  api.get(`/blind-tests/${id}/rows`, { params: { page, page_size: pageSize, status } }).then(r => r.data);
+export const voteBlindTestRow = (id: number, rowId: number, data: any) =>
+  api.post(`/blind-tests/${id}/rows/${rowId}/vote`, data).then(r => r.data);
+export const cancelBlindTest = (id: number) => api.post(`/blind-tests/${id}/cancel`).then(r => r.data);
+export const testBlindTestTarget = (data: any) => api.post('/blind-tests/test-target', data).then(r => r.data);
 
 export default api;

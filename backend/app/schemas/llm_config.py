@@ -54,3 +54,4 @@ class LLMTestResult(BaseModel):
     success: bool
     message: str
     latency_ms: Optional[float] = None
+    sample_output: Optional[str] = None

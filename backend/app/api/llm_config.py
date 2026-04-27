@@ -16,6 +16,40 @@ from app.schemas.llm_config import (
 router = APIRouter(prefix="/llm-configs", tags=["LLM Configs"])
 
 
+def _run_llm_smoke_test(config_like) -> LLMTestResult:
+    try:
+        import openai
+
+        client = openai.OpenAI(
+            base_url=config_like.api_base_url,
+            api_key=config_like.api_key,
+        )
+
+        start = time.time()
+        response = client.chat.completions.create(
+            model=config_like.model_name,
+            messages=[{"role": "user", "content": "请用一句话介绍你自己。"}],
+            max_tokens=min(int(getattr(config_like, "max_tokens", 128) or 128), 128),
+            temperature=getattr(config_like, "temperature", 0.01) or 0.01,
+        )
+        latency_ms = (time.time() - start) * 1000
+        sample_output = response.choices[0].message.content or ""
+
+        return LLMTestResult(
+            success=True,
+            message="Connection successful",
+            latency_ms=round(latency_ms, 2),
+            sample_output=sample_output[:500],
+        )
+    except Exception as exc:
+        return LLMTestResult(
+            success=False,
+            message=f"Connection failed: {str(exc)}",
+            latency_ms=None,
+            sample_output=None,
+        )
+
+
 @router.get("")
 def list_llm_configs(db: Session = Depends(get_db)):
     configs = db.query(LLMConfig).all()
@@ -72,30 +106,9 @@ def test_llm_config(config_id: int, db: Session = Depends(get_db)):
     if not config:
         raise HTTPException(status_code=404, detail="LLM config not found")
 
-    try:
-        import openai
+    return _run_llm_smoke_test(config)
 
-        client = openai.OpenAI(
-            base_url=config.api_base_url,
-            api_key=config.api_key,
-        )
 
-        start = time.time()
-        client.chat.completions.create(
-            model=config.model_name,
-            messages=[{"role": "user", "content": "Hi"}],
-            max_tokens=16,
-        )
-        latency_ms = (time.time() - start) * 1000
-
-        return LLMTestResult(
-            success=True,
-            message="Connection successful",
-            latency_ms=round(latency_ms, 2),
-        )
-    except Exception as exc:
-        return LLMTestResult(
-            success=False,
-            message=f"Connection failed: {str(exc)}",
-            latency_ms=None,
-        )
+@router.post("/test-draft", response_model=LLMTestResult)
+def test_llm_config_draft(payload: LLMConfigCreate):
+    return _run_llm_smoke_test(payload)

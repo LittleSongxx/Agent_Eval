@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
@@ -7,6 +9,7 @@ from app.core.evaluation_engine import DEFAULT_SUMMARY_PASS_THRESHOLD
 from app.schemas.evaluation import (
     EvalTaskResponse,
     EvalRowResultResponse,
+    EvalRowReviewUpdate,
     ReportSummary,
     ReportRowsResponse,
 )
@@ -42,6 +45,13 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
     pass_rate = (pass_count / total_count) if total_count > 0 else 0.0
 
     metric_summary = _normalize_metric_summary(task.summary_scores or {}, row_results)
+    manual_review_summary = {
+        "reviewed_count": sum(1 for r in row_results if r.manual_status is not None),
+        "manual_pass_count": sum(1 for r in row_results if r.manual_status == "pass"),
+        "manual_fail_count": sum(1 for r in row_results if r.manual_status == "fail"),
+        "manual_needs_fix_count": sum(1 for r in row_results if r.manual_status == "needs_fix"),
+        "manual_needs_review_count": sum(1 for r in row_results if r.manual_status == "needs_review"),
+    }
 
     return ReportSummary(
         eval_task=EvalTaskResponse.model_validate(task),
@@ -51,6 +61,7 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
         error_count=error_count,
         pass_rate=round(pass_rate, 4),
         metric_summary=metric_summary,
+        manual_review_summary=manual_review_summary,
     )
 
 
@@ -153,4 +164,32 @@ def get_report_row_detail(
     )
     if not row_result:
         raise HTTPException(status_code=404, detail="Row result not found")
+    return row_result
+
+
+@router.patch("/{eval_id}/rows/{row_id}/review", response_model=EvalRowResultResponse)
+def update_report_row_review(
+    eval_id: int,
+    row_id: int,
+    payload: EvalRowReviewUpdate,
+    db: Session = Depends(get_db),
+):
+    row_result = (
+        db.query(EvalRowResult)
+        .options(joinedload(EvalRowResult.dataset_row))
+        .filter(
+            EvalRowResult.eval_task_id == eval_id,
+            EvalRowResult.id == row_id,
+        )
+        .first()
+    )
+    if not row_result:
+        raise HTTPException(status_code=404, detail="Row result not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(row_result, key, value)
+    row_result.reviewed_at = None if not data else datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row_result)
     return row_result
