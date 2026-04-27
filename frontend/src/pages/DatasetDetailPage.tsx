@@ -14,12 +14,14 @@ import {
   Spin,
   Descriptions,
   Upload,
+  Dropdown,
 } from 'antd';
 import {
   ArrowLeftOutlined,
   PlusOutlined,
   DeleteOutlined,
   UploadOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Dataset, DatasetRow, FieldDefinition, PaginatedResponse } from '../types';
@@ -168,6 +170,25 @@ const DatasetDetailPage: React.FC = () => {
     fetchDataset();
   };
 
+  const handleExport = async (format: 'csv' | 'json') => {
+    try {
+      const result = await api.exportDataset(datasetId, format);
+      const blobUrl = window.URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      const disposition = result.contentDisposition || '';
+      const matched = disposition.match(/filename="?([^"]+)"?/);
+      link.href = blobUrl;
+      link.download = matched?.[1] || `${dataset?.name || `dataset-${datasetId}`}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+      message.success(`已导出 ${format.toUpperCase()} 文件`);
+    } catch {
+      message.error('导出失败');
+    }
+  };
+
   const truncate = (text: any, maxLen = 100): string => {
     if (text === null || text === undefined) return '-';
     const str = typeof text === 'string' ? text : JSON.stringify(text);
@@ -282,6 +303,19 @@ const DatasetDetailPage: React.FC = () => {
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8 }}>
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'csv', label: '导出 CSV' },
+              { key: 'json', label: '导出 JSON' },
+            ],
+            onClick: ({ key }) => handleExport(key as 'csv' | 'json'),
+          }}
+        >
+          <Button icon={<DownloadOutlined />}>
+            导出数据
+          </Button>
+        </Dropdown>
         <Button icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>
           导入数据
         </Button>
@@ -371,7 +405,11 @@ const DatasetDetailPage: React.FC = () => {
             (async () => {
               try {
                 const result = await api.importDataset(datasetId, file as File);
-                message.success(`成功导入 ${result.imported_count ?? ''} 条数据`);
+                const importedCount = result.imported_count ?? 0;
+                const skippedDuplicates = result.skipped_duplicates ?? 0;
+                message.success(
+                  `成功导入 ${importedCount} 条数据${skippedDuplicates ? `，去重跳过 ${skippedDuplicates} 条` : ''}`
+                );
                 handleImportSuccess();
               } catch {
                 message.error('导入失败');
@@ -384,7 +422,7 @@ const DatasetDetailPage: React.FC = () => {
             <UploadOutlined style={{ fontSize: 32, color: '#1677ff' }} />
           </p>
           <p className="ant-upload-text">点击或拖拽文件上传</p>
-          <p className="ant-upload-hint">支持 .csv 和 .json 文件</p>
+          <p className="ant-upload-hint">支持 .csv 和 .json 文件，导入时会自动去重</p>
         </Upload.Dragger>
       </Modal>
     </Spin>

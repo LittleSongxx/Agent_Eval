@@ -32,8 +32,9 @@ const DataImportModal: React.FC<DataImportModalProps> = ({
     try {
       const result = await api.importDataset(datasetId, file);
       const count = result.imported_count ?? result.count ?? 0;
+      const skippedDuplicates = result.skipped_duplicates ?? 0;
       setResultCount(count);
-      message.success(`成功导入 ${count} 条数据`);
+      message.success(`成功导入 ${count} 条数据${skippedDuplicates ? `，去重跳过 ${skippedDuplicates} 条` : ''}`);
       onSuccess();
     } catch {
       message.error('导入失败，请检查文件格式');
@@ -74,7 +75,7 @@ const DataImportModal: React.FC<DataImportModalProps> = ({
           <InboxOutlined />
         </p>
         <p className="ant-upload-text">点击或拖拽文件到此区域</p>
-        <p className="ant-upload-hint">支持 .csv 和 .json 文件</p>
+        <p className="ant-upload-hint">支持 .csv 和 .json 文件，导入时会自动去重</p>
       </Dragger>
 
       {file && (

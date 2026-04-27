@@ -1,4 +1,5 @@
 import io
+import json
 
 
 def _create_dataset(client, name="Test DS", sample_type="single_turn"):
@@ -93,7 +94,74 @@ def test_import_csv(client):
     resp = client.post(f"/api/datasets/{ds_id}/import", files=files)
     assert resp.status_code == 200
     assert resp.json()["imported_count"] == 2
+    assert resp.json()["skipped_duplicates"] == 0
 
     # Verify rows were actually stored
     rows_resp = client.get(f"/api/datasets/{ds_id}/rows")
     assert rows_resp.json()["total"] == 2
+
+
+def test_import_skips_duplicate_rows(client):
+    ds_id = _create_dataset(client).json()["id"]
+    client.post(
+        f"/api/datasets/{ds_id}/rows",
+        json={"data": {"user_input": "What is Python?", "response": "A language", "reference": "A programming language"}},
+    )
+    csv_content = (
+        "user_input,response,reference\n"
+        "What is Python?,A language,A programming language\n"
+        "What is Python?,A language,A programming language\n"
+        "What is JS?,A language,JavaScript\n"
+    )
+    files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+    resp = client.post(f"/api/datasets/{ds_id}/import", files=files)
+    assert resp.status_code == 200
+    assert resp.json()["imported_count"] == 1
+    assert resp.json()["skipped_duplicates"] == 2
+
+    rows_resp = client.get(f"/api/datasets/{ds_id}/rows")
+    assert rows_resp.json()["total"] == 2
+
+
+def test_export_dataset_as_json(client):
+    ds_id = _create_dataset(client).json()["id"]
+    client.post(
+        f"/api/datasets/{ds_id}/rows",
+        json={"data": {"user_input": "Hello", "response": "Hi", "reference": ["A", "B"]}},
+    )
+
+    resp = client.get(f"/api/datasets/{ds_id}/export?format=json")
+    assert resp.status_code == 200
+    assert "application/json" in resp.headers["content-type"]
+    payload = json.loads(resp.content.decode("utf-8"))
+    assert payload == [{"user_input": "Hello", "response": "Hi", "reference": ["A", "B"]}]
+
+
+def test_export_dataset_as_csv(client):
+    ds_id = _create_dataset(client).json()["id"]
+    client.post(
+        f"/api/datasets/{ds_id}/rows",
+        json={"data": {"user_input": "Hello", "response": "Hi", "reference": ["A", "B"]}},
+    )
+
+    resp = client.get(f"/api/datasets/{ds_id}/export?format=csv")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+    content = resp.content.decode("utf-8-sig")
+    assert "user_input,response,reference" in content
+    assert 'Hello,Hi,"[""A"", ""B""]"' in content
+
+
+def test_export_dataset_with_chinese_name_as_json(client):
+    ds_id = _create_dataset(client, name="多轮对话示例数据集", sample_type="multi_turn").json()["id"]
+    client.post(
+        f"/api/datasets/{ds_id}/rows",
+        json={"data": {"user_input": [{"type": "human", "content": "你好"}], "response": "你好", "reference": "你好"}},
+    )
+
+    resp = client.get(f"/api/datasets/{ds_id}/export?format=json")
+    assert resp.status_code == 200
+    assert "application/json" in resp.headers["content-type"]
+    assert "filename*=UTF-8''" in resp.headers["content-disposition"]
+    payload = json.loads(resp.content.decode("utf-8"))
+    assert payload[0]["response"] == "你好"

@@ -1,8 +1,10 @@
 import io
 import json
 from typing import Any, Dict, List
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -43,12 +45,14 @@ def _validate_row_data(data: Dict[str, Any], field_schema: list) -> List[str]:
                 else:
                     data[key] = parsed
             except json.JSONDecodeError:
-                pass
+                errors.append(f"字段 {key} 应为 JSON 数组")
         if field_type == "conversation" and isinstance(value, str):
             try:
                 parsed = json.loads(value)
                 if isinstance(parsed, list):
                     data[key] = parsed
+                else:
+                    errors.append(f"字段 {key} 应为 JSON 对话数组")
             except json.JSONDecodeError:
                 errors.append(f"字段 {key} 应为 JSON 对话数组")
         if field_type == "tool_call_list" and isinstance(value, str):
@@ -56,9 +60,75 @@ def _validate_row_data(data: Dict[str, Any], field_schema: list) -> List[str]:
                 parsed = json.loads(value)
                 if isinstance(parsed, list):
                     data[key] = parsed
+                else:
+                    errors.append(f"字段 {key} 应为 JSON 工具调用数组")
             except json.JSONDecodeError:
                 errors.append(f"字段 {key} 应为 JSON 工具调用数组")
     return errors
+
+
+def _normalize_record(record: Dict[str, Any], field_schema: list) -> Dict[str, Any]:
+    normalized = dict(record or {})
+    if field_schema:
+        errors = _validate_row_data(normalized, field_schema)
+        if errors:
+            raise HTTPException(status_code=422, detail="; ".join(errors))
+    return normalized
+
+
+def _canonicalize_record(record: Dict[str, Any]) -> str:
+    return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _load_import_records(filename: str, content: bytes) -> list[dict[str, Any]]:
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".csv"):
+        import pandas as pd
+
+        df = pd.read_csv(io.BytesIO(content))
+        return df.where(df.notna(), None).to_dict(orient="records")
+    if filename_lower.endswith(".json"):
+        parsed = json.loads(content)
+        if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+            raise HTTPException(
+                status_code=422,
+                detail="JSON file must contain a list of objects",
+            )
+        return parsed
+    raise HTTPException(
+        status_code=422,
+        detail="Unsupported file format. Please upload a CSV or JSON file.",
+    )
+
+
+def _collect_export_columns(dataset: Dataset, rows: list[DatasetRow]) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for field in dataset.field_schema or []:
+        name = field.get("name")
+        if name and name not in seen:
+            seen.add(name)
+            columns.append(name)
+    for row in rows:
+        for key in (row.data or {}).keys():
+            if key not in seen:
+                seen.add(key)
+                columns.append(key)
+    return columns
+
+
+def _serialize_csv_value(value: Any) -> Any:
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def _build_content_disposition(dataset_name: str, suffix: str) -> str:
+    safe_name = (dataset_name or "dataset").strip()
+    ascii_fallback = "".join(ch if ord(ch) < 128 and ch not in {'"', "\\"} else "_" for ch in safe_name).strip(" ._")
+    ascii_fallback = ascii_fallback or "dataset"
+    utf8_name = quote(f"{safe_name}.{suffix}")
+    return f"attachment; filename=\"{ascii_fallback}.{suffix}\"; filename*=UTF-8''{utf8_name}"
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
@@ -236,27 +306,23 @@ def import_dataset_rows(
 
     content = file.file.read()
     filename = file.filename or ""
+    records = _load_import_records(filename, content)
 
-    records: list[dict] = []
-
-    if filename.lower().endswith(".csv"):
-        import pandas as pd
-
-        df = pd.read_csv(io.BytesIO(content))
-        records = df.where(df.notna(), None).to_dict(orient="records")
-    elif filename.lower().endswith(".json"):
-        parsed = json.loads(content)
-        if not isinstance(parsed, list):
-            raise HTTPException(
-                status_code=422,
-                detail="JSON file must contain a list of objects",
-            )
-        records = parsed
-    else:
-        raise HTTPException(
-            status_code=422,
-            detail="Unsupported file format. Please upload a CSV or JSON file.",
-        )
+    existing_keys = {
+        _canonicalize_record(row.data or {})
+        for row in db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).all()
+    }
+    seen_import_keys: set[str] = set()
+    normalized_records: list[dict[str, Any]] = []
+    skipped_duplicates = 0
+    for record in records:
+        normalized = _normalize_record(record, dataset.field_schema or [])
+        canonical = _canonicalize_record(normalized)
+        if canonical in existing_keys or canonical in seen_import_keys:
+            skipped_duplicates += 1
+            continue
+        seen_import_keys.add(canonical)
+        normalized_records.append(normalized)
 
     # Determine starting row_index
     max_index = (
@@ -267,7 +333,7 @@ def import_dataset_rows(
     )
     start_index = (max_index[0] + 1) if max_index else 0
 
-    for i, record in enumerate(records):
+    for i, record in enumerate(normalized_records):
         row = DatasetRow(
             dataset_id=dataset_id,
             row_index=start_index + i,
@@ -277,9 +343,65 @@ def import_dataset_rows(
 
     dataset.row_count = (
         db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).count()
-        + len(records)
+        + len(normalized_records)
     )
 
     db.commit()
 
-    return {"imported_count": len(records)}
+    return {
+        "imported_count": len(normalized_records),
+        "skipped_duplicates": skipped_duplicates,
+    }
+
+
+@router.get("/{dataset_id}/export")
+def export_dataset_rows(
+    dataset_id: int,
+    format: str = Query("csv"),
+    db: Session = Depends(get_db),
+):
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    rows = (
+        db.query(DatasetRow)
+        .filter(DatasetRow.dataset_id == dataset_id)
+        .order_by(DatasetRow.row_index)
+        .all()
+    )
+    records = [dict(row.data or {}) for row in rows]
+    export_format = (format or "csv").lower()
+    dataset_name = (dataset.name or f"dataset-{dataset_id}").strip().replace("/", "-")
+
+    if export_format == "json":
+        payload = json.dumps(records, ensure_ascii=False, indent=2)
+        return StreamingResponse(
+            iter([payload.encode("utf-8")]),
+            media_type="application/json; charset=utf-8",
+            headers={
+                "Content-Disposition": _build_content_disposition(dataset_name, "json")
+            },
+        )
+
+    if export_format == "csv":
+        import csv
+
+        buffer = io.StringIO()
+        columns = _collect_export_columns(dataset, rows)
+        writer = csv.DictWriter(buffer, fieldnames=columns)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({key: _serialize_csv_value(record.get(key)) for key in columns})
+        return StreamingResponse(
+            iter([buffer.getvalue().encode("utf-8-sig")]),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": _build_content_disposition(dataset_name, "csv")
+            },
+        )
+
+    raise HTTPException(
+        status_code=422,
+        detail="Unsupported export format. Please choose csv or json.",
+    )

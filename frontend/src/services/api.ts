@@ -27,6 +27,12 @@ export const importDataset = (id: number, file: File) => {
   fd.append('file', file);
   return api.post(`/datasets/${id}/import`, fd).then(r => r.data);
 };
+export const exportDataset = (id: number, format: 'csv' | 'json') =>
+  api.get(`/datasets/${id}/export`, { params: { format }, responseType: 'blob' }).then(r => ({
+    blob: r.data as Blob,
+    contentDisposition: r.headers['content-disposition'] as string | undefined,
+    contentType: r.headers['content-type'] as string | undefined,
+  }));
 
 // ======================== RAG Dataset Jobs ========================
 
