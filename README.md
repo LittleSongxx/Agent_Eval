@@ -1,3 +1,16 @@
+# CLAUDE.md - AI 评测平台项目指南
+
+## 项目概述
+
+这是一个面向 RAG、AI Agent、多轮对话等场景的 AI 应用评测平台。评测内核由平台原生执行器负责，直接使用 OpenAI 兼容模型返回评分和评判理由。
+
+**技术栈：**
+- 后端：FastAPI + SQLAlchemy + SQLite + Python 3.9+
+- 前端：React 18 + TypeScript + Ant Design 5 + Vite
+- 评测 LLM：通义千问 Qwen Plus (DashScope，OpenAI 兼容)
+
+## 项目结构
+
 # AI 评测平台
 
 面向 RAG、AI Agent、多轮对话等场景的 AI 应用评测平台。评测内核由平台原生执行器负责，直接使用 OpenAI 兼容模型返回评分和评判理由。
