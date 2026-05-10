@@ -23,11 +23,17 @@ class EvalTask(Base):
     created_at = Column(DateTime, default=func.now())
     summary_scores = Column(JSON, nullable=True)
     scenario_snapshot = Column(JSON, nullable=True)
+    evaluation_mode = Column(String(50), default="offline")
+    endpoint_target_id = Column(Integer, ForeignKey("endpoint_targets.id"), nullable=True)
+    target_config = Column(JSON, nullable=True)
+    response_mapping = Column(JSON, nullable=True)
+    result_save_mode = Column(String(50), default="task_only")
     logs = Column(Text, default="")
 
     dataset = relationship("Dataset")
     scenario = relationship("EvalScenario")
     llm_config = relationship("LLMConfig")
+    endpoint_target = relationship("EndpointTarget")
     row_results = relationship("EvalRowResult", back_populates="eval_task", cascade="all, delete-orphan")
 
 
@@ -39,6 +45,7 @@ class EvalRowResult(Base):
     dataset_row_id = Column(Integer, ForeignKey("dataset_rows.id"), nullable=False)
     row_index = Column(Integer, nullable=False)
     metric_scores = Column(JSON, nullable=True)
+    endpoint_trace = Column(JSON, nullable=True)
     is_pass = Column(Boolean, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)

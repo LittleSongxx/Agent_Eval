@@ -122,6 +122,218 @@ def test_create_evaluation_uses_actual_dataset_row_count(client, db, test_llm_pa
     assert body["total_rows"] == 2
 
 
+def test_create_endpoint_evaluation_requires_endpoint_url(client, test_llm_payload):
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Endpoint Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "evaluation_mode": "endpoint",
+            "target_config": {"transport_mode": "json"},
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_endpoint_target_crud_and_evaluation_snapshot(client, test_llm_payload):
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    target_resp = client.post(
+        "/api/endpoint-targets",
+        json={
+            "name": "DeepSeek Chat",
+            "endpoint_url": "https://api.deepseek.com/v1/chat/completions",
+            "transport_mode": "json",
+            "authorization": "Bearer test-key",
+            "extra_headers": "{}",
+            "request_body_template": '{"model":"deepseek-chat","messages":[{"role":"user","content":"{{user_input}}"}]}',
+            "response_mapping": {"response_path": "choices.0.message.content"},
+            "default_test_input": "介绍 DeepSeek",
+        },
+    )
+    assert target_resp.status_code == 201
+    target = target_resp.json()
+
+    task_resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Endpoint Target Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "evaluation_mode": "endpoint",
+            "endpoint_target_id": target["id"],
+            "result_save_mode": "task_only",
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    assert task["endpoint_target_id"] == target["id"]
+    assert task["target_config"]["endpoint_url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert task["response_mapping"]["response_path"] == "choices.0.message.content"
+
+    client.put(
+        f"/api/endpoint-targets/{target['id']}",
+        json={"endpoint_url": "https://example.com/changed"},
+    )
+    existing_task = client.get(f"/api/evaluations/{task['id']}").json()
+    assert existing_task["target_config"]["endpoint_url"] == "https://api.deepseek.com/v1/chat/completions"
+
+
+def test_endpoint_evaluation_merges_extracted_fields_without_writeback(
+    client, db, monkeypatch, test_llm_payload
+):
+    import asyncio
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.evaluation_engine import run_evaluation
+    from app.models.dataset import DatasetRow
+    from app.models.evaluation import EvalRowResult, EvalTask
+
+    llm = client.post("/api/llm-configs", json=test_llm_payload).json()
+    metric = client.post(
+        "/api/metrics",
+        json={
+            "name": "retrieval_hit_rate",
+            "display_name": "HitRate",
+            "metric_type": "code_retrieval_hit_rate",
+            "config": {"k": 3},
+            "category": "retrieval",
+        },
+    ).json()
+    scenario = client.post(
+        "/api/scenarios",
+        json={
+            "name": "接口检索评测",
+            "description": "",
+            "scene_type": "rag",
+            "sample_type": "single_turn",
+            "metrics": [
+                {
+                    "metric_definition_id": metric["id"],
+                    "weight": 1.0,
+                    "pass_threshold": 0.7,
+                }
+            ],
+        },
+    ).json()
+    dataset = client.post(
+        "/api/datasets",
+        json={
+            "name": "输入集",
+            "sample_type": "single_turn",
+            "field_schema": [
+                {"name": "user_input", "type": "text", "required": True, "description": ""},
+                {"name": "reference_context_ids", "type": "array", "required": True, "description": ""},
+            ],
+        },
+    ).json()
+    client.post(
+        f"/api/datasets/{dataset['id']}/rows",
+        json={"data": {"user_input": "查保修", "reference_context_ids": ["doc-1"]}},
+    )
+
+    async def fake_invoke_endpoint(row_data, target_config):
+        return {
+            "status_code": 200,
+            "latency_ms": 12,
+            "request_body": {"question": row_data["user_input"]},
+            "raw_response": '{"data":{"ids":["doc-1","doc-2"]}}',
+            "parsed_response": {"data": {"ids": ["doc-1", "doc-2"]}},
+        }
+
+    monkeypatch.setattr("app.core.evaluation_engine.invoke_endpoint", fake_invoke_endpoint)
+    task = client.post(
+        "/api/evaluations",
+        json={
+            "name": "接口评测",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "evaluation_mode": "endpoint",
+            "target_config": {
+                "endpoint_url": "https://example.com/chat",
+                "transport_mode": "json",
+                "request_body_template": '{"question":"{{user_input}}"}',
+            },
+            "response_mapping": {"retrieved_context_ids_path": "data.ids"},
+            "result_save_mode": "task_only",
+        },
+    ).json()
+
+    TestingSession = sessionmaker(bind=db.get_bind())
+    asyncio.run(run_evaluation(task["id"], TestingSession))
+
+    result = db.query(EvalRowResult).filter(EvalRowResult.eval_task_id == task["id"]).one()
+    assert result.is_pass is True
+    assert result.metric_scores["retrieval_hit_rate"]["score"] == 1.0
+    assert result.endpoint_trace["extracted_fields"]["retrieved_context_ids"] == ["doc-1", "doc-2"]
+
+    row = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset["id"]).one()
+    assert "retrieved_context_ids" not in row.data
+
+
+def test_endpoint_evaluation_can_write_back_extracted_fields(
+    client, db, monkeypatch, test_llm_payload
+):
+    import asyncio
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.evaluation_engine import run_evaluation
+    from app.models.dataset import Dataset, DatasetRow
+
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    row = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset["id"]).first()
+    row.data = {"user_input": "What is Python?", "response": "old"}
+    db.commit()
+
+    async def fake_invoke_endpoint(row_data, target_config):
+        return {
+            "status_code": 200,
+            "latency_ms": 10,
+            "request_body": {"question": row_data["user_input"]},
+            "raw_response": '{"data":{"answer":"new answer"}}',
+            "parsed_response": {"data": {"answer": "new answer"}},
+        }
+
+    monkeypatch.setattr("app.core.evaluation_engine.invoke_endpoint", fake_invoke_endpoint)
+    monkeypatch.setattr(
+        "app.core.evaluation_engine.OpenAIJudgeClient",
+        lambda _llm_config: object(),
+    )
+
+    async def fake_ascore(self, row_data, judge):
+        from app.core.evaluation_engine import _MetricResult
+
+        return _MetricResult(1.0, f"response={row_data.get('response')}")
+
+    monkeypatch.setattr("app.core.evaluation_engine.NativePromptMetric.ascore", fake_ascore)
+
+    task = client.post(
+        "/api/evaluations",
+        json={
+            "name": "接口评测回写",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "evaluation_mode": "endpoint",
+            "target_config": {"endpoint_url": "https://example.com/chat"},
+            "response_mapping": {"response_path": "data.answer"},
+            "result_save_mode": "write_back",
+        },
+    ).json()
+    TestingSession = sessionmaker(bind=db.get_bind())
+    asyncio.run(run_evaluation(task["id"], TestingSession))
+
+    db.expire_all()
+    updated_row = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset["id"]).one()
+    assert updated_row.data["response"] == "new answer"
+    updated_dataset = db.query(Dataset).filter(Dataset.id == dataset["id"]).one()
+    assert any(field["name"] == "response" for field in updated_dataset.field_schema)
+
+
 def test_update_custom_scenario_does_not_mutate_existing_task_snapshot(client, test_llm_payload):
     llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
     replacement_metric = client.post(
@@ -171,6 +383,83 @@ def test_update_custom_scenario_does_not_mutate_existing_task_snapshot(client, t
     existing_task = client.get(f"/api/evaluations/{task['id']}").json()
     assert existing_task["scenario_snapshot"]["name"] == "Test Scenario"
     assert existing_task["scenario_snapshot"]["metrics"][0]["metric_definition"]["name"] == "test_metric"
+
+
+def test_scenario_metric_prompt_override_is_frozen_in_task_snapshot(client, test_llm_payload):
+    llm = client.post("/api/llm-configs", json=test_llm_payload).json()
+    metric = client.post(
+        "/api/metrics",
+        json={
+            "name": "business_completeness",
+            "display_name": "业务完整性",
+            "metric_type": "numeric",
+            "config": {"prompt": "默认完整性标准", "allowed_values": [0, 1]},
+            "category": "custom",
+        },
+    ).json()
+    scenario = client.post(
+        "/api/scenarios",
+        json={
+            "name": "业务场景",
+            "description": "",
+            "scene_type": "rag",
+            "sample_type": "single_turn",
+            "metrics": [
+                {
+                    "metric_definition_id": metric["id"],
+                    "weight": 1.0,
+                    "pass_threshold": 0.7,
+                    "prompt_override": "请按电商客服业务规则评估回答完整性。",
+                }
+            ],
+        },
+    ).json()
+    dataset = client.post(
+        "/api/datasets",
+        json={
+            "name": "业务数据集",
+            "sample_type": "single_turn",
+            "field_schema": [
+                {"name": "user_input", "type": "text", "required": True, "description": ""},
+                {"name": "response", "type": "text", "required": True, "description": ""},
+            ],
+        },
+    ).json()
+    client.post(
+        f"/api/datasets/{dataset['id']}/rows",
+        json={"data": {"user_input": "怎么退货？", "response": "可申请退货。"}},
+    )
+
+    task = client.post(
+        "/api/evaluations",
+        json={
+            "name": "业务评测",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    ).json()
+    assert task["scenario_snapshot"]["metrics"][0]["prompt_override"] == "请按电商客服业务规则评估回答完整性。"
+
+    client.put(
+        f"/api/scenarios/{scenario['id']}",
+        json={
+            "name": "业务场景编辑",
+            "description": "",
+            "scene_type": "rag",
+            "sample_type": "single_turn",
+            "metrics": [
+                {
+                    "metric_definition_id": metric["id"],
+                    "weight": 1.0,
+                    "pass_threshold": 0.7,
+                    "prompt_override": "新的评分口径",
+                }
+            ],
+        },
+    )
+    existing_task = client.get(f"/api/evaluations/{task['id']}").json()
+    assert existing_task["scenario_snapshot"]["metrics"][0]["prompt_override"] == "请按电商客服业务规则评估回答完整性。"
 
 
 def test_run_evaluation_uses_scenario_snapshot_after_scenario_edit(client, db, test_llm_payload):
@@ -363,6 +652,109 @@ def test_report_summary_backfills_metric_pass_rate_without_threshold(client, db)
     assert metric_summary["effective_pass_threshold"] == 0.7
 
 
+def test_compare_reports_groups_regressions_and_fixes(client, db):
+    from app.models.dataset import Dataset, DatasetRow
+    from app.models.evaluation import EvalTask, EvalRowResult
+    from app.models.llm_config import LLMConfig
+    from app.models.metric_definition import MetricDefinition
+    from app.models.scenario import EvalScenario, ScenarioMetric
+    from app.core.scenario_snapshot import build_scenario_snapshot
+
+    llm = LLMConfig(name="Judge", api_base_url="https://example.com/v1", api_key="key", model_name="model")
+    metric = MetricDefinition(
+        name="answer_relevancy",
+        display_name="Answer Relevancy",
+        metric_type="builtin_answer_relevancy",
+        config={},
+        category="rag",
+        is_builtin=True,
+    )
+    scenario = EvalScenario(name="RAG", scene_type="rag", sample_type="single_turn", is_preset=False)
+    dataset = Dataset(name="Rows", sample_type="single_turn", field_schema=[], row_count=3)
+    db.add_all([llm, metric, scenario, dataset])
+    db.flush()
+    scenario.metrics.append(ScenarioMetric(metric_definition_id=metric.id, pass_threshold=0.7, metric_definition=metric))
+    db.flush()
+    scenario_snapshot = build_scenario_snapshot(scenario)
+    rows = [
+        DatasetRow(dataset_id=dataset.id, row_index=0, data={"user_input": "Q1"}),
+        DatasetRow(dataset_id=dataset.id, row_index=1, data={"user_input": "Q2"}),
+        DatasetRow(dataset_id=dataset.id, row_index=2, data={"user_input": "Q3"}),
+    ]
+    db.add_all(rows)
+    db.flush()
+
+    baseline = EvalTask(
+        name="Baseline",
+        dataset_id=dataset.id,
+        scenario_id=scenario.id,
+        llm_config_id=llm.id,
+        status="completed",
+        total_rows=3,
+        completed_rows=3,
+        scenario_snapshot=scenario_snapshot,
+        summary_scores={"answer_relevancy": {"mean": 0.7, "pass_rate": 0.6667, "error_count": 0}},
+    )
+    current = EvalTask(
+        name="Current",
+        dataset_id=dataset.id,
+        scenario_id=scenario.id,
+        llm_config_id=llm.id,
+        status="completed",
+        total_rows=3,
+        completed_rows=3,
+        scenario_snapshot=scenario_snapshot,
+        summary_scores={"answer_relevancy": {"mean": 0.75, "pass_rate": 0.6667, "error_count": 0}},
+    )
+    db.add_all([baseline, current])
+    db.flush()
+    db.add_all(
+        [
+            EvalRowResult(eval_task_id=baseline.id, dataset_row_id=rows[0].id, row_index=0, metric_scores={"answer_relevancy": {"score": 0.9}}, is_pass=True),
+            EvalRowResult(eval_task_id=baseline.id, dataset_row_id=rows[1].id, row_index=1, metric_scores={"answer_relevancy": {"score": 0.4}}, is_pass=False),
+            EvalRowResult(eval_task_id=baseline.id, dataset_row_id=rows[2].id, row_index=2, metric_scores={"answer_relevancy": {"score": 0.8}}, is_pass=True),
+            EvalRowResult(eval_task_id=current.id, dataset_row_id=rows[0].id, row_index=0, metric_scores={"answer_relevancy": {"score": 0.5}}, is_pass=False),
+            EvalRowResult(eval_task_id=current.id, dataset_row_id=rows[1].id, row_index=1, metric_scores={"answer_relevancy": {"score": 0.85}}, is_pass=True),
+            EvalRowResult(eval_task_id=current.id, dataset_row_id=rows[2].id, row_index=2, metric_scores={"answer_relevancy": {"score": 0.9}}, is_pass=True),
+        ]
+    )
+    db.commit()
+
+    resp = client.get(f"/api/reports/{current.id}/compare?baseline_eval_id={baseline.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary_delta"]["current_fail_count"] == 1
+    assert body["summary_delta"]["baseline_fail_count"] == 1
+    assert len(body["row_changes"]["new_failures"]) == 1
+    assert body["row_changes"]["new_failures"][0]["dataset_row_id"] == rows[0].id
+    assert len(body["row_changes"]["fixed"]) == 1
+    assert body["row_changes"]["fixed"][0]["dataset_row_id"] == rows[1].id
+    assert len(body["row_changes"]["still_passing"]) == 1
+    assert body["metric_deltas"][0]["mean_delta"] == 0.05
+
+
+def test_compare_reports_rejects_different_dataset(client, db):
+    from app.models.dataset import Dataset
+    from app.models.evaluation import EvalTask
+    from app.models.llm_config import LLMConfig
+    from app.models.scenario import EvalScenario
+
+    llm = LLMConfig(name="Judge", api_base_url="https://example.com/v1", api_key="key", model_name="model")
+    scenario = EvalScenario(name="RAG", scene_type="rag", sample_type="single_turn", is_preset=False)
+    ds1 = Dataset(name="A", sample_type="single_turn", field_schema=[], row_count=0)
+    ds2 = Dataset(name="B", sample_type="single_turn", field_schema=[], row_count=0)
+    db.add_all([llm, scenario, ds1, ds2])
+    db.flush()
+    snapshot = {"metrics": []}
+    t1 = EvalTask(name="A", dataset_id=ds1.id, scenario_id=scenario.id, llm_config_id=llm.id, status="completed", scenario_snapshot=snapshot)
+    t2 = EvalTask(name="B", dataset_id=ds2.id, scenario_id=scenario.id, llm_config_id=llm.id, status="completed", scenario_snapshot=snapshot)
+    db.add_all([t1, t2])
+    db.commit()
+
+    resp = client.get(f"/api/reports/{t1.id}/compare?baseline_eval_id={t2.id}")
+    assert resp.status_code == 422
+
+
 def test_get_report_summary(client, db):
     """Test report summary using seed data inserted directly into the test DB."""
     from app.seed import run_seed
@@ -386,6 +778,64 @@ def test_get_report_summary(client, db):
     assert "factual_correctness" in body["metric_summary"]
     assert "answer_completeness" in body["metric_summary"]
     assert body["eval_task"]["status"] == "completed"
+
+
+def test_list_reports_returns_report_summaries(client, db):
+    from app.models.dataset import Dataset, DatasetRow
+    from app.models.evaluation import EvalRowResult, EvalTask
+    from app.models.llm_config import LLMConfig
+    from app.models.metric_definition import MetricDefinition
+    from app.models.scenario import EvalScenario, ScenarioMetric
+
+    dataset = Dataset(name="报告数据集", sample_type="single_turn", row_count=2)
+    db.add(dataset)
+    db.flush()
+    row_a = DatasetRow(dataset_id=dataset.id, row_index=0, data={"user_input": "a"})
+    row_b = DatasetRow(dataset_id=dataset.id, row_index=1, data={"user_input": "b"})
+    metric = MetricDefinition(
+        name="report_metric",
+        display_name="报告指标",
+        metric_type="numeric",
+        config={"prompt": "score"},
+        category="custom",
+    )
+    scenario = EvalScenario(name="报告场景", scene_type="general", sample_type="single_turn")
+    llm = LLMConfig(name="Judge", api_base_url="https://api.example.com/v1", api_key="k", model_name="m")
+    db.add_all([row_a, row_b, metric, scenario, llm])
+    db.flush()
+    db.add(ScenarioMetric(scenario_id=scenario.id, metric_definition_id=metric.id, pass_threshold=0.7))
+    task = EvalTask(
+        name="报告列表任务",
+        dataset_id=dataset.id,
+        scenario_id=scenario.id,
+        llm_config_id=llm.id,
+        status="completed",
+        progress=1.0,
+        total_rows=2,
+        completed_rows=2,
+        evaluation_mode="offline",
+        summary_scores={"report_metric": {"mean": 0.75}},
+    )
+    db.add(task)
+    db.flush()
+    db.add_all([
+        EvalRowResult(eval_task_id=task.id, dataset_row_id=row_a.id, row_index=0, metric_scores={}, is_pass=True),
+        EvalRowResult(eval_task_id=task.id, dataset_row_id=row_b.id, row_index=1, metric_scores={}, is_pass=False, error="bad"),
+    ])
+    db.commit()
+
+    resp = client.get("/api/reports")
+    assert resp.status_code == 200
+    body = resp.json()
+    item = next(item for item in body["items"] if item["eval_id"] == task.id)
+    assert item["task_name"] == "报告列表任务"
+    assert item["dataset_name"] == "报告数据集"
+    assert item["scenario_name"] == "报告场景"
+    assert item["total_count"] == 2
+    assert item["pass_count"] == 1
+    assert item["fail_count"] == 1
+    assert item["error_count"] == 1
+    assert item["pass_rate"] == 0.5
 
 
 def test_seed_rag_template_has_p0_metric_layer(client, db):
@@ -605,3 +1055,81 @@ def test_new_llm_metrics_validate_required_fields_and_use_judge_payload():
     )
     assert result.value == 0.82
     assert judge.payloads[0]["metric"]["name"] == "contextual_relevancy"
+
+
+def test_aspect_critic_metric_renders_definition_variables():
+    """Custom aspect metrics should render row variables before judging."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import build_metric
+
+    class FakeJudge:
+        def __init__(self):
+            self.payloads = []
+
+        async def judge_json(self, payload):
+            self.payloads.append(payload)
+            return {"score": 1, "reason": "回答覆盖参考答案并满足评估标准。"}
+
+    metric_def = SimpleNamespace(
+        name="reference_answer_quality_is_ok",
+        display_name="参考答案符合度",
+        metric_type="aspect_critic",
+        config={
+            "definition": (
+                "用户输入：{user_input}\n"
+                "参考答案：{reference}\n"
+                "评估标准：{rubrics}\n"
+                "被测接口回答：{response}"
+            ),
+            "description": "根据参考答案和业务评估标准判断被测回答质量",
+        },
+    )
+    kind, metric = build_metric(metric_def, llm=None)
+    assert kind == "llm"
+
+    judge = FakeJudge()
+    result = asyncio.run(
+        metric.ascore(
+            {
+                "user_input": "请介绍 DeepSeek",
+                "reference": "应说明它是 AI/大模型相关能力。",
+                "rubrics": "不得声称完全免费。",
+                "response": "DeepSeek 是大模型能力提供方。",
+            },
+            judge,
+        )
+    )
+
+    definition = judge.payloads[0]["metric"]["definition"]
+    sample = judge.payloads[0]["sample"]
+    assert result.value == 1.0
+    assert "{user_input}" not in definition
+    assert "{reference}" not in definition
+    assert "请介绍 DeepSeek" in definition
+    assert "不得声称完全免费" in definition
+    assert "user_input" not in sample
+    assert "reference" not in sample
+    assert "rubrics" not in sample
+    assert "response" not in sample
+
+
+def test_prompt_renderer_keeps_json_braces_and_deduplicates_sample_fields():
+    """Business prompts may contain JSON examples plus row variables."""
+    from app.core.evaluation_engine import _render_custom_prompt_and_sample
+
+    prompt, sample = _render_custom_prompt_and_sample(
+        '请判断回答：{response}\n输出 JSON 示例：{"score": 1, "reason": "ok"}',
+        {
+            "user_input": "问题",
+            "response": "实际回答",
+            "reference": "标准答案",
+        },
+    )
+
+    assert "实际回答" in prompt
+    assert '{"score": 1, "reason": "ok"}' in prompt
+    assert "response" not in sample
+    assert sample["user_input"] == "问题"
+    assert sample["reference"] == "标准答案"

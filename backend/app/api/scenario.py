@@ -46,6 +46,7 @@ def _replace_scenario_metrics(
                 metric_definition_id=metric_config.metric_definition_id,
                 weight=metric_config.weight,
                 pass_threshold=metric_config.pass_threshold,
+                prompt_override=(metric_config.prompt_override or "").strip() or None,
             )
         )
 

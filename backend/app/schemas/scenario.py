@@ -10,6 +10,7 @@ class ScenarioMetricConfig(BaseModel):
     metric_definition_id: int
     weight: float = 1.0
     pass_threshold: Optional[float] = None
+    prompt_override: Optional[str] = None
 
 
 class ScenarioCreate(BaseModel):
@@ -29,6 +30,7 @@ class ScenarioMetricResponse(BaseModel):
     metric_definition_id: int
     weight: float
     pass_threshold: Optional[float] = None
+    prompt_override: Optional[str] = None
     metric_definition: Optional[MetricResponse] = None
 
     model_config = ConfigDict(from_attributes=True)

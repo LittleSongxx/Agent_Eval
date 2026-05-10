@@ -14,6 +14,9 @@ import {
   Popconfirm,
   Spin,
   Alert,
+  Radio,
+  Divider,
+  Modal,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -24,10 +27,11 @@ import {
   CopyOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import type { EvalTask, Dataset, EvalScenario, LLMConfig } from '../types';
+import type { EvalTask, Dataset, EndpointTarget, EvalScenario, LLMConfig } from '../types';
 import * as api from '../services/api';
 
 const { Title, Text } = Typography;
+const { TextArea } = Input;
 
 const statusColorMap: Record<string, string> = {
   pending: 'blue',
@@ -68,12 +72,32 @@ const metricRequiredFields: Record<string, string[]> = {
   turn_faithfulness: ['user_input', 'retrieved_contexts'],
 };
 
+const DEFAULT_DEEPSEEK_ENDPOINT_URL = 'https://api.deepseek.com/v1/chat/completions';
+const DEFAULT_DEEPSEEK_AUTHORIZATION = 'Bearer sk-kkkk';
+const DEFAULT_DEEPSEEK_TEST_INPUT = '请用三句话介绍一下 DeepSeek，并说明它适合做哪些 AI 应用测试。';
+const DEFAULT_ENDPOINT_BODY = JSON.stringify(
+  {
+    model: 'deepseek-chat',
+    messages: [
+      {
+        role: 'user',
+        content: '{{user_input}}',
+      },
+    ],
+    temperature: 0.2,
+    stream: false,
+  },
+  null,
+  2,
+);
+
 const EvaluationPage: React.FC = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<EvalTask[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [scenarios, setScenarios] = useState<EvalScenario[]>([]);
   const [llmConfigs, setLLMConfigs] = useState<LLMConfig[]>([]);
+  const [endpointTargets, setEndpointTargets] = useState<EndpointTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
@@ -89,6 +113,9 @@ const EvaluationPage: React.FC = () => {
   const [cloneSourceTask, setCloneSourceTask] = useState<EvalTask | null>(null);
   const selectedDatasetId = Form.useWatch('dataset_id', form);
   const selectedScenarioId = Form.useWatch('scenario_id', form);
+  const selectedEvaluationMode = Form.useWatch('evaluation_mode', form) || 'offline';
+  const selectedResponseMapping = Form.useWatch('response_mapping', form);
+  const [testingEndpoint, setTestingEndpoint] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -104,14 +131,16 @@ const EvaluationPage: React.FC = () => {
 
   const fetchOptions = useCallback(async () => {
     try {
-      const [ds, sc, lc] = await Promise.all([
+      const [ds, sc, lc, et] = await Promise.all([
         api.listDatasets(),
         api.listScenarios(),
         api.listLLMConfigs(),
+        api.listEndpointTargets(),
       ]);
       setDatasets(Array.isArray(ds) ? ds : []);
       setScenarios(Array.isArray(sc) ? sc : []);
       setLLMConfigs(Array.isArray(lc) ? lc : []);
+      setEndpointTargets(Array.isArray(et) ? et : []);
     } catch {
       message.error('加载选项数据失败');
     }
@@ -223,12 +252,17 @@ const EvaluationPage: React.FC = () => {
       hour: '2-digit',
       minute: '2-digit',
     });
-    form.setFieldsValue({
-      name: `${task.name} 复跑 ${timestamp}`,
-      dataset_id: task.dataset_id,
-      scenario_id: task.scenario_id,
-      llm_config_id: task.llm_config_id,
-    });
+      form.setFieldsValue({
+        name: `${task.name} 复跑 ${timestamp}`,
+        dataset_id: task.dataset_id,
+        scenario_id: task.scenario_id,
+        llm_config_id: task.llm_config_id,
+        evaluation_mode: task.evaluation_mode || 'offline',
+        endpoint_target_id: task.endpoint_target_id,
+        target_config: task.target_config,
+        response_mapping: task.response_mapping,
+        result_save_mode: task.result_save_mode || 'task_only',
+      });
     setCloneSourceTask(task);
     message.success('已复制任务配置，可修改后重新执行');
     setTimeout(() => {
@@ -281,7 +315,11 @@ const EvaluationPage: React.FC = () => {
       const fields = metricName ? metricRequiredFields[metricName] || [] : [];
       fields.forEach((field) => requiredFields.add(field));
     });
-    const missingFields = Array.from(requiredFields).filter((field) => !datasetFields.has(field));
+    const producedFields = getEndpointProducedFields();
+    const missingFields = Array.from(requiredFields).filter((field) => {
+      if (datasetFields.has(field)) return false;
+      return selectedEvaluationMode === 'endpoint' ? !producedFields.has(field) : true;
+    });
     if (missingFields.length > 0) {
       return {
         ok: false,
@@ -292,7 +330,90 @@ const EvaluationPage: React.FC = () => {
     return { ok: true, message: '数据集字段满足当前场景的核心指标要求。' };
   };
 
+  const getEndpointProducedFields = () => {
+    const mapping = selectedResponseMapping || form.getFieldValue('response_mapping') || {};
+    const produced = new Set<string>();
+    if (mapping.response_path) produced.add('response');
+    if (mapping.retrieved_contexts_path) produced.add('retrieved_contexts');
+    if (mapping.tool_calls_path) produced.add('tool_calls');
+    if (mapping.retrieved_context_ids_path) produced.add('retrieved_context_ids');
+    return produced;
+  };
+
+  const handleTestEndpoint = async () => {
+    try {
+      const values = await form.validateFields([
+        ['target_config', 'endpoint_url'],
+        ['target_config', 'transport_mode'],
+        ['target_config', 'request_body_template'],
+      ]);
+      setTestingEndpoint(true);
+      const rowData = {
+        user_input: form.getFieldValue('endpoint_test_user_input') || DEFAULT_DEEPSEEK_TEST_INPUT,
+      };
+      const result = await api.testEvaluationEndpoint({
+        target_config: {
+          ...(form.getFieldValue('target_config') || {}),
+          request_body_template: form.getFieldValue(['target_config', 'request_body_template']) || DEFAULT_ENDPOINT_BODY,
+        },
+        response_mapping: form.getFieldValue('response_mapping') || {},
+        row_data: rowData,
+      });
+      if (result.success) {
+        Modal.success({
+          width: 760,
+          title: '接口试跑成功',
+          content: (
+            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              <div>
+                <Text strong>请求体</Text>
+                <pre style={{ maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(result.request_body, null, 2)}</pre>
+              </div>
+              <div>
+                <Text strong>解析字段</Text>
+                <pre style={{ maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(result.extracted_fields || {}, null, 2)}</pre>
+              </div>
+              {result.mapping_errors && Object.keys(result.mapping_errors).length > 0 && (
+                <Alert type="warning" showIcon message="字段映射提示" description={JSON.stringify(result.mapping_errors)} />
+              )}
+            </Space>
+          ),
+        });
+      } else {
+        message.error(`接口试跑失败: ${result.message}`);
+      }
+    } catch {
+      message.error('请先补全接口地址和请求模板');
+    } finally {
+      setTestingEndpoint(false);
+    }
+  };
+
+  const applyEndpointTarget = (targetId?: number) => {
+    const target = endpointTargets.find((item) => item.id === targetId);
+    if (!target) return;
+    form.setFieldsValue({
+      endpoint_target_id: target.id,
+      target_config: {
+        endpoint_url: target.endpoint_url,
+        transport_mode: target.transport_mode || 'json',
+        authorization: target.authorization || '',
+        extra_headers: target.extra_headers || '{}',
+        request_body_template: target.request_body_template || DEFAULT_ENDPOINT_BODY,
+      },
+      response_mapping: {
+        response_path: target.response_mapping?.response_path || 'choices.0.message.content',
+        retrieved_contexts_path: target.response_mapping?.retrieved_contexts_path || '',
+        retrieved_context_ids_path: target.response_mapping?.retrieved_context_ids_path || '',
+        tool_calls_path: target.response_mapping?.tool_calls_path || '',
+      },
+      endpoint_test_user_input: target.default_test_input || DEFAULT_DEEPSEEK_TEST_INPUT,
+    });
+  };
+
   const selectionCompatibility = getSelectionCompatibility(selectedDatasetId, selectedScenarioId);
+  const selectedScenario = scenarios.find((s) => s.id === selectedScenarioId);
+  const customPromptCount = (selectedScenario?.metrics || []).filter((m) => m.prompt_override).length;
 
   const columns = [
     { title: '任务名称', dataIndex: 'name', key: 'name', width: 180 },
@@ -357,6 +478,9 @@ const EvaluationPage: React.FC = () => {
       width: 240,
       render: (_: unknown, record: EvalTask) => (
         <Space>
+          <Tag color={(record.evaluation_mode || 'offline') === 'endpoint' ? 'purple' : 'default'}>
+            {(record.evaluation_mode || 'offline') === 'endpoint' ? '接口评测' : '已有结果'}
+          </Tag>
           <Button
             size="small"
             type="link"
@@ -431,7 +555,32 @@ const EvaluationPage: React.FC = () => {
           form={form}
           layout="inline"
           style={{ flexWrap: 'wrap', gap: 8 }}
+          initialValues={{
+            evaluation_mode: 'offline',
+            result_save_mode: 'task_only',
+            target_config: {
+              endpoint_url: DEFAULT_DEEPSEEK_ENDPOINT_URL,
+              transport_mode: 'json',
+              authorization: DEFAULT_DEEPSEEK_AUTHORIZATION,
+              request_body_template: DEFAULT_ENDPOINT_BODY,
+              extra_headers: '{}',
+            },
+            response_mapping: {
+              response_path: 'choices.0.message.content',
+            },
+            endpoint_test_user_input: DEFAULT_DEEPSEEK_TEST_INPUT,
+          }}
         >
+          <Form.Item name="evaluation_mode" label="评测类型">
+            <Radio.Group
+              optionType="button"
+              buttonStyle="solid"
+              options={[
+                { label: '已有结果评测', value: 'offline' },
+                { label: '接口实时评测', value: 'endpoint' },
+              ]}
+            />
+          </Form.Item>
           <Form.Item
             name="name"
             rules={[{ required: true, message: '请输入名称' }]}
@@ -477,6 +626,102 @@ const EvaluationPage: React.FC = () => {
               }))}
             />
           </Form.Item>
+
+          {selectedEvaluationMode === 'endpoint' && (
+            <div style={{ width: '100%', marginTop: 8 }}>
+              <Divider orientation="left" style={{ margin: '8px 0 16px' }}>被测接口</Divider>
+              <Form.Item name="endpoint_target_id" label="选择已保存接口">
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="选择后自动填充接口配置"
+                  style={{ width: 360 }}
+                  onChange={(value) => applyEndpointTarget(value)}
+                  options={endpointTargets.map((target) => ({
+                    label: `${target.name} · ${target.transport_mode.toUpperCase()}`,
+                    value: target.id,
+                  }))}
+                />
+              </Form.Item>
+              <Space wrap align="start" size={12}>
+                <Form.Item
+                  name={['target_config', 'endpoint_url']}
+                  label="接口地址"
+                  rules={[{ required: true, message: '请填写接口地址' }]}
+                >
+                  <Input placeholder={DEFAULT_DEEPSEEK_ENDPOINT_URL} style={{ width: 360 }} />
+                </Form.Item>
+                <Form.Item name={['target_config', 'transport_mode']} label="返回方式">
+                  <Select
+                    style={{ width: 140 }}
+                    options={[
+                      { label: '普通 JSON', value: 'json' },
+                      { label: 'SSE 流式', value: 'sse' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="result_save_mode" label="结果保存">
+                  <Select
+                    style={{ width: 180 }}
+                    options={[
+                      { label: '只存任务结果', value: 'task_only' },
+                      { label: '回写数据集', value: 'write_back' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name={['target_config', 'authorization']} label="Authorization">
+                  <Input placeholder={DEFAULT_DEEPSEEK_AUTHORIZATION} style={{ width: 260 }} />
+                </Form.Item>
+              </Space>
+              <Space align="start" size={12} style={{ width: '100%' }}>
+                <Form.Item name={['target_config', 'extra_headers']} label="附加 Headers(JSON)">
+                  <TextArea autoSize={{ minRows: 4, maxRows: 8 }} style={{ width: 330 }} />
+                </Form.Item>
+                <Form.Item
+                  name={['target_config', 'request_body_template']}
+                  label="请求体模板(JSON)"
+                  rules={[{ required: true, message: '请填写请求体模板' }]}
+                >
+                  <TextArea autoSize={{ minRows: 4, maxRows: 8 }} style={{ width: 380 }} />
+                </Form.Item>
+                <Form.Item name="endpoint_test_user_input" label="试跑输入">
+                  <TextArea
+                    placeholder="输入一条测试问题"
+                    autoSize={{ minRows: 4, maxRows: 8 }}
+                    style={{ width: 300 }}
+                  />
+                </Form.Item>
+              </Space>
+              <Divider orientation="left" style={{ margin: '8px 0 16px' }}>响应字段映射</Divider>
+              <Space wrap align="start" size={12}>
+                <Form.Item name={['response_mapping', 'response_path']} label="回答字段">
+                  <Input placeholder="choices.0.message.content" style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item name={['response_mapping', 'retrieved_contexts_path']} label="上下文字段">
+                  <Input placeholder="data.contexts" style={{ width: 200 }} />
+                </Form.Item>
+                <Form.Item name={['response_mapping', 'retrieved_context_ids_path']} label="检索ID字段">
+                  <Input placeholder="data.context_ids" style={{ width: 200 }} />
+                </Form.Item>
+                <Form.Item name={['response_mapping', 'tool_calls_path']} label="工具调用字段">
+                  <Input placeholder="trace.tool_calls" style={{ width: 200 }} />
+                </Form.Item>
+                <Form.Item label="连通性">
+                  <Button loading={testingEndpoint} onClick={handleTestEndpoint}>
+                    测试接口
+                  </Button>
+                </Form.Item>
+              </Space>
+              <Alert
+                style={{ marginBottom: 12 }}
+                type="info"
+                showIcon
+                message="接口实时评测会先逐条调用业务接口，再把映射出的字段交给现有指标评分。"
+                description="默认只保存到本次任务结果；选择回写数据集时，会把 response、retrieved_contexts、tool_calls 等映射结果补充回原始数据行。"
+              />
+            </div>
+          )}
           <Form.Item>
             <Button
               type="primary"
@@ -495,7 +740,14 @@ const EvaluationPage: React.FC = () => {
             type={selectionCompatibility.ok ? 'success' : 'warning'}
             showIcon
             message={selectionCompatibility.ok ? '数据集与场景字段匹配' : '数据集与场景不匹配'}
-            description={selectionCompatibility.message}
+            description={
+              <span>
+                {selectionCompatibility.message}
+                {selectionCompatibility.ok && customPromptCount > 0 && (
+                  <span> 当前场景包含 {customPromptCount} 个业务自定义评测提示词，新建任务会冻结这些评测口径。</span>
+                )}
+              </span>
+            }
           />
         )}
       </Card>

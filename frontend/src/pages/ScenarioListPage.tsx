@@ -17,6 +17,7 @@ import {
   Badge,
   Spin,
   InputNumber,
+  Alert,
 } from 'antd';
 import {
   PlusOutlined,
@@ -37,6 +38,7 @@ interface SelectedMetric {
   metric_definition_id: number;
   weight: number;
   pass_threshold: number | null;
+  prompt_override?: string | null;
 }
 
 interface ScenarioMetricEntry {
@@ -150,6 +152,7 @@ const ScenarioListPage: React.FC = () => {
         metric_definition_id: scenarioMetric.metric_definition_id,
         weight: scenarioMetric.weight ?? 1.0,
         pass_threshold: scenarioMetric.pass_threshold ?? null,
+        prompt_override: scenarioMetric.prompt_override || null,
       }))
     );
     setModalOpen(true);
@@ -291,6 +294,9 @@ const ScenarioListPage: React.FC = () => {
                     {entry.label}
                     {!compact && scenarioMetric?.pass_threshold != null && (
                       <span style={{ color: '#999', marginLeft: 4 }}>≥{scenarioMetric.pass_threshold}</span>
+                    )}
+                    {!compact && scenarioMetric?.prompt_override && (
+                      <span style={{ color: '#1677ff', marginLeft: 4 }}>场景覆盖</span>
                     )}
                     <MetricHelpIcon metricName={entry.metricName} onClick={() => setHelpMetric(entry.metricName)} />
                   </Tag>
@@ -497,7 +503,7 @@ const ScenarioListPage: React.FC = () => {
               setSelectedMetrics(
                 ids.map((mid) => {
                   const existing = selectedMetrics.find((s) => s.metric_definition_id === mid);
-                  return existing ?? { metric_definition_id: mid, weight: 1.0, pass_threshold: null };
+                  return existing ?? { metric_definition_id: mid, weight: 1.0, pass_threshold: null, prompt_override: null };
                 })
               );
             }}
@@ -505,6 +511,13 @@ const ScenarioListPage: React.FC = () => {
           />
           {selectedMetrics.length > 0 && (
             <Card size="small" title="指标配置">
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="这里填写场景覆盖规则"
+                description="指标管理里维护默认评分规则；这里留空时使用指标默认规则，填写后只在当前场景覆盖该指标规则。适合写当前业务线、接口版本或测试目标的特殊扣分/通过标准。系统仍会统一要求评测模型返回 score 和 reason。"
+              />
               <Space direction="vertical" style={{ width: '100%' }} size={12}>
                 {groupMetricNames(selectedMetrics.map((sm) => metrics.find((m) => m.id === sm.metric_definition_id)?.name || '').filter(Boolean)).map((group) => (
                   <div key={group.key}>
@@ -517,29 +530,52 @@ const ScenarioListPage: React.FC = () => {
                       const sm = selectedMetrics.find((m) => m.metric_definition_id === def?.id);
                       if (!def || !sm) return null;
                       return (
-                        <div key={sm.metric_definition_id} style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 12 }}>
-                          <span style={{ width: 220, flexShrink: 0 }}>
-                            {def.display_name}
-                            <MetricHelpIcon metricName={def.name} onClick={() => setHelpMetric(def.name)} />
-                          </span>
-                          <span>权重:</span>
-                          <InputNumber
-                            min={0} max={10} step={0.1}
-                            value={sm.weight}
-                            onChange={(v) => setSelectedMetrics((prev) =>
-                              prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, weight: v ?? 1 } : m)
+                        <div
+                          key={sm.metric_definition_id}
+                          style={{
+                            marginBottom: 12,
+                            padding: 12,
+                            border: '1px solid #f0f0f0',
+                            borderRadius: 6,
+                            background: '#fff',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 12, flexWrap: 'wrap' }}>
+                            <span style={{ width: 220, flexShrink: 0 }}>
+                              {def.display_name}
+                              <MetricHelpIcon metricName={def.name} onClick={() => setHelpMetric(def.name)} />
+                            </span>
+                            <span>权重:</span>
+                            <InputNumber
+                              min={0} max={10} step={0.1}
+                              value={sm.weight}
+                              onChange={(v) => setSelectedMetrics((prev) =>
+                                prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, weight: v ?? 1 } : m)
+                              )}
+                              style={{ width: 80 }}
+                            />
+                            <span>通过阈值:</span>
+                            <InputNumber
+                              min={0} max={1} step={0.05}
+                              value={sm.pass_threshold ?? undefined}
+                              onChange={(v) => setSelectedMetrics((prev) =>
+                                prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, pass_threshold: v } : m)
+                              )}
+                              placeholder="可选"
+                              style={{ width: 80 }}
+                            />
+                            {sm.prompt_override && <Tag color="processing">已覆盖默认规则</Tag>}
+                          </div>
+                          <Input.TextArea
+                            rows={3}
+                            allowClear
+                            placeholder="可选：填写该指标在当前场景下的覆盖规则。例如当前业务必须覆盖哪些规则、哪些情况必须扣分、低于多少分算失败。留空则使用指标管理中的默认评分规则。"
+                            value={sm.prompt_override || ''}
+                            onChange={(e) => setSelectedMetrics((prev) =>
+                              prev.map((m) => m.metric_definition_id === sm.metric_definition_id
+                                ? { ...m, prompt_override: e.target.value || null }
+                                : m)
                             )}
-                            style={{ width: 80 }}
-                          />
-                          <span>通过阈值:</span>
-                          <InputNumber
-                            min={0} max={1} step={0.05}
-                            value={sm.pass_threshold ?? undefined}
-                            onChange={(v) => setSelectedMetrics((prev) =>
-                              prev.map((m) => m.metric_definition_id === sm.metric_definition_id ? { ...m, pass_threshold: v } : m)
-                            )}
-                            placeholder="可选"
-                            style={{ width: 80 }}
                           />
                         </div>
                       );

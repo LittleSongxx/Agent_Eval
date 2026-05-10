@@ -12,6 +12,14 @@ class MetricCreate(BaseModel):
     category: str = "custom"
 
 
+class MetricUpdate(BaseModel):
+    name: str
+    display_name: str
+    metric_type: str
+    config: Dict = {}
+    category: str = "custom"
+
+
 class MetricResponse(BaseModel):
     id: int
     name: str

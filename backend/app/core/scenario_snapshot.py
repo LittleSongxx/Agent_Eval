@@ -18,6 +18,7 @@ def build_scenario_snapshot(scenario) -> dict[str, Any]:
                 "metric_definition_id": scenario_metric.metric_definition_id,
                 "weight": scenario_metric.weight,
                 "pass_threshold": scenario_metric.pass_threshold,
+                "prompt_override": getattr(scenario_metric, "prompt_override", None),
                 "metric_definition": {
                     "id": metric_definition.id,
                     "name": metric_definition.name,
@@ -57,6 +58,7 @@ def snapshot_to_scenario_metrics(snapshot: dict[str, Any] | None) -> list[Any]:
                 metric_definition_id=item.get("metric_definition_id"),
                 weight=item.get("weight", 1.0),
                 pass_threshold=item.get("pass_threshold"),
+                prompt_override=item.get("prompt_override"),
                 metric_definition=SimpleNamespace(
                     id=metric_definition.get("id"),
                     name=metric_definition.get("name"),

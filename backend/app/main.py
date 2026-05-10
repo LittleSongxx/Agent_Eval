@@ -1,4 +1,6 @@
 import os
+import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +9,33 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import engine, Base, ensure_runtime_schema
+
+
+def _configure_app_logging() -> None:
+    """Send project logger output to the console when running with uvicorn.
+
+    Uvicorn configures its own access/error loggers, but application loggers
+    such as ``app.core.evaluation_engine`` may not have a console handler in
+    local ``uv run ./run.py`` startup mode. This keeps debug traces like the
+    full Judge Prompt visible without changing every module's logger setup.
+    """
+
+    level_name = os.getenv("APP_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(level)
+
+    if not app_logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(
+            logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        )
+        app_logger.addHandler(handler)
+
+    app_logger.propagate = False
+
+
+_configure_app_logging()
 
 # Import all models so they register with Base before create_all
 import app.models  # noqa: F401
@@ -97,6 +126,7 @@ app.add_middleware(
 from app.api.llm_config import router as llm_config_router
 from app.api.dataset import router as dataset_router
 from app.api.metric import router as metric_router
+from app.api.endpoint_target import router as endpoint_target_router
 from app.api.scenario import router as scenario_router
 from app.api.evaluation import router as evaluation_router
 from app.api.report import router as report_router
@@ -106,6 +136,7 @@ from app.api.blind_test import router as blind_test_router
 app.include_router(llm_config_router, prefix="/api")
 app.include_router(dataset_router, prefix="/api")
 app.include_router(metric_router, prefix="/api")
+app.include_router(endpoint_target_router, prefix="/api")
 app.include_router(scenario_router, prefix="/api")
 app.include_router(evaluation_router, prefix="/api")
 app.include_router(report_router, prefix="/api")

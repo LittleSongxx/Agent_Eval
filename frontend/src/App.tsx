@@ -8,6 +8,8 @@ import {
   PlayCircleOutlined,
   BarChartOutlined,
   SwapOutlined,
+  SlidersOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 
 import LLMConfigPage from './pages/LLMConfigPage';
@@ -15,7 +17,10 @@ import DatasetListPage from './pages/DatasetListPage';
 import DatasetDetailPage from './pages/DatasetDetailPage';
 import RagDatasetBuilderPage from './pages/RagDatasetBuilderPage';
 import ScenarioListPage from './pages/ScenarioListPage';
+import MetricListPage from './pages/MetricListPage';
+import EndpointTargetPage from './pages/EndpointTargetPage';
 import EvaluationPage from './pages/EvaluationPage';
+import ReportListPage from './pages/ReportListPage';
 import ReportDetailPage from './pages/ReportDetailPage';
 import BlindTestPage from './pages/BlindTestPage';
 
@@ -25,6 +30,8 @@ const { Title } = Typography;
 const menuItems = [
   { key: '/llm-configs', icon: <SettingOutlined />, label: 'LLM配置' },
   { key: '/datasets', icon: <DatabaseOutlined />, label: '数据管理' },
+  { key: '/metrics', icon: <SlidersOutlined />, label: '指标管理' },
+  { key: '/endpoint-targets', icon: <ApiOutlined />, label: '被测接口' },
   { key: '/scenarios', icon: <AppstoreOutlined />, label: '场景管理' },
   { key: '/evaluations', icon: <PlayCircleOutlined />, label: '评测执行' },
   { key: '/blind-tests', icon: <SwapOutlined />, label: '人工盲测' },
@@ -85,9 +92,12 @@ const App: React.FC = () => {
               <Route path="/datasets" element={<DatasetListPage />} />
               <Route path="/datasets/:id" element={<DatasetDetailPage />} />
               <Route path="/datasets/rag-builder" element={<RagDatasetBuilderPage />} />
+              <Route path="/metrics" element={<MetricListPage />} />
+              <Route path="/endpoint-targets" element={<EndpointTargetPage />} />
               <Route path="/scenarios" element={<ScenarioListPage />} />
               <Route path="/evaluations" element={<EvaluationPage />} />
               <Route path="/blind-tests" element={<BlindTestPage />} />
+              <Route path="/reports" element={<ReportListPage />} />
               <Route path="/reports/:id" element={<ReportDetailPage />} />
               <Route path="*" element={<Navigate to="/datasets" replace />} />
             </Routes>

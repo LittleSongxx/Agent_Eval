@@ -18,6 +18,14 @@ import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
+from app.core.prompt_manager import (
+    DEFAULT_RAG_TARGET_REQUEST_BODY_TEMPLATE,
+    DEFAULT_TARGET_ANSWER_ONLY_PROMPT,
+    DEFAULT_TARGET_CONTEXT_PROMPT,
+    QUESTION_GENERATION_PROMPT,
+    QUESTION_VALIDATION_PROMPT,
+    render_template_value,
+)
 from app.models.dataset import Dataset, DatasetRow
 from app.models.llm_config import LLMConfig
 from app.models.rag_dataset_job import (
@@ -34,82 +42,6 @@ RAG_QUESTION_GENERATION_TIMEOUT_SECONDS = 120
 RAG_TARGET_REQUEST_TIMEOUT_SECONDS = 180
 RAG_TARGET_REQUEST_RETRIES = 3
 RAG_TARGET_REQUEST_CONCURRENCY = 3
-
-QUESTION_GENERATION_PROMPT = """你是一个严谨的 RAG 测试集构建助手。请只基于给定文档分片内容，生成 {n} 个高质量问题及标准答案。
-
-## 文档
-- 文件名: {filename}
-- 分片ID: {chunk_key}
-
-## 分片内容
-{content}
-
-## 要求
-1. 问题必须能直接依据分片内容回答，不能依赖外部知识。
-2. 问题要覆盖事实、规则、步骤、例外等不同角度，避免重复。
-3. 标准答案必须简洁准确，严格以分片内容为依据。
-4. 生成数量严格为 {n} 个。
-5. 不要生成“文档里提到了什么”这类元问题。
-6. 优先生成真实业务会问的问题，而不是照抄标题。
-7. 每道题尽量只考查一个明确知识点，避免含糊表述。
-
-## 输出格式
-只输出 JSON：
-{{
-  "items": [
-    {{
-      "question": "问题文本",
-      "reference": "标准答案"
-    }}
-  ]
-}}
-"""
-
-QUESTION_VALIDATION_PROMPT = """你是一个严格的数据集质检助手。请检查下面每个候选问题是否真的适合作为 RAG 评测样本。
-
-## 分片内容
-{content}
-
-## 候选问题
-{items_json}
-
-## 评估标准
-1. 问题必须能仅凭分片内容回答。
-2. 标准答案必须被分片直接支持，不能有外推。
-3. 问题不能是“文档提到了什么”“这一节讲了什么”之类元问题。
-4. 问题应具体、清晰、像真实用户会问的问题。
-5. 重复或高度近似的问题只保留质量更高的那个。
-
-## 输出格式
-只输出 JSON：
-{{
-  "items": [
-    {{
-      "question": "原问题",
-      "keep": true,
-      "score": 0.0,
-      "reason": "一句中文理由"
-    }}
-  ]
-}}
-"""
-
-DEFAULT_TARGET_CONTEXT_PROMPT = """请使用你自己的正常 RAG / 知识库检索流程回答用户问题，并严格输出 JSON。
-
-输出字段要求：
-- answer: 最终回答
-- retrieved_contexts: 你本次回答实际使用或返回给模型的检索片段数组
-- retrieved_context_ids: 与 retrieved_contexts 对应的文档/分片 ID 数组
-
-不要输出额外解释。"""
-
-DEFAULT_TARGET_ANSWER_ONLY_PROMPT = """请回答用户问题，并严格输出 JSON：
-{
-  "answer": "你的回答"
-}
-不要输出额外解释。"""
-
-DEFAULT_TARGET_REQUEST_BODY_TEMPLATE = '{"question":"{{question}}","kb_codes":[],"payload":{"files":[]}}'
 
 _PAGE_LINE_RE = re.compile(r"^\s*第?\s*\d+\s*页(?:\s*/\s*共?\s*\d+\s*页)?\s*$")
 _DATE_RE = re.compile(r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日")
@@ -862,16 +794,6 @@ def _parse_json_text(value: str | None, default: dict[str, Any] | None = None) -
     return loaded
 
 
-def _render_template_value(value: Any, question: str) -> Any:
-    if isinstance(value, str):
-        return value.replace("{{question}}", question)
-    if isinstance(value, list):
-        return [_render_template_value(item, question) for item in value]
-    if isinstance(value, dict):
-        return {key: _render_template_value(item, question) for key, item in value.items()}
-    return value
-
-
 def _extract_from_dict(payload: dict[str, Any], candidates: list[str]) -> Any:
     for path in candidates:
         current: Any = payload
@@ -1003,7 +925,7 @@ class TargetEndpointClient:
         self.transport_mode = (job.target_transport_mode or "sse").strip() or "sse"
         self.authorization = (job.target_authorization or "").strip()
         self.extra_headers = job.target_extra_headers or ""
-        self.body_template = job.target_request_body_template or DEFAULT_TARGET_REQUEST_BODY_TEMPLATE
+        self.body_template = job.target_request_body_template or DEFAULT_RAG_TARGET_REQUEST_BODY_TEMPLATE
         self.timeout = 180
         self.max_retries = RAG_TARGET_REQUEST_RETRIES
 
@@ -1023,8 +945,8 @@ class TargetEndpointClient:
         return headers
 
     def build_body(self, question: str) -> dict[str, Any]:
-        template = _parse_json_text(self.body_template, default=json.loads(DEFAULT_TARGET_REQUEST_BODY_TEMPLATE))
-        rendered = _render_template_value(template, question)
+        template = _parse_json_text(self.body_template, default=json.loads(DEFAULT_RAG_TARGET_REQUEST_BODY_TEMPLATE))
+        rendered = render_template_value(template, {"question": question})
         if not isinstance(rendered, dict):
             raise ValueError("目标接口请求体模板渲染后必须是 JSON 对象")
         return rendered
