@@ -7,6 +7,7 @@ import {
   Descriptions,
   Divider,
   Input,
+  InputNumber,
   Modal,
   Progress,
   Radio,
@@ -24,7 +25,9 @@ import {
   ApiOutlined,
   BarChartOutlined,
   CodeOutlined,
+  CopyOutlined,
   DatabaseOutlined,
+  EditOutlined,
   ExperimentOutlined,
   FileSearchOutlined,
   FormOutlined,
@@ -33,7 +36,7 @@ import {
   SwapOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import type { Dataset, EndpointTarget, EvalScenario, EvalTask, LLMConfig, MetricDefinition } from '../types';
+import type { Dataset, DatasetRow, EndpointTarget, EvalScenario, EvalTask, LLMConfig, MetricDefinition, ScenarioMetric } from '../types';
 import * as api from '../services/api';
 import DatasetCreateModal from '../components/resource/DatasetCreateModal';
 import EndpointTargetModal from '../components/resource/EndpointTargetModal';
@@ -90,6 +93,13 @@ type EvaluationMode = 'offline' | 'endpoint';
 type ResourceSource = 'existing' | 'create';
 type TestStatus = 'idle' | 'success' | 'failed';
 
+interface MetricOverrideDraft {
+  metric_definition_id: number;
+  prompt_override?: string | null;
+  pass_threshold?: number | null;
+  weight?: number | null;
+}
+
 interface ExperimentDraft {
   evaluation_mode: EvaluationMode;
   dataset_id?: number;
@@ -97,6 +107,9 @@ interface ExperimentDraft {
   scenario_id?: number;
   llm_config_id?: number;
   task_id?: number;
+  metric_overrides?: MetricOverrideDraft[];
+  selected_metric_definition_id?: number;
+  last_debug_success?: boolean;
 }
 
 const loadWorkbenchDraft = (): ExperimentDraft => {
@@ -112,11 +125,71 @@ const loadWorkbenchDraft = (): ExperimentDraft => {
       scenario_id: typeof parsed.scenario_id === 'number' ? parsed.scenario_id : undefined,
       llm_config_id: typeof parsed.llm_config_id === 'number' ? parsed.llm_config_id : undefined,
       task_id: typeof parsed.task_id === 'number' ? parsed.task_id : undefined,
+      selected_metric_definition_id: typeof parsed.selected_metric_definition_id === 'number'
+        ? parsed.selected_metric_definition_id
+        : undefined,
+      metric_overrides: Array.isArray(parsed.metric_overrides)
+        ? parsed.metric_overrides
+          .filter((item: any) => typeof item?.metric_definition_id === 'number')
+          .map((item: any) => ({
+            metric_definition_id: item.metric_definition_id,
+            prompt_override: typeof item.prompt_override === 'string' ? item.prompt_override : item.prompt_override === null ? null : undefined,
+            pass_threshold: typeof item.pass_threshold === 'number' ? item.pass_threshold : item.pass_threshold === null ? null : undefined,
+            weight: typeof item.weight === 'number' ? item.weight : item.weight === null ? null : undefined,
+          }))
+        : undefined,
+      last_debug_success: typeof parsed.last_debug_success === 'boolean' ? parsed.last_debug_success : undefined,
     };
   } catch {
     return { evaluation_mode: 'offline' };
   }
 };
+
+const getMetricPromptTemplate = (scenarioMetric?: ScenarioMetric | null) => {
+  if (!scenarioMetric) return '';
+  const override = scenarioMetric.prompt_override?.trim();
+  if (override) return override;
+  const config = scenarioMetric.metric_definition?.config || {};
+  if (scenarioMetric.metric_definition?.metric_type === 'aspect_critic') {
+    return String(config.definition || config.description || scenarioMetric.metric_definition?.display_name || '');
+  }
+  return String(config.prompt || config.definition || config.description || '');
+};
+
+const getMetricScoreRange = (metric?: MetricDefinition) => {
+  if (!metric) return '0 到 1';
+  const allowed = metric.config?.allowed_values;
+  if (metric.metric_type === 'numeric' && Array.isArray(allowed) && allowed.length >= 2) {
+    return `${allowed[0]} 到 ${allowed[1]}`;
+  }
+  if (metric.metric_type === 'discrete' && Array.isArray(allowed)) {
+    return allowed.join(' / ');
+  }
+  if (metric.metric_type === 'aspect_critic') return '0 或 1';
+  return '0 到 1';
+};
+
+const promptVariableRegex = /(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}(?!\})/g;
+
+const resolvePromptVariable = (context: Record<string, any>, variable: string) => {
+  if (Object.prototype.hasOwnProperty.call(context, variable)) return context[variable];
+  return variable.split('.').reduce((current: any, part) => {
+    if (current && typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, part)) {
+      return current[part];
+    }
+    return undefined;
+  }, context);
+};
+
+const renderPromptPreview = (template: string, context: Record<string, any>) =>
+  template.replace(promptVariableRegex, (_match, variable) => {
+    const value = resolvePromptVariable(context, variable);
+    if (value === undefined || value === null) return '';
+    return typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+  });
+
+const extractPromptVariables = (template: string) =>
+  Array.from(template.matchAll(promptVariableRegex)).map((match) => match[1]);
 
 const ExperimentWorkbenchPage: React.FC = () => {
   const navigate = useNavigate();
@@ -128,7 +201,9 @@ const ExperimentWorkbenchPage: React.FC = () => {
   const [llmConfigs, setLLMConfigs] = useState<LLMConfig[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [tasks, setTasks] = useState<EvalTask[]>([]);
+  const [sampleRow, setSampleRow] = useState<DatasetRow | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resourcesLoaded, setResourcesLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [debugging, setDebugging] = useState(false);
   const [debugResult, setDebugResult] = useState<any>(null);
@@ -182,6 +257,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
       message.error('加载工作台数据失败');
     } finally {
       setLoading(false);
+      setResourcesLoaded(true);
     }
   };
 
@@ -193,6 +269,39 @@ const ExperimentWorkbenchPage: React.FC = () => {
   useEffect(() => {
     fetchAll();
   }, []);
+
+  useEffect(() => {
+    if (!resourcesLoaded) return;
+    setDraft((prev) => {
+      const datasetExists = !prev.dataset_id || datasets.some((item) => item.id === prev.dataset_id);
+      const endpointExists = !prev.endpoint_target_id || endpointTargets.some((item) => item.id === prev.endpoint_target_id);
+      const scenarioExists = !prev.scenario_id || scenarios.some((item) => item.id === prev.scenario_id);
+      const llmExists = !prev.llm_config_id || llmConfigs.some((item) => item.id === prev.llm_config_id);
+      const taskExists = !prev.task_id || tasks.some((item) => item.id === prev.task_id);
+      if (datasetExists && endpointExists && scenarioExists && llmExists && taskExists) return prev;
+      return {
+        ...prev,
+        dataset_id: datasetExists ? prev.dataset_id : undefined,
+        endpoint_target_id: endpointExists ? prev.endpoint_target_id : undefined,
+        scenario_id: scenarioExists ? prev.scenario_id : undefined,
+        llm_config_id: llmExists ? prev.llm_config_id : undefined,
+        task_id: taskExists ? prev.task_id : undefined,
+        metric_overrides: scenarioExists ? prev.metric_overrides : [],
+        selected_metric_definition_id: scenarioExists ? prev.selected_metric_definition_id : undefined,
+        last_debug_success: undefined,
+      };
+    });
+  }, [datasets, endpointTargets, llmConfigs, resourcesLoaded, scenarios, tasks]);
+
+  useEffect(() => {
+    if (!draft.dataset_id) {
+      setSampleRow(null);
+      return;
+    }
+    api.listDatasetRows(draft.dataset_id, 1, 1)
+      .then((data) => setSampleRow(data?.items?.[0] || null))
+      .catch(() => setSampleRow(null));
+  }, [draft.dataset_id]);
 
   useEffect(() => {
     window.localStorage.setItem(WORKBENCH_DRAFT_STORAGE_KEY, JSON.stringify(draft));
@@ -264,6 +373,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
     base.push(
       { key: 'scenario', title: '选择评测标准', icon: <SafetyCertificateOutlined /> },
       { key: 'llm', title: '配置 Judge LLM', icon: <FormOutlined /> },
+      { key: 'prompt', title: '配置 Prompt 模板', icon: <EditOutlined /> },
       { key: 'run', title: '执行评测', icon: <PlayCircleOutlined /> },
       { key: 'report', title: '查看报告', icon: <BarChartOutlined /> },
       { key: 'review', title: '人工复核/盲测', icon: <SwapOutlined /> },
@@ -287,6 +397,37 @@ const ExperimentWorkbenchPage: React.FC = () => {
   const endpointResponseParsed = endpointExtractedResponse !== null
     && endpointExtractedResponse !== undefined
     && endpointExtractedResponse !== '';
+  const selectedScenarioMetrics = selectedScenario?.metrics || [];
+  const selectedMetricDefinitionId = draft.selected_metric_definition_id
+    || selectedScenarioMetrics[0]?.metric_definition_id;
+  const selectedScenarioMetric = selectedScenarioMetrics.find((item) => item.metric_definition_id === selectedMetricDefinitionId)
+    || selectedScenarioMetrics[0];
+  const selectedMetricOverride = (draft.metric_overrides || [])
+    .find((item) => item.metric_definition_id === selectedScenarioMetric?.metric_definition_id);
+  const effectivePromptTemplate = selectedMetricOverride && Object.prototype.hasOwnProperty.call(selectedMetricOverride, 'prompt_override')
+    ? selectedMetricOverride.prompt_override || ''
+    : getMetricPromptTemplate(selectedScenarioMetric);
+  const effectivePassThreshold = selectedMetricOverride && Object.prototype.hasOwnProperty.call(selectedMetricOverride, 'pass_threshold')
+    ? selectedMetricOverride.pass_threshold ?? null
+    : selectedScenarioMetric?.pass_threshold ?? null;
+  const effectiveWeight = selectedMetricOverride && Object.prototype.hasOwnProperty.call(selectedMetricOverride, 'weight')
+    ? selectedMetricOverride.weight ?? null
+    : selectedScenarioMetric?.weight ?? 1;
+  const promptOverrideCount = (draft.metric_overrides || []).filter((item) => {
+    const scenarioMetric = selectedScenarioMetrics.find((metric) => metric.metric_definition_id === item.metric_definition_id);
+    return item.prompt_override !== undefined && (item.prompt_override || '') !== getMetricPromptTemplate(scenarioMetric);
+  }).length;
+
+  useEffect(() => {
+    if (!selectedScenarioMetrics.length) return;
+    if (selectedScenarioMetrics.some((item) => item.metric_definition_id === draft.selected_metric_definition_id)) {
+      return;
+    }
+    setDraft((prev) => ({
+      ...prev,
+      selected_metric_definition_id: selectedScenarioMetrics[0].metric_definition_id,
+    }));
+  }, [draft.selected_metric_definition_id, selectedScenarioMetrics]);
 
   const executionBlocks = useMemo(() => {
     const blocks: string[] = [];
@@ -323,8 +464,11 @@ const ExperimentWorkbenchPage: React.FC = () => {
     if (selectedLLM && llmTestStatus !== 'success') {
       warnings.push('建议先测试 Judge LLM 连接，避免任务开始后才失败');
     }
+    if (!draft.last_debug_success) {
+      warnings.push('建议先完成评测流程验证，确认 Prompt、变量和 Judge 返回都符合预期');
+    }
     return warnings;
-  }, [draft.evaluation_mode, endpointResponseParsed, endpointTestStatus, llmTestStatus, selectedEndpoint, selectedLLM]);
+  }, [draft.evaluation_mode, draft.last_debug_success, endpointResponseParsed, endpointTestStatus, llmTestStatus, selectedEndpoint, selectedLLM]);
 
   const canProceed = (key: string) => {
     if (key === 'mode') return true;
@@ -332,6 +476,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
     if (key === 'endpoint') return draft.evaluation_mode !== 'endpoint' || Boolean(draft.endpoint_target_id);
     if (key === 'scenario') return Boolean(draft.scenario_id) && selectedScenarioMetricCount > 0 && compatibility.ok;
     if (key === 'llm') return Boolean(draft.llm_config_id);
+    if (key === 'prompt') return selectedScenarioMetricCount > 0;
     if (key === 'run') return Boolean(draft.task_id);
     if (key === 'report') return Boolean(isTaskDone);
     if (key === 'review') return Boolean(isTaskDone);
@@ -365,7 +510,35 @@ const ExperimentWorkbenchPage: React.FC = () => {
       scenario_id: prev.scenario_id,
       llm_config_id: prev.llm_config_id,
       endpoint_target_id: mode === 'endpoint' ? prev.endpoint_target_id : undefined,
+      metric_overrides: prev.metric_overrides,
+      selected_metric_definition_id: prev.selected_metric_definition_id,
+      last_debug_success: undefined,
     }));
+  };
+
+  const updateMetricOverride = (metricDefinitionId: number, patch: Partial<MetricOverrideDraft>) => {
+    setDraft((prev) => {
+      const existing = prev.metric_overrides || [];
+      const current = existing.find((item) => item.metric_definition_id === metricDefinitionId);
+      const nextItem = { metric_definition_id: metricDefinitionId, ...(current || {}), ...patch };
+      return {
+        ...prev,
+        last_debug_success: undefined,
+        metric_overrides: [
+          nextItem,
+          ...existing.filter((item) => item.metric_definition_id !== metricDefinitionId),
+        ],
+      };
+    });
+  };
+
+  const copyVariable = async (variable: string) => {
+    try {
+      await navigator.clipboard.writeText(variable);
+      message.success(`已复制 ${variable}`);
+    } catch {
+      message.warning('复制失败，请手动复制变量');
+    }
   };
 
   const handleTestEndpoint = async () => {
@@ -437,6 +610,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
       scenario_id: draft.scenario_id,
       llm_config_id: draft.llm_config_id,
       result_save_mode: 'task_only',
+      metric_overrides: draft.metric_overrides || [],
     };
     if (draft.evaluation_mode === 'endpoint' && selectedEndpoint) {
       payload.endpoint_target_id = selectedEndpoint.id;
@@ -462,6 +636,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
       const result = await api.debugEvaluation(buildEvaluationPayload());
       setDebugResult(result);
       setDebugModalOpen(true);
+      setDraft((prev) => ({ ...prev, last_debug_success: Boolean(result.success) }));
       if (result.success) {
         message.success('评测流程验证通过');
       } else {
@@ -551,7 +726,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
               style={{ width: 520, maxWidth: '100%' }}
               placeholder="选择已有数据集"
               value={draft.dataset_id}
-              onChange={(value) => setDraft((prev) => ({ ...prev, dataset_id: value }))}
+              onChange={(value) => setDraft((prev) => ({ ...prev, dataset_id: value, last_debug_success: undefined }))}
               options={datasets.map((dataset) => ({
                 label: `${dataset.name} · ${dataset.sample_type} · ${dataset.row_count} 条`,
                 value: dataset.id,
@@ -640,7 +815,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
               placeholder="选择已保存被测接口"
               value={draft.endpoint_target_id}
               onChange={(value) => {
-                setDraft((prev) => ({ ...prev, endpoint_target_id: value }));
+                setDraft((prev) => ({ ...prev, endpoint_target_id: value, last_debug_success: undefined }));
                 const target = endpointTargets.find((item) => item.id === value);
                 setEndpointTestInput(target?.default_test_input || DEFAULT_TEST_INPUT);
                 setEndpointTestStatus('idle');
@@ -766,7 +941,16 @@ const ExperimentWorkbenchPage: React.FC = () => {
                   style={{ width: 560, maxWidth: '100%' }}
                   placeholder="选择评测场景"
                   value={draft.scenario_id}
-                  onChange={(value) => setDraft((prev) => ({ ...prev, scenario_id: value }))}
+                  onChange={(value) => {
+                    const nextScenario = scenarios.find((scenario) => scenario.id === value);
+                    setDraft((prev) => ({
+                      ...prev,
+                      scenario_id: value,
+                      selected_metric_definition_id: nextScenario?.metrics?.[0]?.metric_definition_id,
+                      metric_overrides: [],
+                      last_debug_success: undefined,
+                    }));
+                  }}
                   options={scenarios.map((scenario) => ({
                     label: `${scenario.name} · ${scenario.scene_type} · ${scenario.metrics?.length || 0} 个指标`,
                     value: scenario.id,
@@ -865,7 +1049,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
               placeholder="选择评测裁判使用的 LLM 配置"
               value={draft.llm_config_id}
               onChange={(value) => {
-                setDraft((prev) => ({ ...prev, llm_config_id: value }));
+                setDraft((prev) => ({ ...prev, llm_config_id: value, last_debug_success: undefined }));
                 setLlmTestStatus('idle');
                 setLlmTestMessage('');
               }}
@@ -907,6 +1091,196 @@ const ExperimentWorkbenchPage: React.FC = () => {
                 {llmTestMessage && <Text type={llmTestStatus === 'failed' ? 'danger' : 'secondary'}>{llmTestMessage}</Text>}
               </Space>
             </>
+          )}
+        </Space>
+      );
+    }
+
+    if (key === 'prompt') {
+      const datasetData = sampleRow?.data || {};
+      const endpointData = {
+        ...(endpointTestResult?.extracted_fields || {}),
+        raw_response: endpointTestResult?.raw_response,
+        status_code: endpointTestResult?.status_code,
+        latency_ms: endpointTestResult?.latency_ms,
+        request_body: endpointTestResult?.request_body,
+      };
+      const metricData = {
+        name: selectedScenarioMetric?.metric_definition?.name,
+        display_name: selectedScenarioMetric?.metric_definition?.display_name,
+        description: selectedScenarioMetric?.metric_definition?.config?.description,
+        metric_type: selectedScenarioMetric?.metric_definition?.metric_type,
+        score_range: getMetricScoreRange(selectedScenarioMetric?.metric_definition),
+        pass_threshold: effectivePassThreshold,
+        weight: effectiveWeight,
+      };
+      const previewContext = {
+        ...datasetData,
+        ...endpointData,
+        dataset: datasetData,
+        endpoint: endpointData,
+        metric: metricData,
+      };
+      const referencedVariables = extractPromptVariables(effectivePromptTemplate);
+      const missingVariables = referencedVariables.filter((variable) => {
+        const value = resolvePromptVariable(previewContext, variable);
+        return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+      });
+      const datasetVariables = (selectedDataset?.field_schema || []).map((field) => ({
+        key: `dataset.${field.name}`,
+        label: field.description ? `${field.name} · ${field.description}` : field.name,
+      }));
+      const endpointVariables = draft.evaluation_mode === 'endpoint'
+        ? [
+          ...Array.from(endpointProducedFields).map((field) => ({ key: `endpoint.${field}`, label: field })),
+          { key: 'endpoint.raw_response', label: 'raw_response' },
+          { key: 'endpoint.status_code', label: 'status_code' },
+          { key: 'endpoint.latency_ms', label: 'latency_ms' },
+          { key: 'endpoint.request_body', label: 'request_body' },
+        ]
+        : [];
+      const metricVariables = [
+        'metric.name',
+        'metric.display_name',
+        'metric.description',
+        'metric.metric_type',
+        'metric.score_range',
+        'metric.pass_threshold',
+        'metric.weight',
+      ];
+      const renderVariableGroup = (title: string, items: { key: string; label: string }[]) => (
+        <Card size="small" title={title}>
+          {items.length > 0 ? (
+            <Space wrap>
+              {items.map((item) => (
+                <Button
+                  key={item.key}
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => copyVariable(`{${item.key}}`)}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </Space>
+          ) : (
+            <Text type="secondary">暂无可用变量</Text>
+          )}
+        </Card>
+      );
+
+      return (
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Title level={4}>配置 Prompt 模板</Title>
+          <Alert
+            type="info"
+            showIcon
+            message="这里编辑的是本次实验实例"
+            description="不会修改指标定义或场景模板；评测流程验证和正式批量评测都会使用这里传入的覆盖规则，并冻结到任务快照。"
+          />
+          {!selectedScenarioMetric && (
+            <Alert type="warning" showIcon message="当前场景没有可编辑指标" />
+          )}
+          {selectedScenarioMetric && (
+            <Row gutter={16} align="top">
+              <Col xs={24} lg={6}>
+                <Card size="small" title="指标">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {selectedScenarioMetrics.map((scenarioMetric) => (
+                      <Button
+                        key={scenarioMetric.metric_definition_id}
+                        type={scenarioMetric.metric_definition_id === selectedScenarioMetric.metric_definition_id ? 'primary' : 'default'}
+                        block
+                        onClick={() => setDraft((prev) => ({
+                          ...prev,
+                          selected_metric_definition_id: scenarioMetric.metric_definition_id,
+                        }))}
+                      >
+                        {scenarioMetric.metric_definition?.display_name || scenarioMetric.metric_definition?.name || scenarioMetric.metric_definition_id}
+                      </Button>
+                    ))}
+                  </Space>
+                </Card>
+              </Col>
+              <Col xs={24} lg={11}>
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Card size="small" title={selectedScenarioMetric.metric_definition?.display_name || 'Prompt 模板'}>
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <Text type="secondary">
+                        默认来自场景覆盖规则；没有覆盖时来自指标定义。当前本次实验已改写 {promptOverrideCount} 个指标模板。
+                      </Text>
+                      <TextArea
+                        value={effectivePromptTemplate}
+                        onChange={(event) => updateMetricOverride(selectedScenarioMetric.metric_definition_id, {
+                          prompt_override: event.target.value,
+                        })}
+                        autoSize={{ minRows: 10, maxRows: 18 }}
+                        placeholder="在这里编辑本次实验使用的业务评判规则"
+                      />
+                      <Space wrap>
+                        <Text>通过阈值</Text>
+                        <InputNumber
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={effectivePassThreshold}
+                          placeholder="不设置"
+                          onChange={(value) => updateMetricOverride(selectedScenarioMetric.metric_definition_id, {
+                            pass_threshold: value === null ? null : Number(value),
+                          })}
+                        />
+                        <Text>权重</Text>
+                        <InputNumber
+                          min={0}
+                          step={0.1}
+                          value={effectiveWeight ?? 1}
+                          onChange={(value) => updateMetricOverride(selectedScenarioMetric.metric_definition_id, {
+                            weight: value === null ? null : Number(value),
+                          })}
+                        />
+                        <Button
+                          onClick={() => updateMetricOverride(selectedScenarioMetric.metric_definition_id, {
+                            prompt_override: getMetricPromptTemplate(selectedScenarioMetric),
+                            pass_threshold: selectedScenarioMetric.pass_threshold,
+                            weight: selectedScenarioMetric.weight,
+                          })}
+                        >
+                          恢复场景默认
+                        </Button>
+                      </Space>
+                    </Space>
+                  </Card>
+                  <Card size="small" title="模板渲染预览">
+                    {missingVariables.length > 0 && (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message="当前样本缺少部分变量"
+                        description={missingVariables.map((item) => `{${item}}`).join('、')}
+                        style={{ marginBottom: 12 }}
+                      />
+                    )}
+                    {renderJsonBlock(renderPromptPreview(effectivePromptTemplate, previewContext))}
+                  </Card>
+                </Space>
+              </Col>
+              <Col xs={24} lg={7}>
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  {renderVariableGroup('测试数据字段', datasetVariables)}
+                  {renderVariableGroup('接口输出字段', endpointVariables)}
+                  {renderVariableGroup('指标字段', metricVariables.map((item) => ({ key: item, label: item.replace('metric.', '') })))}
+                  <Card size="small" title="兼容旧变量">
+                    <Space wrap>
+                      {['user_input', 'response', 'reference', 'rubrics', 'retrieved_contexts'].map((item) => (
+                        <Button key={item} size="small" icon={<CopyOutlined />} onClick={() => copyVariable(`{${item}}`)}>
+                          {item}
+                        </Button>
+                      ))}
+                    </Space>
+                  </Card>
+                </Space>
+              </Col>
+            </Row>
           )}
         </Space>
       );
@@ -1086,7 +1460,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
 
           <Row gutter={16} align="top">
             <Col xs={24} lg={7} xl={6}>
-              <Card title="实验流程" bodyStyle={{ paddingBottom: 8 }}>
+              <Card title="实验流程" styles={{ body: { paddingBottom: 8 } }}>
                 <Steps
                   direction="vertical"
                   current={currentStep}
@@ -1107,6 +1481,8 @@ const ExperimentWorkbenchPage: React.FC = () => {
                     ...(draft.evaluation_mode === 'endpoint' ? [{ color: draft.endpoint_target_id ? 'green' : 'gray', children: selectedEndpoint?.name || '未选择被测接口' }] : []),
                     { color: draft.scenario_id && selectedScenarioMetricCount > 0 && compatibility.ok ? 'green' : draft.scenario_id ? 'orange' : 'gray', children: selectedScenario?.name || '未选择评测标准' },
                     { color: draft.llm_config_id ? 'green' : 'gray', children: selectedLLM?.name || '未选择 Judge LLM' },
+                    { color: selectedScenarioMetricCount > 0 ? 'green' : 'gray', children: `Prompt 模板 ${promptOverrideCount} 个本次覆盖` },
+                    { color: draft.last_debug_success ? 'green' : 'gray', children: draft.last_debug_success ? '流程验证通过' : '未完成流程验证' },
                     { color: isTaskDone ? 'green' : draft.task_id ? 'orange' : 'gray', children: currentTask?.name || '未创建任务' },
                   ]}
                 />
@@ -1240,7 +1616,13 @@ const ExperimentWorkbenchPage: React.FC = () => {
         onCancel={() => setScenarioModalOpen(false)}
         onCreated={(scenario) => {
           setScenarios((prev) => [scenario, ...prev.filter((item) => item.id !== scenario.id)]);
-          setDraft((prev) => ({ ...prev, scenario_id: scenario.id }));
+          setDraft((prev) => ({
+            ...prev,
+            scenario_id: scenario.id,
+            selected_metric_definition_id: scenario.metrics?.[0]?.metric_definition_id,
+            metric_overrides: [],
+            last_debug_success: undefined,
+          }));
           setScenarioSource('existing');
         }}
       />

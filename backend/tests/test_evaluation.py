@@ -76,6 +76,122 @@ def test_create_evaluation(client, test_llm_payload):
     assert body["llm_config_id"] == llm["id"]
 
 
+def test_prompt_renderer_supports_namespaced_variables():
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import build_template_context
+    from app.core.prompt_manager import render_prompt
+
+    context = build_template_context(
+        {
+            "user_input": "问题",
+            "response": "旧回答",
+            "_dataset_data": {"user_input": "问题", "reference": "标准答案"},
+            "_endpoint_trace": {
+                "status_code": 200,
+                "latency_ms": 12,
+                "raw_response": '{"answer":"接口回答"}',
+                "extracted_fields": {"response": "接口回答"},
+            },
+        },
+        {
+            "status_code": 200,
+            "latency_ms": 12,
+            "raw_response": '{"answer":"接口回答"}',
+            "extracted_fields": {"response": "接口回答"},
+        },
+        SimpleNamespace(
+            id=1,
+            name="answer_quality",
+            display_name="回答质量",
+            metric_type="numeric",
+            config={"allowed_values": [0, 1], "description": "质量"},
+        ),
+        SimpleNamespace(pass_threshold=0.7, weight=1.0),
+    )
+
+    rendered = render_prompt(
+        "{dataset.user_input}|{dataset.reference}|{endpoint.response}|"
+        "{endpoint.status_code}|{metric.display_name}|{metric.pass_threshold}|{response}",
+        context,
+    )
+
+    assert rendered == "问题|标准答案|接口回答|200|回答质量|0.7|接口回答"
+
+
+def test_create_evaluation_freezes_metric_overrides(client, test_llm_payload):
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    metric_definition_id = scenario["metrics"][0]["metric_definition_id"]
+
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Override Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "metric_overrides": [
+                {
+                    "metric_definition_id": metric_definition_id,
+                    "prompt_override": "本次实验规则：{dataset.user_input} / {response}",
+                    "pass_threshold": 0.8,
+                    "weight": 2.0,
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 201
+    metric_snapshot = resp.json()["scenario_snapshot"]["metrics"][0]
+    assert metric_snapshot["prompt_override"] == "本次实验规则：{dataset.user_input} / {response}"
+    assert metric_snapshot["pass_threshold"] == 0.8
+    assert metric_snapshot["weight"] == 2.0
+
+
+def test_debug_uses_metric_override_prompt(client, test_llm_payload, monkeypatch):
+    import json
+
+    from app.core import evaluation_engine
+
+    class FakeJudgeClient:
+        def __init__(self, _llm_config):
+            self.last_messages = None
+            self.last_raw_response = None
+
+        async def judge_json(self, payload):
+            self.last_messages = [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
+            self.last_raw_response = '{"score": 1, "reason": "ok"}'
+            return {"score": 1, "reason": "ok"}
+
+    monkeypatch.setattr(evaluation_engine, "OpenAIJudgeClient", FakeJudgeClient)
+
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    metric_definition_id = scenario["metrics"][0]["metric_definition_id"]
+    resp = client.post(
+        "/api/evaluations/debug",
+        json={
+            "name": "Debug Override",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "metric_overrides": [
+                {
+                    "metric_definition_id": metric_definition_id,
+                    "prompt_override": "覆盖规则：{dataset.user_input} / {response} / {metric.display_name}",
+                }
+            ],
+        },
+    )
+
+    body = resp.json()
+    assert resp.status_code == 200
+    prompt_content = body["judge_traces"][0]["prompt_messages"][0]["content"]
+    assert "覆盖规则" in prompt_content
+    assert "What is Python?" in prompt_content
+    assert "A programming language" in prompt_content
+    assert "Test Metric" in prompt_content
+
+
 def test_debug_warns_when_aspect_prompt_uses_numeric_ranges(client, test_llm_payload, monkeypatch):
     from app.core import evaluation_engine
 

@@ -27,6 +27,7 @@ from app.core.prompt_manager import (
     NUMERIC_SCORE_INSTRUCTION,
     extract_prompt_variables,
     render_prompt,
+    resolve_prompt_variable,
 )
 from app.core.scenario_snapshot import snapshot_to_scenario_metrics
 
@@ -105,11 +106,21 @@ class OpenAIJudgeClient:
 class NativeBuiltinLLMMetric:
     """Built-in metric implemented by our own judge prompt."""
 
-    def __init__(self, metric_def, spec: dict[str, t.Any], prompt_override: str | None = None):
+    def __init__(
+        self,
+        metric_def,
+        spec: dict[str, t.Any],
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
         self.name = metric_def.name
         self.display_name = metric_def.display_name
         self.metric_type = metric_def.metric_type
         self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
         self.required_fields = list(
             self.config.get("required_fields") or spec.get("required_fields") or []
         )
@@ -121,12 +132,14 @@ class NativeBuiltinLLMMetric:
         if missing:
             return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
 
+        context = build_template_context(row_data, row_data.get("_endpoint_trace"), self, self)
+        criteria = render_prompt(self.criteria, context)
         payload = {
             "metric": {
                 "name": self.name,
                 "display_name": self.display_name,
                 "score_range": "0 到 1，1 表示完全满足指标，0 表示完全不满足",
-                "criteria": self.criteria,
+                "criteria": criteria,
                 "description": self.description,
                 "required_fields": self.required_fields,
             },
@@ -146,12 +159,23 @@ class NativeBuiltinLLMMetric:
 class NativePromptMetric:
     """User-configured prompt metric implemented by the platform judge."""
 
-    def __init__(self, metric_def, mode: str, prompt_override: str | None = None):
+    def __init__(
+        self,
+        metric_def,
+        mode: str,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
         self.name = metric_def.name
         self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
         self.mode = mode
         self.config = metric_def.config or {}
         self.prompt_override = (prompt_override or "").strip() or None
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
 
     async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
         if self.mode == "numeric":
@@ -168,7 +192,7 @@ class NativePromptMetric:
         raw_range = self.config.get("allowed_values", [0.0, 1.0])
         lower, upper = float(raw_range[0]), float(raw_range[1])
         prompt_template = self.prompt_override or self.config.get("prompt", "")
-        prompt, sample = _render_custom_prompt_and_sample(prompt_template, row_data)
+        prompt, sample = _render_custom_prompt_and_sample(prompt_template, row_data, self, self)
         payload = {
             "metric": {
                 "name": self.name,
@@ -194,7 +218,7 @@ class NativePromptMetric:
     ) -> _MetricResult:
         allowed_values = [str(v) for v in self.config.get("allowed_values", ["pass", "fail"])]
         prompt_template = self.prompt_override or self.config.get("prompt", "")
-        prompt, sample = _render_custom_prompt_and_sample(prompt_template, row_data)
+        prompt, sample = _render_custom_prompt_and_sample(prompt_template, row_data, self, self)
         payload = {
             "metric": {
                 "name": self.name,
@@ -227,7 +251,7 @@ class NativePromptMetric:
             or self.display_name
         )
         definition, sample = _render_custom_prompt_and_sample(
-            str(definition_template), row_data
+            str(definition_template), row_data, self, self
         )
         payload = {
             "metric": {
@@ -389,7 +413,12 @@ class StepEfficiencyMetric:
         )
 
 
-def build_metric(metric_def, llm=None, prompt_override: str | None = None) -> tuple[str, t.Any]:
+def build_metric(
+    metric_def,
+    llm=None,
+    prompt_override: str | None = None,
+    scenario_metric=None,
+) -> tuple[str, t.Any]:
     """
     Instantiate a metric executor from a MetricDefinition database row.
 
@@ -402,7 +431,16 @@ def build_metric(metric_def, llm=None, prompt_override: str | None = None) -> tu
 
     spec = NAMED_LLM_METRIC_SPECS.get(metric_def.name) or BUILTIN_LLM_METRIC_SPECS.get(metric_type)
     if spec:
-        return ("llm", NativeBuiltinLLMMetric(metric_def, spec, prompt_override=prompt_override))
+        return (
+            "llm",
+            NativeBuiltinLLMMetric(
+                metric_def,
+                spec,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
 
     if metric_type == "code_retrieval_hit_rate":
         return ("simple", RetrievalHitRateAtK(k=int(config.get("k", 5))))
@@ -420,7 +458,16 @@ def build_metric(metric_def, llm=None, prompt_override: str | None = None) -> tu
         return ("simple", StepEfficiencyMetric())
 
     if metric_type in {"numeric", "discrete", "aspect_critic"}:
-        return ("llm", NativePromptMetric(metric_def, mode=metric_type, prompt_override=prompt_override))
+        return (
+            "llm",
+            NativePromptMetric(
+                metric_def,
+                mode=metric_type,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
 
     raise ValueError(f"Unknown metric_type: {metric_type!r}")
 
@@ -436,7 +483,52 @@ def get_metric_prompt_template(metric_def, prompt_override: str | None = None) -
     return str(config.get("prompt") or config.get("definition") or config.get("description") or "")
 
 
-def diagnose_metric_prompt(metric_def, row_data: dict[str, t.Any], prompt_override: str | None = None) -> list[str]:
+def build_template_context(
+    row_data: dict[str, t.Any],
+    endpoint_trace: dict[str, t.Any] | None,
+    metric_def,
+    scenario_metric=None,
+) -> dict[str, t.Any]:
+    """Build the unified variable context available to Judge prompt templates."""
+
+    dataset_data = row_data.get("_dataset_data")
+    dataset = _public_row_data(dataset_data if isinstance(dataset_data, dict) else row_data)
+    endpoint_trace = endpoint_trace or {}
+    extracted_fields = endpoint_trace.get("extracted_fields") or {}
+    endpoint: dict[str, t.Any] = dict(extracted_fields if isinstance(extracted_fields, dict) else {})
+    for key in ("raw_response", "status_code", "latency_ms", "request_body", "mapping_errors"):
+        if key in endpoint_trace:
+            endpoint[key] = endpoint_trace.get(key)
+
+    metric_config = getattr(metric_def, "config", None) or {}
+    metric = {
+        "id": getattr(metric_def, "id", None),
+        "name": getattr(metric_def, "name", None),
+        "display_name": getattr(metric_def, "display_name", None),
+        "metric_type": getattr(metric_def, "metric_type", None),
+        "description": metric_config.get("description"),
+        "score_range": _metric_score_range(metric_def),
+        "pass_threshold": getattr(scenario_metric, "pass_threshold", None),
+        "weight": getattr(scenario_metric, "weight", None),
+        "required_fields": getattr(metric_def, "required_fields", None) or metric_config.get("required_fields"),
+    }
+    flat = _public_row_data(row_data)
+    flat.update(endpoint)
+    return {
+        **flat,
+        "dataset": dataset,
+        "endpoint": endpoint,
+        "metric": metric,
+    }
+
+
+def diagnose_metric_prompt(
+    metric_def,
+    row_data: dict[str, t.Any],
+    prompt_override: str | None = None,
+    scenario_metric=None,
+    evaluation_mode: str | None = None,
+) -> list[str]:
     """Find common conflicts between metric type, business prompt and sample fields."""
     warnings: list[str] = []
     metric_type = metric_def.metric_type
@@ -459,8 +551,19 @@ def diagnose_metric_prompt(metric_def, row_data: dict[str, t.Any], prompt_overri
             "建议改为 numeric，或把 allowed_values 的每个标签判定条件写清楚。"
         )
 
+    context = build_template_context(
+        row_data,
+        row_data.get("_endpoint_trace"),
+        metric_def,
+        scenario_metric,
+    )
     for field in sorted(extract_prompt_variables(template)):
-        value = row_data.get(field)
+        if field.startswith("endpoint.") and evaluation_mode != "endpoint":
+            warnings.append(
+                f"指标 [{metric_def.display_name}] 的业务提示词引用了 {{{field}}}，但当前是已有结果评测模式，接口变量不可用。"
+            )
+            continue
+        found, value = resolve_prompt_variable(context, field)
         if value is None or value == "" or value == [] or value == {}:
             warnings.append(
                 f"指标 [{metric_def.display_name}] 的业务提示词引用了 {{{field}}}，但当前样本没有该字段或字段为空。"
@@ -556,6 +659,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 kind, metric_instance = build_metric(
                     metric_def,
                     prompt_override=getattr(sm, "prompt_override", None),
+                    scenario_metric=sm,
                 )
                 metrics.append((metric_def.name, metric_instance, sm))
                 _log(task, f"✓ 指标 [{metric_def.display_name}] 构建成功 (类型: {kind})")
@@ -580,7 +684,8 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 break
 
             row_start = time.time()
-            row_data: dict = dataset_row.data or {}
+            base_row_data: dict = dict(dataset_row.data or {})
+            row_data: dict = {**base_row_data, "_dataset_data": base_row_data}
             endpoint_trace: dict[str, t.Any] | None = None
             metric_scores: dict[str, t.Any] = {}
             row_error: str | None = None
@@ -594,7 +699,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     _log(task, "  ▸ 调用被测业务接口...")
                     db.commit()
                     response_payload = await invoke_endpoint(
-                        row_data,
+                        base_row_data,
                         task.target_config or {},
                     )
                     extracted_fields, mapping_errors = extract_eval_fields(
@@ -610,7 +715,12 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                         "extracted_fields": extracted_fields,
                         "mapping_errors": mapping_errors,
                     }
-                    row_data = {**row_data, **extracted_fields}
+                    row_data = {
+                        **base_row_data,
+                        **extracted_fields,
+                        "_dataset_data": base_row_data,
+                        "_endpoint_trace": endpoint_trace,
+                    }
                     if task.result_save_mode == "write_back" and extracted_fields:
                         dataset_row.data = {**(dataset_row.data or {}), **extracted_fields}
                         _ensure_dataset_schema_fields(dataset, extracted_fields)
@@ -937,8 +1047,46 @@ def _missing_required_fields(row_data: dict[str, t.Any], required_fields: list[s
     return missing
 
 
+def _public_row_data(row_data: dict[str, t.Any]) -> dict[str, t.Any]:
+    return {
+        key: value
+        for key, value in (row_data or {}).items()
+        if not str(key).startswith("_")
+    }
+
+
+def _metric_score_range(metric_def) -> str | None:
+    config = getattr(metric_def, "config", None) or {}
+    metric_type = getattr(metric_def, "metric_type", "")
+    if metric_type == "numeric":
+        allowed = config.get("allowed_values") or [0, 1]
+        if isinstance(allowed, list) and len(allowed) >= 2:
+            return f"{allowed[0]} 到 {allowed[1]}"
+    if metric_type == "discrete":
+        allowed = config.get("allowed_values") or ["pass", "fail"]
+        return " / ".join(str(item) for item in allowed)
+    if metric_type == "aspect_critic":
+        return "0 或 1"
+    return "0 到 1"
+
+
+def _excluded_sample_fields(referenced_fields: set[str]) -> set[str]:
+    excluded: set[str] = set()
+    for field in referenced_fields:
+        if "." not in field:
+            excluded.add(field)
+            continue
+        namespace, name = field.split(".", 1)
+        if namespace in {"dataset", "endpoint"} and name:
+            excluded.add(name)
+    return excluded
+
+
 def _render_custom_prompt_and_sample(
-    prompt_template: str, row_data: dict[str, t.Any]
+    prompt_template: str,
+    row_data: dict[str, t.Any],
+    metric_def=None,
+    scenario_metric=None,
 ) -> tuple[str, dict[str, t.Any]]:
     """Render a custom Judge prompt and omit embedded fields from sample.
 
@@ -951,8 +1099,14 @@ def _render_custom_prompt_and_sample(
     """
 
     referenced_fields = extract_prompt_variables(prompt_template)
-    prompt = render_prompt(prompt_template, row_data)
-    return prompt, _sample_payload(row_data, exclude_fields=referenced_fields)
+    context = build_template_context(
+        row_data,
+        row_data.get("_endpoint_trace"),
+        metric_def,
+        scenario_metric,
+    )
+    prompt = render_prompt(prompt_template, context)
+    return prompt, _sample_payload(row_data, exclude_fields=_excluded_sample_fields(referenced_fields))
 
 
 def _sample_payload(
@@ -978,6 +1132,8 @@ def _sample_payload(
         if key in row_data and key not in exclude_fields and row_data[key] is not None
     }
     for key, value in row_data.items():
+        if str(key).startswith("_"):
+            continue
         if key not in exclude_fields and key not in payload and len(payload) < 16:
             payload[key] = _json_safe(value)
     return payload

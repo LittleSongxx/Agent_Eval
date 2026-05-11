@@ -6,6 +6,13 @@ from pydantic import BaseModel, ConfigDict
 from app.schemas.dataset import DatasetRowResponse
 
 
+class MetricOverridePayload(BaseModel):
+    metric_definition_id: int
+    prompt_override: Optional[str] = None
+    pass_threshold: Optional[float] = None
+    weight: Optional[float] = None
+
+
 class EvalTaskCreate(BaseModel):
     name: str
     dataset_id: int
@@ -16,6 +23,7 @@ class EvalTaskCreate(BaseModel):
     target_config: Optional[Dict[str, Any]] = None
     response_mapping: Optional[Dict[str, Any]] = None
     result_save_mode: Literal["task_only", "write_back"] = "task_only"
+    metric_overrides: Optional[List[MetricOverridePayload]] = None
 
 
 class EvalDebugRequest(EvalTaskCreate):

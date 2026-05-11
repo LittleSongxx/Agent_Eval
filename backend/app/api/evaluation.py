@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
-from app.core.scenario_snapshot import build_scenario_snapshot
+from app.core.scenario_snapshot import build_scenario_snapshot, snapshot_to_scenario_metrics
 from app.models.evaluation import EvalTask
 from app.models.dataset import Dataset, DatasetRow
 from app.models.endpoint_target import EndpointTarget
@@ -109,7 +109,7 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         llm_config_id=payload.llm_config_id,
         status="pending",
         total_rows=actual_row_count,
-        scenario_snapshot=build_scenario_snapshot(scenario),
+        scenario_snapshot=build_scenario_snapshot(scenario, payload.metric_overrides),
         evaluation_mode=payload.evaluation_mode,
         endpoint_target_id=payload.endpoint_target_id,
         target_config=target_config,
@@ -206,10 +206,11 @@ async def debug_evaluation_flow(payload: EvalDebugRequest, db: Session = Depends
     if not llm_config:
         raise HTTPException(status_code=404, detail="LLM config not found")
 
-    row_data = dict(dataset_row.data or {})
+    base_row_data = dict(dataset_row.data or {})
+    row_data = {**base_row_data, "_dataset_data": base_row_data}
     if payload.evaluation_mode == "endpoint":
         try:
-            response_payload = await invoke_endpoint(row_data, target_config or {})
+            response_payload = await invoke_endpoint(base_row_data, target_config or {})
             extracted_fields, mapping_errors = extract_eval_fields(
                 response_payload,
                 response_mapping or {},
@@ -223,19 +224,27 @@ async def debug_evaluation_flow(payload: EvalDebugRequest, db: Session = Depends
                 "extracted_fields": extracted_fields,
                 "mapping_errors": mapping_errors,
             }
-            row_data = {**row_data, **extracted_fields}
+            row_data = {
+                **base_row_data,
+                **extracted_fields,
+                "_dataset_data": base_row_data,
+                "_endpoint_trace": endpoint_trace,
+            }
         except Exception as exc:
             error = f"接口调用失败: {str(exc)[:800]}"
             errors.append(error)
             endpoint_trace = {"status": "error", "error": error}
 
+    scenario_snapshot = build_scenario_snapshot(scenario, payload.metric_overrides)
+    scenario_metrics = snapshot_to_scenario_metrics(scenario_snapshot)
     metrics: list[tuple[str, object, ScenarioMetric]] = []
-    for scenario_metric in scenario.metrics:
+    for scenario_metric in scenario_metrics:
         metric_def = scenario_metric.metric_definition
         try:
             _kind, metric_instance = build_metric(
                 metric_def,
                 prompt_override=getattr(scenario_metric, "prompt_override", None),
+                scenario_metric=scenario_metric,
             )
             metrics.append((metric_def.name, metric_instance, scenario_metric))
         except Exception as exc:
@@ -255,6 +264,8 @@ async def debug_evaluation_flow(payload: EvalDebugRequest, db: Session = Depends
             metric_def,
             row_data,
             prompt_override=getattr(scenario_metric, "prompt_override", None),
+            scenario_metric=scenario_metric,
+            evaluation_mode=payload.evaluation_mode,
         )
         warnings.extend(metric_warnings)
         trace = {
@@ -299,7 +310,7 @@ async def debug_evaluation_flow(payload: EvalDebugRequest, db: Session = Depends
         ),
         message="调试完成" if not errors and not warnings else "调试完成，但存在错误或风险",
         dataset_row=dataset_row,
-        row_data=row_data,
+        row_data={key: value for key, value in row_data.items() if not str(key).startswith("_")},
         endpoint_trace=endpoint_trace,
         metric_scores=metric_scores,
         judge_traces=judge_traces,

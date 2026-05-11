@@ -155,7 +155,9 @@ DEFAULT_RAG_TARGET_REQUEST_BODY_TEMPLATE = '{"question":"{{question}}","kb_codes
 DEFAULT_RESPONSE_PATH = "data.answer"
 
 
-PROMPT_VARIABLE_RE = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")
+PROMPT_VARIABLE_RE = re.compile(
+    r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}(?!\})"
+)
 
 
 # RAG dataset generation prompts are platform defaults used to synthesize and
@@ -238,30 +240,29 @@ DEFAULT_TARGET_ANSWER_ONLY_PROMPT = """请回答用户问题，并严格输出 J
 不要输出额外解释。"""
 
 
-def render_prompt(prompt: str, row_data: dict[str, t.Any]) -> str:
-    """Render business scoring prompts using ``{field}`` variables.
+def render_prompt(prompt: str, context: dict[str, t.Any]) -> str:
+    """Render business scoring prompts using ``{field}`` or ``{group.field}`` variables.
 
     This is used for Judge prompts stored in metric/scenario configuration.
     Missing variables are rendered as empty strings so one partially populated
-    row cannot break a full batch evaluation. Only simple ``{field}`` tokens
-    are replaced; unrelated JSON/example braces in the prompt are left intact.
+    row cannot break a full batch evaluation. Unrelated JSON/example braces in
+    the prompt are left intact.
     """
 
     if not prompt:
         return ""
-    safe_vars = {
-        key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
-        for key, value in row_data.items()
-    }
 
     def replace_var(match: re.Match[str]) -> str:
-        return safe_vars.get(match.group(1), "")
+        found, value = resolve_prompt_variable(context, match.group(1))
+        if not found or value is None:
+            return ""
+        return json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
 
     return PROMPT_VARIABLE_RE.sub(replace_var, prompt)
 
 
 def extract_prompt_variables(prompt: str) -> set[str]:
-    """Return row field names referenced by a business Judge prompt.
+    """Return variable names referenced by a business Judge prompt.
 
     The evaluator uses this to avoid sending the same field twice: if a custom
     prompt already embeds ``{response}``, the structured ``sample.response`` can
@@ -272,6 +273,20 @@ def extract_prompt_variables(prompt: str) -> set[str]:
     if not prompt:
         return set()
     return set(PROMPT_VARIABLE_RE.findall(prompt))
+
+
+def resolve_prompt_variable(context: dict[str, t.Any], variable: str) -> tuple[bool, t.Any]:
+    """Resolve a prompt variable from a nested context."""
+
+    if variable in context:
+        return True, context.get(variable)
+    current: t.Any = context
+    for part in variable.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            return False, None
+    return True, current
 
 
 def render_template_value(value: t.Any, context: dict[str, t.Any]) -> t.Any:
