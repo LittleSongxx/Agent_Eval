@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Descriptions,
   Modal,
   Popconfirm,
   Space,
@@ -17,9 +18,15 @@ import type { EndpointTarget } from '../types';
 import * as api from '../services/api';
 import EndpointTargetModal from '../components/resource/EndpointTargetModal';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 const DEFAULT_TEST_INPUT = '请用三句话介绍一下 DeepSeek，并说明它适合做哪些 AI 应用测试。';
+
+const renderJsonBlock = (value: unknown) => (
+  <pre className="result-json-block">
+    {typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2)}
+  </pre>
+);
 
 const EndpointTargetPage: React.FC = () => {
   const [targets, setTargets] = useState<EndpointTarget[]>([]);
@@ -72,18 +79,18 @@ const EndpointTargetPage: React.FC = () => {
       });
       if (result.success) {
         Modal.success({
-          width: 760,
+          width: 860,
           title: '接口试跑成功',
           content: (
             <Space direction="vertical" style={{ width: '100%' }} size={12}>
-              <div>
-                <Text strong>请求体</Text>
-                <pre style={{ maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(result.request_body, null, 2)}</pre>
-              </div>
-              <div>
-                <Text strong>解析字段</Text>
-                <pre style={{ maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(result.extracted_fields || {}, null, 2)}</pre>
-              </div>
+              <Descriptions size="small" column={2}>
+                <Descriptions.Item label="HTTP 状态码">{result.status_code || '-'}</Descriptions.Item>
+                <Descriptions.Item label="耗时">{result.latency_ms || '-'} ms</Descriptions.Item>
+              </Descriptions>
+              <Text strong>请求体</Text>
+              {renderJsonBlock(result.request_body)}
+              <Text strong>解析字段</Text>
+              {renderJsonBlock(result.extracted_fields || {})}
             </Space>
           ),
         });
@@ -101,11 +108,16 @@ const EndpointTargetPage: React.FC = () => {
     {
       title: '被测接口',
       key: 'name',
-      width: 240,
+      width: 260,
       render: (_: unknown, record: EndpointTarget) => (
         <Space direction="vertical" size={0}>
           <Text strong>{record.name}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{record.description || '-'}</Text>
+          <Space size={6} wrap>
+            <Tag color={record.transport_mode === 'sse' ? 'purple' : 'blue'}>
+              {record.transport_mode === 'sse' ? 'SSE' : 'JSON'}
+            </Tag>
+            <Text type="secondary" style={{ fontSize: 12 }}>{record.description || '未填写说明'}</Text>
+          </Space>
         </Space>
       ),
     },
@@ -113,36 +125,32 @@ const EndpointTargetPage: React.FC = () => {
       title: '接口地址',
       dataIndex: 'endpoint_url',
       key: 'endpoint_url',
+      width: 360,
       ellipsis: true,
+      render: (value: string) => <Text copyable={{ text: value }} ellipsis>{value}</Text>,
     },
     {
-      title: '返回方式',
-      dataIndex: 'transport_mode',
-      key: 'transport_mode',
-      width: 100,
-      render: (value: string) => <Tag>{value === 'sse' ? 'SSE' : 'JSON'}</Tag>,
-    },
-    {
-      title: '回答字段',
-      key: 'response_path',
-      width: 220,
-      render: (_: unknown, record: EndpointTarget) => <Text code>{record.response_mapping?.response_path || '-'}</Text>,
-    },
-    {
-      title: '试跑输入',
-      key: 'default_test_input',
+      title: '字段映射',
+      key: 'mapping',
+      width: 280,
       render: (_: unknown, record: EndpointTarget) => (
-        <Paragraph ellipsis={{ rows: 2, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
-          {record.default_test_input || '-'}
-        </Paragraph>
+        <Space direction="vertical" size={2}>
+          <Text code>{record.response_mapping?.response_path || '未配置回答字段'}</Text>
+          {(record.response_mapping?.retrieved_contexts_path || record.response_mapping?.tool_calls_path) && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {record.response_mapping?.retrieved_contexts_path ? `ctx: ${record.response_mapping.retrieved_contexts_path}` : ''}
+              {record.response_mapping?.tool_calls_path ? ` tool: ${record.response_mapping.tool_calls_path}` : ''}
+            </Text>
+          )}
+        </Space>
       ),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 260,
+      width: 220,
       render: (_: unknown, record: EndpointTarget) => (
-        <Space>
+        <Space size={6}>
           <Button size="small" icon={<ExperimentOutlined />} loading={testingId === record.id} onClick={() => handleTest(record)}>
             试跑
           </Button>
@@ -176,7 +184,13 @@ const EndpointTargetPage: React.FC = () => {
       />
 
       <Card>
-        <Table rowKey="id" columns={columns} dataSource={targets} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 个接口` }} />
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={targets}
+          scroll={{ x: 1120 }}
+          pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 个接口` }}
+        />
       </Card>
 
       <EndpointTargetModal

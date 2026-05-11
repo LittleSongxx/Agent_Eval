@@ -18,6 +18,8 @@ import {
   Divider,
   Descriptions,
   Modal,
+  Row,
+  Col,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -91,6 +93,31 @@ const DEFAULT_ENDPOINT_BODY = JSON.stringify(
   null,
   2,
 );
+
+const JsonTextArea: React.FC<React.ComponentProps<typeof TextArea>> = ({ className, ...props }) => (
+  <TextArea
+    {...props}
+    className={['json-textarea', className].filter(Boolean).join(' ')}
+    spellCheck={false}
+  />
+);
+
+const FormSectionTitle: React.FC<{ title: string; description?: string }> = ({ title, description }) => (
+  <div className="eval-form-section-title">
+    <Text strong>{title}</Text>
+    {description && <Text type="secondary">{description}</Text>}
+  </div>
+);
+
+const validateJsonText = (_: unknown, value?: string) => {
+  if (!value?.trim()) return Promise.resolve();
+  try {
+    JSON.parse(value);
+    return Promise.resolve();
+  } catch {
+    return Promise.reject(new Error('请输入合法 JSON'));
+  }
+};
 
 const EvaluationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -574,7 +601,15 @@ const EvaluationPage: React.FC = () => {
 
       <div ref={formCardRef}>
       <Card
-        title={cloneSourceTask ? `克隆评测任务 #${cloneSourceTask.id}` : '新建评测'}
+        className="eval-create-card"
+        title={
+          <Space direction="vertical" size={2}>
+            <Text strong>{cloneSourceTask ? `克隆评测任务 #${cloneSourceTask.id}` : '新建评测'}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              选择数据集、评测场景和 Judge LLM，接口评测可在下方配置请求与字段映射。
+            </Text>
+          </Space>
+        }
         style={{ marginBottom: 24 }}
         extra={cloneSourceTask && (
           <Button
@@ -599,8 +634,8 @@ const EvaluationPage: React.FC = () => {
         )}
         <Form
           form={form}
-          layout="inline"
-          style={{ flexWrap: 'wrap', gap: 8 }}
+          layout="vertical"
+          className="eval-create-form"
           initialValues={{
             evaluation_mode: 'offline',
             result_save_mode: 'task_only',
@@ -617,150 +652,196 @@ const EvaluationPage: React.FC = () => {
             endpoint_test_user_input: DEFAULT_DEEPSEEK_TEST_INPUT,
           }}
         >
-          <Form.Item name="evaluation_mode" label="评测类型">
-            <Radio.Group
-              optionType="button"
-              buttonStyle="solid"
-              options={[
-                { label: '已有结果评测', value: 'offline' },
-                { label: '接口实时评测', value: 'endpoint' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            name="name"
-            rules={[{ required: true, message: '请输入名称' }]}
-          >
-            <Input placeholder="评测任务名称" style={{ width: 200 }} />
-          </Form.Item>
-          <Form.Item
-            name="dataset_id"
-            rules={[{ required: true, message: '请选择数据集' }]}
-          >
-            <Select
-              placeholder="选择数据集"
-              style={{ width: 200 }}
-              options={datasets.map((d) => ({
-                label: `${d.name} · ${d.sample_type} · ${d.row_count} 条`,
-                value: d.id,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            name="scenario_id"
-            rules={[{ required: true, message: '请选择场景' }]}
-          >
-            <Select
-              placeholder="选择评测场景"
-              style={{ width: 200 }}
-              options={scenarios.map((s) => ({
-                label: `${s.name} · ${s.scene_type}`,
-                value: s.id,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            name="llm_config_id"
-            rules={[{ required: true, message: '请选择 LLM' }]}
-          >
-            <Select
-              placeholder="选择 LLM 配置"
-              style={{ width: 200 }}
-              options={llmConfigs.map((c) => ({
-                label: `${c.name} (${c.model_name})`,
-                value: c.id,
-              }))}
-            />
-          </Form.Item>
-
-          {selectedEvaluationMode === 'endpoint' && (
-            <div style={{ width: '100%', marginTop: 8 }}>
-              <Divider orientation="left" style={{ margin: '8px 0 16px' }}>被测接口</Divider>
-              <Form.Item name="endpoint_target_id" label="选择已保存接口">
+          <FormSectionTitle title="基础配置" description="这些配置会在任务创建时冻结，后续报告按这次快照展示。" />
+          <Row gutter={16}>
+            <Col span={6}>
+              <Form.Item name="evaluation_mode" label="评测类型">
+                <Radio.Group
+                  optionType="button"
+                  buttonStyle="solid"
+                  className="eval-mode-switch"
+                  options={[
+                    { label: '已有结果评测', value: 'offline' },
+                    { label: '接口实时评测', value: 'endpoint' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                name="name"
+                label="任务名称"
+                rules={[{ required: true, message: '请输入名称' }]}
+              >
+                <Input placeholder="评测任务名称" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                name="dataset_id"
+                label="数据集"
+                rules={[{ required: true, message: '请选择数据集' }]}
+              >
                 <Select
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="选择后自动填充接口配置"
-                  style={{ width: 360 }}
-                  onChange={(value) => applyEndpointTarget(value)}
-                  options={endpointTargets.map((target) => ({
-                    label: `${target.name} · ${target.transport_mode.toUpperCase()}`,
-                    value: target.id,
+                  placeholder="选择数据集"
+                  options={datasets.map((d) => ({
+                    label: `${d.name} · ${d.sample_type} · ${d.row_count} 条`,
+                    value: d.id,
                   }))}
                 />
               </Form.Item>
-              <Space wrap align="start" size={12}>
-                <Form.Item
-                  name={['target_config', 'endpoint_url']}
-                  label="接口地址"
-                  rules={[{ required: true, message: '请填写接口地址' }]}
-                >
-                  <Input placeholder={DEFAULT_DEEPSEEK_ENDPOINT_URL} style={{ width: 360 }} />
-                </Form.Item>
-                <Form.Item name={['target_config', 'transport_mode']} label="返回方式">
-                  <Select
-                    style={{ width: 140 }}
-                    options={[
-                      { label: '普通 JSON', value: 'json' },
-                      { label: 'SSE 流式', value: 'sse' },
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                name="scenario_id"
+                label="评测场景"
+                rules={[{ required: true, message: '请选择场景' }]}
+              >
+                <Select
+                  placeholder="选择评测场景"
+                  options={scenarios.map((s) => ({
+                    label: `${s.name} · ${s.scene_type}`,
+                    value: s.id,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                name="llm_config_id"
+                label="Judge LLM"
+                rules={[{ required: true, message: '请选择 LLM' }]}
+              >
+                <Select
+                  placeholder="选择 LLM 配置"
+                  options={llmConfigs.map((c) => ({
+                    label: `${c.name} (${c.model_name})`,
+                    value: c.id,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {selectedEvaluationMode === 'endpoint' && (
+            <div className="eval-endpoint-panel">
+              <FormSectionTitle title="被测接口" description="保存过的接口可直接套用，也可以在这里临时覆盖请求配置。" />
+              <Row gutter={16}>
+                <Col span={7}>
+                  <Form.Item name="endpoint_target_id" label="选择已保存接口">
+                    <Select
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="选择后自动填充接口配置"
+                      onChange={(value) => applyEndpointTarget(value)}
+                      options={endpointTargets.map((target) => ({
+                        label: `${target.name} · ${target.transport_mode.toUpperCase()}`,
+                        value: target.id,
+                      }))}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={9}>
+                  <Form.Item
+                    name={['target_config', 'endpoint_url']}
+                    label="接口地址"
+                    rules={[{ required: true, message: '请填写接口地址' }]}
+                  >
+                    <Input placeholder={DEFAULT_DEEPSEEK_ENDPOINT_URL} />
+                  </Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item name={['target_config', 'transport_mode']} label="返回方式">
+                    <Select
+                      options={[
+                        { label: 'JSON', value: 'json' },
+                        { label: 'SSE 流式', value: 'sse' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item name="result_save_mode" label="结果保存">
+                    <Select
+                      options={[
+                        { label: '任务结果', value: 'task_only' },
+                        { label: '回写数据集', value: 'write_back' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name={['target_config', 'authorization']} label="Authorization">
+                    <Input placeholder={DEFAULT_DEEPSEEK_AUTHORIZATION} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={7}>
+                  <Form.Item
+                    name={['target_config', 'extra_headers']}
+                    label="附加 Headers(JSON)"
+                    rules={[{ validator: validateJsonText }]}
+                  >
+                    <JsonTextArea autoSize={{ minRows: 7, maxRows: 12 }} placeholder={'{\n  "X-Trace-Id": "{{row_id}}"\n}'} />
+                  </Form.Item>
+                </Col>
+                <Col span={10}>
+                  <Form.Item
+                    name={['target_config', 'request_body_template']}
+                    label="请求体模板(JSON)"
+                    rules={[
+                      { required: true, message: '请填写请求体模板' },
+                      { validator: validateJsonText },
                     ]}
-                  />
-                </Form.Item>
-                <Form.Item name="result_save_mode" label="结果保存">
-                  <Select
-                    style={{ width: 180 }}
-                    options={[
-                      { label: '只存任务结果', value: 'task_only' },
-                      { label: '回写数据集', value: 'write_back' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name={['target_config', 'authorization']} label="Authorization">
-                  <Input placeholder={DEFAULT_DEEPSEEK_AUTHORIZATION} style={{ width: 260 }} />
-                </Form.Item>
-              </Space>
-              <Space align="start" size={12} style={{ width: '100%' }}>
-                <Form.Item name={['target_config', 'extra_headers']} label="附加 Headers(JSON)">
-                  <TextArea autoSize={{ minRows: 4, maxRows: 8 }} style={{ width: 330 }} />
-                </Form.Item>
-                <Form.Item
-                  name={['target_config', 'request_body_template']}
-                  label="请求体模板(JSON)"
-                  rules={[{ required: true, message: '请填写请求体模板' }]}
-                >
-                  <TextArea autoSize={{ minRows: 4, maxRows: 8 }} style={{ width: 380 }} />
-                </Form.Item>
-                <Form.Item name="endpoint_test_user_input" label="试跑输入">
-                  <TextArea
-                    placeholder="输入一条测试问题"
-                    autoSize={{ minRows: 4, maxRows: 8 }}
-                    style={{ width: 300 }}
-                  />
-                </Form.Item>
-              </Space>
-              <Divider orientation="left" style={{ margin: '8px 0 16px' }}>响应字段映射</Divider>
-              <Space wrap align="start" size={12}>
-                <Form.Item name={['response_mapping', 'response_path']} label="回答字段">
-                  <Input placeholder="choices.0.message.content" style={{ width: 240 }} />
-                </Form.Item>
-                <Form.Item name={['response_mapping', 'retrieved_contexts_path']} label="上下文字段">
-                  <Input placeholder="data.contexts" style={{ width: 200 }} />
-                </Form.Item>
-                <Form.Item name={['response_mapping', 'retrieved_context_ids_path']} label="检索ID字段">
-                  <Input placeholder="data.context_ids" style={{ width: 200 }} />
-                </Form.Item>
-                <Form.Item name={['response_mapping', 'tool_calls_path']} label="工具调用字段">
-                  <Input placeholder="trace.tool_calls" style={{ width: 200 }} />
-                </Form.Item>
-                <Form.Item label="连通性">
-                  <Button loading={testingEndpoint} onClick={handleTestEndpoint}>
-                    测试接口
-                  </Button>
-                </Form.Item>
-              </Space>
+                  >
+                    <JsonTextArea autoSize={{ minRows: 7, maxRows: 12 }} />
+                  </Form.Item>
+                </Col>
+                <Col span={7}>
+                  <Form.Item name="endpoint_test_user_input" label="试跑输入">
+                    <TextArea
+                      placeholder="输入一条测试问题"
+                      autoSize={{ minRows: 7, maxRows: 12 }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Divider orientation="left" style={{ margin: '4px 0 16px' }}>响应字段映射</Divider>
+              <Row gutter={16} align="bottom">
+                <Col span={5}>
+                  <Form.Item name={['response_mapping', 'response_path']} label="回答字段">
+                    <Input placeholder="choices.0.message.content" />
+                  </Form.Item>
+                </Col>
+                <Col span={5}>
+                  <Form.Item name={['response_mapping', 'retrieved_contexts_path']} label="上下文字段">
+                    <Input placeholder="data.contexts" />
+                  </Form.Item>
+                </Col>
+                <Col span={5}>
+                  <Form.Item name={['response_mapping', 'retrieved_context_ids_path']} label="检索ID字段">
+                    <Input placeholder="data.context_ids" />
+                  </Form.Item>
+                </Col>
+                <Col span={5}>
+                  <Form.Item name={['response_mapping', 'tool_calls_path']} label="工具调用字段">
+                    <Input placeholder="trace.tool_calls" />
+                  </Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item label="连通性">
+                    <Button block loading={testingEndpoint} onClick={handleTestEndpoint}>
+                      测试接口
+                    </Button>
+                  </Form.Item>
+                </Col>
+              </Row>
               <Alert
-                style={{ marginBottom: 12 }}
+                style={{ marginBottom: 4 }}
                 type="info"
                 showIcon
                 message="接口实时评测会先逐条调用业务接口，再把映射出的字段交给现有指标评分。"
@@ -768,7 +849,8 @@ const EvaluationPage: React.FC = () => {
               />
             </div>
           )}
-          <Form.Item>
+
+          <div className="eval-create-actions">
             <Space>
               <Button
                 icon={<CodeOutlined />}
@@ -788,7 +870,7 @@ const EvaluationPage: React.FC = () => {
                 开始评测
               </Button>
             </Space>
-          </Form.Item>
+          </div>
         </Form>
         {selectedDatasetId && selectedScenarioId && (
           <Alert

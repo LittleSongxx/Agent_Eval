@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -25,6 +25,7 @@ import {
   ApiOutlined,
   BarChartOutlined,
   CodeOutlined,
+  CloseOutlined,
   CopyOutlined,
   DatabaseOutlined,
   EditOutlined,
@@ -223,6 +224,12 @@ const ExperimentWorkbenchPage: React.FC = () => {
   const [endpointModalOpen, setEndpointModalOpen] = useState(false);
   const [scenarioModalOpen, setScenarioModalOpen] = useState(false);
   const [llmModalOpen, setLlmModalOpen] = useState(false);
+  const [consoleTaskId, setConsoleTaskId] = useState<number | null>(null);
+  const [consoleLogs, setConsoleLogs] = useState('');
+  const [consoleStatus, setConsoleStatus] = useState('');
+  const consoleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const consoleBoxRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
 
   const selectedDataset = datasets.find((item) => item.id === draft.dataset_id);
   const selectedEndpoint = endpointTargets.find((item) => item.id === draft.endpoint_target_id);
@@ -264,6 +271,23 @@ const ExperimentWorkbenchPage: React.FC = () => {
   const openScenarioCreateModal = async () => {
     await fetchAll();
     setScenarioModalOpen(true);
+  };
+
+  const openConsole = (taskId: number) => {
+    setConsoleTaskId(taskId);
+    setConsoleLogs('');
+    setConsoleStatus('');
+    userScrolledUp.current = false;
+  };
+
+  const closeConsole = () => {
+    setConsoleTaskId(null);
+    setConsoleLogs('');
+    setConsoleStatus('');
+    if (consoleTimerRef.current) {
+      clearInterval(consoleTimerRef.current);
+      consoleTimerRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -320,6 +344,36 @@ const ExperimentWorkbenchPage: React.FC = () => {
     }, 1500);
     return () => clearInterval(timer);
   }, [draft.task_id]);
+
+  useEffect(() => {
+    if (consoleTaskId === null) return;
+
+    const pollLogs = async () => {
+      try {
+        const data = await api.getEvaluationLogs(consoleTaskId);
+        setConsoleLogs(data.logs || '');
+        setConsoleStatus(data.status || '');
+        if (!userScrolledUp.current && consoleBoxRef.current) {
+          setTimeout(() => {
+            const box = consoleBoxRef.current;
+            if (box) box.scrollTop = box.scrollHeight;
+          }, 100);
+        }
+      } catch {
+        // Logs are best-effort; task polling above keeps progress visible.
+      }
+    };
+
+    pollLogs();
+    consoleTimerRef.current = setInterval(pollLogs, 1000);
+
+    return () => {
+      if (consoleTimerRef.current) {
+        clearInterval(consoleTimerRef.current);
+        consoleTimerRef.current = null;
+      }
+    };
+  }, [consoleTaskId]);
 
   const endpointProducedFields = useMemo(() => {
     const mapping = selectedEndpoint?.response_mapping || {};
@@ -663,6 +717,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
       const created = await api.createEvaluation(payload);
       setDraft((prev) => ({ ...prev, task_id: created.id }));
       setTasks((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+      openConsole(created.id);
       message.success('评测任务已创建');
       setCurrentStep(stepIndex('run'));
     } catch {
@@ -1357,8 +1412,89 @@ const ExperimentWorkbenchPage: React.FC = () => {
                   status={currentTask.status === 'failed' ? 'exception' : currentTask.status === 'completed' ? 'success' : 'active'}
                 />
                 {currentTask.error_message && <Text type="danger">{currentTask.error_message}</Text>}
+                {consoleTaskId !== currentTask.id && (
+                  <Button icon={<CodeOutlined />} onClick={() => openConsole(currentTask.id)}>
+                    查看实时日志
+                  </Button>
+                )}
               </Space>
             </Card>
+          )}
+          {consoleTaskId !== null && (
+            <div>
+              <div
+                style={{
+                  background: '#1e1e1e',
+                  borderRadius: '8px 8px 0 0',
+                  padding: '8px 16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Space>
+                  <CodeOutlined style={{ color: '#4ec9b0' }} />
+                  <Text style={{ color: '#ccc', fontSize: 13 }}>
+                    评测日志 - 任务 #{consoleTaskId}
+                  </Text>
+                  <Tag
+                    color={
+                      consoleStatus === 'running' ? 'orange' :
+                      consoleStatus === 'completed' ? 'green' :
+                      consoleStatus === 'failed' ? 'red' : 'blue'
+                    }
+                    style={{ fontSize: 11 }}
+                  >
+                    {statusLabelMap[consoleStatus] || consoleStatus || '加载中'}
+                  </Tag>
+                </Space>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseOutlined style={{ color: '#999' }} />}
+                  onClick={closeConsole}
+                />
+              </div>
+              <div
+                ref={consoleBoxRef}
+                onScroll={() => {
+                  const el = consoleBoxRef.current;
+                  if (!el) return;
+                  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+                  userScrolledUp.current = !atBottom;
+                }}
+                style={{
+                  background: '#1e1e1e',
+                  borderRadius: '0 0 8px 8px',
+                  padding: '12px 16px',
+                  height: 360,
+                  overflowY: 'auto',
+                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  color: '#d4d4d4',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {consoleLogs ? consoleLogs.split('\n').map((line, index) => {
+                  let color = '#d4d4d4';
+                  if (line.includes('✓')) color = '#4ec9b0';
+                  else if (line.includes('✗')) color = '#f44747';
+                  else if (line.includes('⚠')) color = '#dcdcaa';
+                  else if (line.includes('══')) color = '#569cd6';
+                  else if (line.includes('──')) color = '#808080';
+                  else if (line.includes('▸')) color = '#9cdcfe';
+                  return (
+                    <div key={`${index}-${line}`} style={{ color, minHeight: 20 }}>
+                      {line}
+                    </div>
+                  );
+                }) : (
+                  <div style={{ color: '#808080' }}>等待日志输出...</div>
+                )}
+              </div>
+            </div>
           )}
         </Space>
       );
