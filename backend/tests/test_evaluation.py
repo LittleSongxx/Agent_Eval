@@ -76,6 +76,77 @@ def test_create_evaluation(client, test_llm_payload):
     assert body["llm_config_id"] == llm["id"]
 
 
+def test_debug_warns_when_aspect_prompt_uses_numeric_ranges(client, test_llm_payload, monkeypatch):
+    from app.core import evaluation_engine
+
+    class FakeJudgeClient:
+        last_messages = [{"role": "user", "content": "fake"}]
+        last_raw_response = '{"score": 1, "reason": "ok"}'
+
+        def __init__(self, _llm_config):
+            pass
+
+        async def judge_json(self, _payload):
+            return {"score": 1, "reason": "ok"}
+
+    monkeypatch.setattr(evaluation_engine, "OpenAIJudgeClient", FakeJudgeClient)
+
+    llm = client.post("/api/llm-configs", json=test_llm_payload).json()
+    metric = client.post(
+        "/api/metrics",
+        json={
+            "name": "debug_aspect_conflict",
+            "display_name": "调试冲突指标",
+            "metric_type": "aspect_critic",
+            "category": "custom",
+            "config": {
+                "definition": "如果回答准确给 0.8 到 1.0 分，否则给 0 到 0.49 分。回答：{response}",
+                "description": "conflict",
+            },
+        },
+    ).json()
+    scenario = client.post(
+        "/api/scenarios",
+        json={
+            "name": "Debug Conflict",
+            "scene_type": "general",
+            "sample_type": "single_turn",
+            "metrics": [{"metric_definition_id": metric["id"], "weight": 1, "pass_threshold": 0.7}],
+        },
+    ).json()
+    dataset = client.post(
+        "/api/datasets",
+        json={
+            "name": "Debug DS",
+            "description": "",
+            "sample_type": "single_turn",
+            "field_schema": [
+                {"name": "user_input", "type": "text", "required": True, "description": ""},
+            ],
+        },
+    ).json()
+    client.post(
+        f"/api/datasets/{dataset['id']}/rows",
+        json={"data": {"user_input": "Q"}},
+    )
+
+    resp = client.post(
+        "/api/evaluations/debug",
+        json={
+            "name": "debug",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "evaluation_mode": "offline",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert any("0/1 判断" in warning for warning in body["warnings"])
+    assert any("{response}" in warning for warning in body["warnings"])
+
+
 def test_list_evaluations(client, test_llm_payload):
     llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
     for i in range(2):

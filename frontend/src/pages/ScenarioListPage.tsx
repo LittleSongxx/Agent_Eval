@@ -466,9 +466,14 @@ const ScenarioListPage: React.FC = () => {
           <Typography.Text strong>评测指标</Typography.Text>
           <Select
             mode="multiple"
+            showSearch
             placeholder="选择评测指标"
             style={{ width: '100%', marginTop: 8, marginBottom: 12 }}
             optionLabelProp="label"
+            optionFilterProp="searchText"
+            filterOption={(input, option) =>
+              String(option?.searchText || '').includes(input.trim().toLowerCase())
+            }
             options={filteredMetrics.map((m) => {
               const desc = m.config?.description || '';
               const layer = getMetricLayer(m.name);
@@ -479,6 +484,14 @@ const ScenarioListPage: React.FC = () => {
                 desc,
                 layer,
                 info,
+                searchText: [
+                  m.display_name,
+                  m.name,
+                  m.category,
+                  m.metric_type,
+                  desc,
+                  m.is_builtin ? '内置 builtin' : '自定义 custom',
+                ].filter(Boolean).join(' ').toLowerCase(),
               };
             })}
             optionRender={(option) => (

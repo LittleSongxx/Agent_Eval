@@ -101,6 +101,38 @@ def test_import_csv(client):
     assert rows_resp.json()["total"] == 2
 
 
+def test_text_list_field_accepts_plain_text_in_row_and_import(client):
+    create_resp = client.post(
+        "/api/datasets",
+        json={
+            "name": "Rubric DS",
+            "description": "rubric dataset",
+            "sample_type": "single_turn",
+            "field_schema": [
+                {"name": "user_input", "type": "text", "required": True, "description": ""},
+                {"name": "rubrics", "type": "text_list", "required": False, "description": ""},
+            ],
+        },
+    )
+    ds_id = create_resp.json()["id"]
+
+    row_resp = client.post(
+        f"/api/datasets/{ds_id}/rows",
+        json={"data": {"user_input": "Q1", "rubrics": "必须准确\n不得夸大"}},
+    )
+    assert row_resp.status_code == 201
+    assert row_resp.json()["data"]["rubrics"] == ["必须准确", "不得夸大"]
+
+    csv_content = "user_input,rubrics\nQ2,回答要简洁\n"
+    files = {"file": ("rubrics.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+    import_resp = client.post(f"/api/datasets/{ds_id}/import", files=files)
+    assert import_resp.status_code == 200
+
+    rows_resp = client.get(f"/api/datasets/{ds_id}/rows")
+    rows = rows_resp.json()["items"]
+    assert rows[1]["data"]["rubrics"] == ["回答要简洁"]
+
+
 def test_import_skips_duplicate_rows(client):
     ds_id = _create_dataset(client).json()["id"]
     client.post(

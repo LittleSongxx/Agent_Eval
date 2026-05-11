@@ -86,6 +86,8 @@ const MetricListPage: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricDefinition | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string | undefined>();
   const [form] = Form.useForm();
   const selectedType = Form.useWatch('metric_type', form) || 'numeric';
 
@@ -106,6 +108,29 @@ const MetricListPage: React.FC = () => {
   }, []);
 
   const customCount = useMemo(() => metrics.filter((item) => !item.is_builtin).length, [metrics]);
+  const filteredMetrics = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return metrics.filter((metric) => {
+      if (categoryFilter && metric.category !== categoryFilter) return false;
+      if (!normalizedKeyword) return true;
+      return [
+        metric.display_name,
+        metric.name,
+        metric.category,
+        metric.metric_type,
+        metric.is_builtin ? '内置 builtin' : '自定义 custom',
+        metric.config?.description,
+        metric.config?.prompt,
+        metric.config?.definition,
+      ].filter(Boolean).join(' ').toLowerCase().includes(normalizedKeyword);
+    });
+  }, [categoryFilter, keyword, metrics]);
+  const metricCategoryOptions = useMemo(() => (
+    Array.from(new Set(metrics.map((item) => item.category).filter(Boolean))).map((category) => ({
+      label: category,
+      value: category,
+    }))
+  ), [metrics]);
 
   const openCreateModal = () => {
     form.resetFields();
@@ -285,10 +310,28 @@ const MetricListPage: React.FC = () => {
       />
 
       <Card>
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Input.Search
+            allowClear
+            placeholder="搜索展示名、唯一标识、分类、类型、说明"
+            style={{ width: 360 }}
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+          />
+          <Select
+            allowClear
+            placeholder="按分类筛选"
+            style={{ width: 180 }}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            options={metricCategoryOptions}
+          />
+          <Text type="secondary">当前显示 {filteredMetrics.length} / {metrics.length} 个指标</Text>
+        </Space>
         <Table
           rowKey="id"
           columns={columns}
-          dataSource={metrics}
+          dataSource={filteredMetrics}
           pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 个指标` }}
         />
       </Card>

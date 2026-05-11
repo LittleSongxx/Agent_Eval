@@ -10,8 +10,10 @@ import {
   SwapOutlined,
   SlidersOutlined,
   ApiOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 
+import ExperimentWorkbenchPage from './pages/ExperimentWorkbenchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
 import DatasetListPage from './pages/DatasetListPage';
 import DatasetDetailPage from './pages/DatasetDetailPage';
@@ -28,14 +30,36 @@ const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
 
 const menuItems = [
-  { key: '/llm-configs', icon: <SettingOutlined />, label: 'LLM配置' },
-  { key: '/datasets', icon: <DatabaseOutlined />, label: '数据管理' },
-  { key: '/metrics', icon: <SlidersOutlined />, label: '指标管理' },
-  { key: '/endpoint-targets', icon: <ApiOutlined />, label: '被测接口' },
-  { key: '/scenarios', icon: <AppstoreOutlined />, label: '场景管理' },
-  { key: '/evaluations', icon: <PlayCircleOutlined />, label: '评测执行' },
-  { key: '/blind-tests', icon: <SwapOutlined />, label: '人工盲测' },
-  { key: '/reports', icon: <BarChartOutlined />, label: '评测报告' },
+  {
+    key: 'workflow',
+    type: 'group' as const,
+    label: '实验流程',
+    children: [
+      { key: '/workbench', icon: <ExperimentOutlined />, label: '评测实验工作台' },
+    ],
+  },
+  {
+    key: 'resources',
+    type: 'group' as const,
+    label: '资源管理',
+    children: [
+      { key: '/datasets', icon: <DatabaseOutlined />, label: '数据管理' },
+      { key: '/metrics', icon: <SlidersOutlined />, label: '指标管理' },
+      { key: '/endpoint-targets', icon: <ApiOutlined />, label: '被测接口' },
+      { key: '/scenarios', icon: <AppstoreOutlined />, label: '场景管理' },
+      { key: '/llm-configs', icon: <SettingOutlined />, label: 'LLM配置' },
+    ],
+  },
+  {
+    key: 'results',
+    type: 'group' as const,
+    label: '结果分析',
+    children: [
+      { key: '/evaluations', icon: <PlayCircleOutlined />, label: '评测执行' },
+      { key: '/reports', icon: <BarChartOutlined />, label: '评测报告' },
+      { key: '/blind-tests', icon: <SwapOutlined />, label: '人工盲测' },
+    ],
+  },
 ];
 
 const App: React.FC = () => {
@@ -88,6 +112,7 @@ const App: React.FC = () => {
             }}
           >
             <Routes>
+              <Route path="/workbench" element={<ExperimentWorkbenchPage />} />
               <Route path="/llm-configs" element={<LLMConfigPage />} />
               <Route path="/datasets" element={<DatasetListPage />} />
               <Route path="/datasets/:id" element={<DatasetDetailPage />} />
@@ -99,7 +124,7 @@ const App: React.FC = () => {
               <Route path="/blind-tests" element={<BlindTestPage />} />
               <Route path="/reports" element={<ReportListPage />} />
               <Route path="/reports/:id" element={<ReportDetailPage />} />
-              <Route path="*" element={<Navigate to="/datasets" replace />} />
+              <Route path="*" element={<Navigate to="/workbench" replace />} />
             </Routes>
           </Content>
         </Layout>

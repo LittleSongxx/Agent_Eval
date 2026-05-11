@@ -18,3 +18,4 @@ frontend/dist/
 # IDE
 .idea/
 .vscode/
+/uploads/

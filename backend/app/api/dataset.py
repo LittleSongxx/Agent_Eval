@@ -41,11 +41,13 @@ def _validate_row_data(data: Dict[str, Any], field_schema: list) -> List[str]:
             try:
                 parsed = json.loads(value)
                 if not isinstance(parsed, list):
-                    errors.append(f"字段 {key} 应为列表")
+                    data[key] = [value]
                 else:
                     data[key] = parsed
             except json.JSONDecodeError:
-                errors.append(f"字段 {key} 应为 JSON 数组")
+                # 测试同学在页面或 CSV 中经常用普通文本/换行文本填写评估标准。
+                # 对 text_list/tags 做宽松兼容：JSON 数组优先，其次按换行拆分，单行文本作为单元素列表。
+                data[key] = [item.strip() for item in value.splitlines() if item.strip()] or [value]
         if field_type == "conversation" and isinstance(value, str):
             try:
                 parsed = json.loads(value)
@@ -64,6 +66,11 @@ def _validate_row_data(data: Dict[str, Any], field_schema: list) -> List[str]:
                     errors.append(f"字段 {key} 应为 JSON 工具调用数组")
             except json.JSONDecodeError:
                 errors.append(f"字段 {key} 应为 JSON 工具调用数组")
+        if field_type == "json" and isinstance(value, str):
+            try:
+                data[key] = json.loads(value)
+            except json.JSONDecodeError:
+                errors.append(f"字段 {key} 应为 JSON 对象或数组")
     return errors
 
 

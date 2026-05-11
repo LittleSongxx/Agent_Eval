@@ -56,7 +56,26 @@ export const rerunRagDatasetJobSamples = (id: number, sampleIds: number[]) =>
 
 // ======================== Metric ========================
 
-export const listMetrics = () => api.get('/metrics').then(r => r.data);
+export const listMetrics = async () => {
+  const first = await api.get('/metrics', { params: { page: 1, page_size: 100 } }).then(r => r.data);
+  if (Array.isArray(first)) return first;
+
+  const firstItems = first?.items || [];
+  const total = Number(first?.total || firstItems.length);
+  const pageSize = Number(first?.page_size || firstItems.length || 100);
+  if (!total || firstItems.length >= total || !pageSize) return firstItems;
+
+  const pageCount = Math.ceil(total / pageSize);
+  const restPages = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) =>
+      api.get('/metrics', { params: { page: index + 2, page_size: pageSize } }).then(r => r.data)
+    )
+  );
+  return [
+    ...firstItems,
+    ...restPages.flatMap((page) => (Array.isArray(page) ? page : page?.items || [])),
+  ];
+};
 export const createMetric = (data: any) => api.post('/metrics', data).then(r => r.data);
 export const updateMetric = (id: number, data: any) => api.put(`/metrics/${id}`, data).then(r => r.data);
 export const deleteMetric = (id: number) => api.delete(`/metrics/${id}`);
@@ -82,6 +101,7 @@ export const getPresetScenarios = () => api.get('/scenarios/presets').then(r => 
 
 export const listEvaluations = () => api.get('/evaluations').then(r => r.data);
 export const createEvaluation = (data: any) => api.post('/evaluations', data).then(r => r.data);
+export const debugEvaluation = (data: any) => api.post('/evaluations/debug', data).then(r => r.data);
 export const getEvaluation = (id: number) => api.get(`/evaluations/${id}`).then(r => r.data);
 export const getEvaluationLogs = (id: number) => api.get(`/evaluations/${id}/logs`).then(r => r.data);
 export const cancelEvaluation = (id: number) => api.post(`/evaluations/${id}/cancel`);

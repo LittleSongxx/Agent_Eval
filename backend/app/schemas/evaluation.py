@@ -18,6 +18,24 @@ class EvalTaskCreate(BaseModel):
     result_save_mode: Literal["task_only", "write_back"] = "task_only"
 
 
+class EvalDebugRequest(EvalTaskCreate):
+    row_id: Optional[int] = None
+
+
+class EvalDebugResponse(BaseModel):
+    success: bool
+    message: str
+    dataset_row: Optional[DatasetRowResponse] = None
+    row_data: Optional[Dict[str, Any]] = None
+    endpoint_trace: Optional[Dict[str, Any]] = None
+    metric_scores: Dict[str, Any] = {}
+    judge_traces: List[Dict[str, Any]] = []
+    is_pass: Optional[bool] = None
+    execution_time_ms: Optional[int] = None
+    warnings: List[str] = []
+    errors: List[str] = []
+
+
 class EvalTaskBrief(BaseModel):
     id: int
     name: str

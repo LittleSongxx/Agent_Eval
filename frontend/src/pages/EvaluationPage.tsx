@@ -16,6 +16,7 @@ import {
   Alert,
   Radio,
   Divider,
+  Descriptions,
   Modal,
 } from 'antd';
 import {
@@ -106,6 +107,9 @@ const EvaluationPage: React.FC = () => {
   const [consoleTaskId, setConsoleTaskId] = useState<number | null>(null);
   const [consoleLogs, setConsoleLogs] = useState('');
   const [consoleStatus, setConsoleStatus] = useState('');
+  const [debugging, setDebugging] = useState(false);
+  const [debugResult, setDebugResult] = useState<any>(null);
+  const [debugModalOpen, setDebugModalOpen] = useState(false);
   const consoleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const consoleBoxRef = useRef<HTMLDivElement>(null);
@@ -232,6 +236,31 @@ const EvaluationPage: React.FC = () => {
       message.error('创建评测失败');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDebugEvaluation = async () => {
+    try {
+      const values = await form.validateFields();
+      const compatibility = getSelectionCompatibility(values.dataset_id, values.scenario_id);
+      if (!compatibility.ok) {
+        message.error(compatibility.message);
+        return;
+      }
+      setDebugging(true);
+      const result = await api.debugEvaluation(values);
+      setDebugResult(result);
+      setDebugModalOpen(true);
+      if (result.success) {
+        message.success('评测流程验证通过');
+      } else {
+        message.warning('评测流程验证完成，但存在错误或风险');
+      }
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      message.error(typeof detail === 'string' ? detail : '评测流程验证失败');
+    } finally {
+      setDebugging(false);
     }
   };
 
@@ -522,6 +551,23 @@ const EvaluationPage: React.FC = () => {
     },
   ];
 
+  const renderJsonBlock = (value: any) => (
+    <pre
+      style={{
+        maxHeight: 280,
+        overflow: 'auto',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        background: '#f5f5f5',
+        borderRadius: 6,
+        padding: 12,
+        margin: 0,
+      }}
+    >
+      {typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2)}
+    </pre>
+  );
+
   return (
     <Spin spinning={loading}>
       <Title level={4}>评测执行</Title>
@@ -723,15 +769,25 @@ const EvaluationPage: React.FC = () => {
             </div>
           )}
           <Form.Item>
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              loading={submitting}
-              disabled={!selectionCompatibility.ok}
-              onClick={handleCreate}
-            >
-              开始评测
-            </Button>
+            <Space>
+              <Button
+                icon={<CodeOutlined />}
+                loading={debugging}
+                disabled={!selectionCompatibility.ok}
+                onClick={handleDebugEvaluation}
+              >
+                评测流程验证
+              </Button>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={submitting}
+                disabled={!selectionCompatibility.ok}
+                onClick={handleCreate}
+              >
+                开始评测
+              </Button>
+            </Space>
           </Form.Item>
         </Form>
         {selectedDatasetId && selectedScenarioId && (
@@ -796,6 +852,115 @@ const EvaluationPage: React.FC = () => {
           }}
         />
       </Card>
+
+      <Modal
+        title="评测流程验证结果"
+        open={debugModalOpen}
+        onCancel={() => setDebugModalOpen(false)}
+        footer={<Button type="primary" onClick={() => setDebugModalOpen(false)}>知道了</Button>}
+        width={980}
+      >
+        {debugResult && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Alert
+              type={debugResult.success ? 'success' : 'warning'}
+              showIcon
+              message={debugResult.message || (debugResult.success ? '验证通过' : '验证存在风险')}
+              description={
+                <Space wrap>
+                  <Tag color={debugResult.is_pass ? 'green' : 'red'}>
+                    {debugResult.is_pass ? '样本通过' : '样本不通过'}
+                  </Tag>
+                  <Text type="secondary">耗时 {debugResult.execution_time_ms || 0} ms</Text>
+                  <Text type="secondary">
+                    样本行 #{debugResult.dataset_row?.row_index ?? '-'}
+                  </Text>
+                </Space>
+              }
+            />
+            {debugResult.errors?.length > 0 && (
+              <Alert
+                type="error"
+                showIcon
+                message="错误"
+                description={debugResult.errors.join('；')}
+              />
+            )}
+            {debugResult.warnings?.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="风险提示"
+                description={debugResult.warnings.join('；')}
+              />
+            )}
+
+            <Card size="small" title="1. 样本输入">
+              {renderJsonBlock(debugResult.dataset_row?.data || debugResult.row_data)}
+            </Card>
+
+            {debugResult.endpoint_trace && (
+              <Card size="small" title="2. 被测接口调用结果">
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Descriptions size="small" column={3}>
+                    <Descriptions.Item label="状态">{debugResult.endpoint_trace.status || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="HTTP 状态码">{debugResult.endpoint_trace.status_code || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="耗时">{debugResult.endpoint_trace.latency_ms || '-'} ms</Descriptions.Item>
+                  </Descriptions>
+                  <Text strong>请求体</Text>
+                  {renderJsonBlock(debugResult.endpoint_trace.request_body)}
+                  <Text strong>映射字段</Text>
+                  {renderJsonBlock(debugResult.endpoint_trace.extracted_fields)}
+                  {debugResult.endpoint_trace.mapping_errors && Object.keys(debugResult.endpoint_trace.mapping_errors).length > 0 && (
+                    <Alert type="warning" showIcon message="字段映射提示" description={JSON.stringify(debugResult.endpoint_trace.mapping_errors)} />
+                  )}
+                  <Text strong>原始响应</Text>
+                  {renderJsonBlock(debugResult.endpoint_trace.raw_response || debugResult.endpoint_trace.error)}
+                </Space>
+              </Card>
+            )}
+
+            <Card size="small" title="3. Judge Prompt 与返回结果">
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                {(debugResult.judge_traces || []).map((trace: any) => (
+                  <Card
+                    key={trace.metric_name}
+                    size="small"
+                    title={
+                      <Space wrap>
+                        <Text strong>{trace.metric_display_name || trace.metric_name}</Text>
+                        <Tag>{trace.metric_type}</Tag>
+                        {trace.parsed_result?.score !== undefined && (
+                          <Tag color={trace.parsed_result?.score == null ? 'red' : 'blue'}>
+                            score: {String(trace.parsed_result?.score)}
+                          </Tag>
+                        )}
+                      </Space>
+                    }
+                  >
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      {trace.error && <Alert type="error" showIcon message={trace.error} />}
+                      {trace.warnings?.length > 0 && (
+                        <Alert type="warning" showIcon message="Prompt/字段风险" description={trace.warnings.join('；')} />
+                      )}
+                      <Text strong>完整 Judge Prompt</Text>
+                      {trace.prompt_messages ? renderJsonBlock(trace.prompt_messages) : <Text type="secondary">该指标不需要 Judge LLM Prompt</Text>}
+                      <Text strong>Judge 原始返回</Text>
+                      {trace.judge_raw_response ? renderJsonBlock(trace.judge_raw_response) : <Text type="secondary">无模型原始返回</Text>}
+                      <Text strong>解析结果</Text>
+                      {renderJsonBlock(trace.parsed_result)}
+                    </Space>
+                  </Card>
+                ))}
+              </Space>
+            </Card>
+
+            <Card size="small" title="4. 指标汇总">
+              {renderJsonBlock(debugResult.metric_scores)}
+            </Card>
+          </Space>
+        )}
+      </Modal>
 
       {consoleTaskId !== null && (
         <div style={{ marginTop: 16 }}>

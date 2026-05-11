@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 DEFAULT_SUMMARY_PASS_THRESHOLD = 0.7
+_DECIMAL_SCORE_RANGE_RE = re.compile(
+    r"(?:0\.\d+\s*(?:到|至|~|-)\s*(?:0\.\d+|1(?:\.0)?))|(?:0\s*(?:到|至|~|-)\s*1(?:\.0)?)"
+)
+_BINARY_SCORE_RE = re.compile(r"(?:返回|给|打|只能|必须)?\s*0\s*(?:或|/|和|、)\s*1")
 
 
 class _MetricResult:
@@ -54,6 +58,8 @@ class OpenAIJudgeClient:
         self.model = llm_config.model_name
         self.temperature = llm_config.temperature if llm_config.temperature is not None else 0.01
         self.max_tokens = min(int(llm_config.max_tokens or 1024), 1200)
+        self.last_messages: list[dict[str, str]] | None = None
+        self.last_raw_response: str | None = None
         self.client = AsyncOpenAI(
             base_url=llm_config.api_base_url,
             api_key=llm_config.api_key,
@@ -67,6 +73,8 @@ class OpenAIJudgeClient:
             {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ]
+        self.last_messages = messages
+        self.last_raw_response = None
         logger.info(
             "========== JUDGE_PROMPT_BEGIN ==========\n%s\n========== JUDGE_PROMPT_END ==========",
             json.dumps(messages, ensure_ascii=False, indent=2),
@@ -90,6 +98,7 @@ class OpenAIJudgeClient:
             )
 
         content = response.choices[0].message.content or ""
+        self.last_raw_response = content
         return _parse_json_object(content)
 
 
@@ -414,6 +423,49 @@ def build_metric(metric_def, llm=None, prompt_override: str | None = None) -> tu
         return ("llm", NativePromptMetric(metric_def, mode=metric_type, prompt_override=prompt_override))
 
     raise ValueError(f"Unknown metric_type: {metric_type!r}")
+
+
+def get_metric_prompt_template(metric_def, prompt_override: str | None = None) -> str:
+    """Return the business-owned prompt text used by a configurable metric."""
+    config = metric_def.config or {}
+    override = (prompt_override or "").strip()
+    if override:
+        return override
+    if metric_def.metric_type == "aspect_critic":
+        return str(config.get("definition") or config.get("description") or metric_def.display_name or "")
+    return str(config.get("prompt") or config.get("definition") or config.get("description") or "")
+
+
+def diagnose_metric_prompt(metric_def, row_data: dict[str, t.Any], prompt_override: str | None = None) -> list[str]:
+    """Find common conflicts between metric type, business prompt and sample fields."""
+    warnings: list[str] = []
+    metric_type = metric_def.metric_type
+    template = get_metric_prompt_template(metric_def, prompt_override)
+    normalized = template.replace("～", "~")
+
+    if metric_type == "aspect_critic" and _DECIMAL_SCORE_RANGE_RE.search(normalized):
+        warnings.append(
+            f"指标 [{metric_def.display_name}] 是 0/1 判断(aspect_critic)，但业务规则中出现连续分或分档区间。"
+            "建议改为 numeric 指标，或把业务规则改成严格返回 0/1。"
+        )
+    if metric_type == "numeric" and _BINARY_SCORE_RE.search(normalized) and not _DECIMAL_SCORE_RANGE_RE.search(normalized):
+        warnings.append(
+            f"指标 [{metric_def.display_name}] 是数值评分(numeric)，但业务规则看起来要求 0/1。"
+            "建议改为 aspect_critic，或明确允许 0~1 连续分。"
+        )
+    if metric_type == "discrete" and _DECIMAL_SCORE_RANGE_RE.search(normalized):
+        warnings.append(
+            f"指标 [{metric_def.display_name}] 是标签判断(discrete)，但业务规则中出现数值分档。"
+            "建议改为 numeric，或把 allowed_values 的每个标签判定条件写清楚。"
+        )
+
+    for field in sorted(extract_prompt_variables(template)):
+        value = row_data.get(field)
+        if value is None or value == "" or value == [] or value == {}:
+            warnings.append(
+                f"指标 [{metric_def.display_name}] 的业务提示词引用了 {{{field}}}，但当前样本没有该字段或字段为空。"
+            )
+    return warnings
 
 
 async def run_evaluation(task_id: int, session_factory) -> None:
