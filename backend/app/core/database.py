@@ -30,9 +30,21 @@ def ensure_runtime_schema() -> None:
         return
 
     eval_task_columns = {column["name"] for column in inspector.get_columns("eval_tasks")}
-    if "scenario_snapshot" not in eval_task_columns:
+    eval_task_additions = {
+        "scenario_snapshot": "ALTER TABLE eval_tasks ADD COLUMN scenario_snapshot JSON",
+        "evaluation_mode": "ALTER TABLE eval_tasks ADD COLUMN evaluation_mode VARCHAR(50) DEFAULT 'offline'",
+        "endpoint_target_id": "ALTER TABLE eval_tasks ADD COLUMN endpoint_target_id INTEGER",
+        "target_config": "ALTER TABLE eval_tasks ADD COLUMN target_config JSON",
+        "response_mapping": "ALTER TABLE eval_tasks ADD COLUMN response_mapping JSON",
+        "result_save_mode": "ALTER TABLE eval_tasks ADD COLUMN result_save_mode VARCHAR(50) DEFAULT 'task_only'",
+    }
+    missing_eval_task_sql = [
+        sql for name, sql in eval_task_additions.items() if name not in eval_task_columns
+    ]
+    if missing_eval_task_sql:
         with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE eval_tasks ADD COLUMN scenario_snapshot JSON"))
+            for sql in missing_eval_task_sql:
+                connection.execute(text(sql))
 
     if "rag_dataset_jobs" in table_names:
         rag_job_columns = {column["name"] for column in inspector.get_columns("rag_dataset_jobs")}
@@ -57,12 +69,19 @@ def ensure_runtime_schema() -> None:
             "manual_tags": "ALTER TABLE eval_row_results ADD COLUMN manual_tags JSON",
             "manual_note": "ALTER TABLE eval_row_results ADD COLUMN manual_note TEXT",
             "reviewed_at": "ALTER TABLE eval_row_results ADD COLUMN reviewed_at DATETIME",
+            "endpoint_trace": "ALTER TABLE eval_row_results ADD COLUMN endpoint_trace JSON",
         }
         missing_sql = [sql for name, sql in additions.items() if name not in row_result_columns]
         if missing_sql:
             with engine.begin() as connection:
                 for sql in missing_sql:
                     connection.execute(text(sql))
+
+    if "scenario_metrics" in table_names:
+        scenario_metric_columns = {column["name"] for column in inspector.get_columns("scenario_metrics")}
+        if "prompt_override" not in scenario_metric_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE scenario_metrics ADD COLUMN prompt_override TEXT"))
 
 
 def get_db():

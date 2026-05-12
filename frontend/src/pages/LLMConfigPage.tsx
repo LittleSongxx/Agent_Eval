@@ -2,22 +2,18 @@ import React, { useEffect, useState } from 'react';
 import {
   Table,
   Button,
-  Modal,
-  Form,
-  Input,
-  InputNumber,
   Space,
   message,
   Popconfirm,
   Tag,
   Typography,
   Badge,
-  Switch,
   Spin,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined } from '@ant-design/icons';
-import type { LLMConfig, LLMConfigCreate } from '../types';
+import type { LLMConfig } from '../types';
 import * as api from '../services/api';
+import LLMConfigModal from '../components/resource/LLMConfigModal';
 
 const { Title } = Typography;
 
@@ -26,10 +22,7 @@ const LLMConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
-  const [form] = Form.useForm<LLMConfigCreate>();
   const [testingId, setTestingId] = useState<number | null>(null);
-  const [testingDraft, setTestingDraft] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
   const fetchConfigs = async () => {
     setLoading(true);
@@ -49,48 +42,12 @@ const LLMConfigPage: React.FC = () => {
 
   const openCreateModal = () => {
     setEditingConfig(null);
-    form.resetFields();
-    form.setFieldsValue({ temperature: 0.7, max_tokens: 4096, is_default: false });
     setModalOpen(true);
   };
 
   const openEditModal = (record: LLMConfig) => {
     setEditingConfig(record);
-    form.setFieldsValue({
-      name: record.name,
-      provider: record.provider,
-      api_base_url: record.api_base_url,
-      api_key: '',
-      model_name: record.model_name,
-      temperature: record.temperature,
-      max_tokens: record.max_tokens,
-      is_default: record.is_default,
-    });
     setModalOpen(true);
-  };
-
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-      setSubmitting(true);
-      if (editingConfig) {
-        const { api_key, ...rest } = values;
-        const updateData = api_key ? { ...rest, api_key } : rest;
-        await api.updateLLMConfig(editingConfig.id, updateData);
-        message.success('更新成功');
-      } else {
-        await api.createLLMConfig(values);
-        message.success('创建成功');
-      }
-      setModalOpen(false);
-      form.resetFields();
-      setEditingConfig(null);
-      fetchConfigs();
-    } catch {
-      message.error(editingConfig ? '更新失败' : '创建失败');
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const handleDelete = async (id: number) => {
@@ -116,42 +73,6 @@ const LLMConfigPage: React.FC = () => {
       message.error('测试请求失败');
     } finally {
       setTestingId(null);
-    }
-  };
-
-  const handleTestDraft = async () => {
-    try {
-      const values = await form.validateFields(['name', 'api_base_url', 'api_key', 'model_name']);
-      setTestingDraft(true);
-      const payload = {
-        provider: form.getFieldValue('provider') || 'openai',
-        temperature: form.getFieldValue('temperature') ?? 0.01,
-        max_tokens: form.getFieldValue('max_tokens') ?? 1024,
-        is_default: form.getFieldValue('is_default') ?? false,
-        ...values,
-      };
-      const result = await api.testLLMConfigDraft(payload);
-      if (result.success) {
-        Modal.success({
-          title: '测试成功',
-          content: (
-            <div>
-              <div>延迟：{result.latency_ms ? `${result.latency_ms}ms` : '-'}</div>
-              {result.sample_output && (
-                <pre style={{ marginTop: 12, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                  {result.sample_output}
-                </pre>
-              )}
-            </div>
-          ),
-        });
-      } else {
-        message.error(`连接测试失败: ${result.message}`);
-      }
-    } catch {
-      message.error('请先补全必填配置后再测试');
-    } finally {
-      setTestingDraft(false);
     }
   };
 
@@ -228,78 +149,19 @@ const LLMConfigPage: React.FC = () => {
         pagination={false}
       />
 
-      <Modal
-        title={editingConfig ? '编辑 LLM 配置' : '新增 LLM 配置'}
+      <LLMConfigModal
         open={modalOpen}
-        onOk={handleSubmit}
-        confirmLoading={submitting}
+        config={editingConfig}
         onCancel={() => {
           setModalOpen(false);
-          form.resetFields();
           setEditingConfig(null);
         }}
-        okText={editingConfig ? '保存' : '创建'}
-        cancelText="取消"
-        width={560}
-        footer={[
-          <Button key="test" icon={<ExperimentOutlined />} loading={testingDraft} onClick={handleTestDraft}>
-            测试当前配置
-          </Button>,
-          <Button key="cancel" onClick={() => {
-            setModalOpen(false);
-            form.resetFields();
-            setEditingConfig(null);
-          }}>
-            取消
-          </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={handleSubmit}>
-            {editingConfig ? '保存' : '创建'}
-          </Button>,
-        ]}
-      >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="name"
-            label="配置名称"
-            rules={[{ required: true, message: '请输入名称' }]}
-          >
-            <Input placeholder="例如: GPT-4o 生产环境" />
-          </Form.Item>
-          <Form.Item name="provider" label="提供商">
-            <Input placeholder="例如: openai, anthropic, minimax" />
-          </Form.Item>
-          <Form.Item
-            name="api_base_url"
-            label="API 地址"
-            rules={[{ required: true, message: '请输入 API 地址' }]}
-          >
-            <Input placeholder="https://api.openai.com/v1" />
-          </Form.Item>
-          <Form.Item
-            name="api_key"
-            label={editingConfig ? 'API Key（留空则不修改）' : 'API Key'}
-            rules={editingConfig ? [] : [{ required: true, message: '请输入 API Key' }]}
-          >
-            <Input.Password placeholder={editingConfig ? '留空保持不变' : 'sk-...'} />
-          </Form.Item>
-          <Form.Item
-            name="model_name"
-            label="模型名称"
-            rules={[{ required: true, message: '请输入模型名称' }]}
-          >
-            <Input placeholder="例如: gpt-4o" />
-          </Form.Item>
-          <Form.Item name="temperature" label="温度 (Temperature)">
-            <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="max_tokens" label="最大 Token 数">
-            <InputNumber min={1} max={128000} step={256} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="is_default" label="设为默认" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onSaved={() => {
+          setModalOpen(false);
+          setEditingConfig(null);
+          fetchConfigs();
+        }}
+      />
     </Spin>
   );
 };

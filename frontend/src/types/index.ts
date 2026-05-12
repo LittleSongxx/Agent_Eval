@@ -66,11 +66,28 @@ export interface MetricDefinition {
   created_at: string;
 }
 
+export interface EndpointTarget {
+  id: number;
+  name: string;
+  description?: string | null;
+  endpoint_url: string;
+  transport_mode: 'json' | 'sse';
+  authorization?: string | null;
+  authorization_masked?: string;
+  extra_headers?: string | null;
+  request_body_template?: string | null;
+  response_mapping?: Record<string, any> | null;
+  default_test_input?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface ScenarioMetric {
   id: number;
   metric_definition_id: number;
   weight: number;
   pass_threshold: number | null;
+  prompt_override?: string | null;
   metric_definition?: MetricDefinition;
 }
 
@@ -98,6 +115,11 @@ export interface EvalTask {
   error_message: string | null;
   summary_scores: Record<string, any> | null;
   scenario_snapshot?: Record<string, any> | null;
+  evaluation_mode?: 'offline' | 'endpoint';
+  endpoint_target_id?: number | null;
+  target_config?: Record<string, any> | null;
+  response_mapping?: Record<string, any> | null;
+  result_save_mode?: 'task_only' | 'write_back';
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
@@ -111,6 +133,7 @@ export interface EvalRowResult {
   eval_task_id: number;
   row_index: number;
   metric_scores: Record<string, { score: number | null; reason: string }>;
+  endpoint_trace?: Record<string, any> | null;
   is_pass: boolean | null;
   execution_time_ms: number | null;
   error: string | null;
@@ -132,6 +155,83 @@ export interface ReportSummary {
   pass_rate: number;
   metric_summary: Record<string, { mean: number; min: number; max: number; pass_rate: number }>;
   manual_review_summary?: Record<string, number>;
+}
+
+export interface ReportListItem {
+  eval_id: number;
+  task_name: string;
+  dataset_id: number;
+  dataset_name?: string | null;
+  scenario_id: number;
+  scenario_name?: string | null;
+  evaluation_mode?: 'offline' | 'endpoint';
+  endpoint_target_id?: number | null;
+  endpoint_name?: string | null;
+  status: string;
+  total_count: number;
+  pass_count: number;
+  fail_count: number;
+  error_count: number;
+  pass_rate: number;
+  progress: number;
+  completed_rows: number;
+  total_rows?: number | null;
+  error_message?: string | null;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface ReportListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: ReportListItem[];
+}
+
+export interface ReportCompareMetricDelta {
+  metric: string;
+  current_mean: number | null;
+  baseline_mean: number | null;
+  mean_delta: number | null;
+  current_pass_rate: number | null;
+  baseline_pass_rate: number | null;
+  pass_rate_delta: number | null;
+  current_error_count: number;
+  baseline_error_count: number;
+}
+
+export interface ReportCompareRowItem {
+  dataset_row_id: number;
+  row_index: number;
+  current_result_id?: number | null;
+  baseline_result_id?: number | null;
+  current_status?: string | null;
+  baseline_status?: string | null;
+  metric_deltas: Record<string, {
+    current_score: number | string | null;
+    baseline_score: number | string | null;
+    delta: number | null;
+  }>;
+  dataset_row?: DatasetRow | null;
+}
+
+export interface ReportCompareResponse {
+  current_eval: EvalTask;
+  baseline_eval: EvalTask;
+  summary_delta: {
+    current_pass_rate: number;
+    baseline_pass_rate: number;
+    pass_rate_delta: number;
+    current_fail_count: number;
+    baseline_fail_count: number;
+    fail_count_delta: number;
+    current_error_count: number;
+    baseline_error_count: number;
+    error_count_delta: number;
+  };
+  metric_deltas: ReportCompareMetricDelta[];
+  row_changes: Record<string, ReportCompareRowItem[]>;
 }
 
 export interface BlindTestTarget {
@@ -240,9 +340,6 @@ export interface RagDatasetSample {
   reference: string;
   reference_context_ids: string[];
   source_chunk_ids: string[];
-  response?: string | null;
-  retrieved_contexts?: string[] | null;
-  retrieved_context_ids?: string[] | null;
   status: string;
   error_message?: string | null;
   retry_count: number;
@@ -256,13 +353,6 @@ export interface RagDatasetJob {
   name: string;
   description?: string | null;
   status: string;
-  target_endpoint_url?: string | null;
-  target_transport_mode: 'json' | 'sse';
-  target_authorization_masked: string;
-  target_extra_headers: string;
-  target_request_body_template: string;
-  target_response_mode: 'answer_only' | 'answer_with_contexts';
-  target_system_prompt?: string | null;
   question_count_mode: 'auto' | 'custom';
   requested_question_count?: number | null;
   suggested_question_count?: number | null;
@@ -280,7 +370,6 @@ export interface RagDatasetJob {
   dataset_id?: number | null;
   dataset?: Dataset | null;
   question_llm_config?: LLMConfig | null;
-  target_llm_config?: LLMConfig | null;
   documents: RagDatasetDocument[];
   generation_summary?: {
     supported_metrics: string[];

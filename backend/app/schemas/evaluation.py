@@ -6,11 +6,42 @@ from pydantic import BaseModel, ConfigDict
 from app.schemas.dataset import DatasetRowResponse
 
 
+class MetricOverridePayload(BaseModel):
+    metric_definition_id: int
+    prompt_override: Optional[str] = None
+    pass_threshold: Optional[float] = None
+    weight: Optional[float] = None
+
+
 class EvalTaskCreate(BaseModel):
     name: str
     dataset_id: int
     scenario_id: int
     llm_config_id: int
+    evaluation_mode: Literal["offline", "endpoint"] = "offline"
+    endpoint_target_id: Optional[int] = None
+    target_config: Optional[Dict[str, Any]] = None
+    response_mapping: Optional[Dict[str, Any]] = None
+    result_save_mode: Literal["task_only", "write_back"] = "task_only"
+    metric_overrides: Optional[List[MetricOverridePayload]] = None
+
+
+class EvalDebugRequest(EvalTaskCreate):
+    row_id: Optional[int] = None
+
+
+class EvalDebugResponse(BaseModel):
+    success: bool
+    message: str
+    dataset_row: Optional[DatasetRowResponse] = None
+    row_data: Optional[Dict[str, Any]] = None
+    endpoint_trace: Optional[Dict[str, Any]] = None
+    metric_scores: Dict[str, Any] = {}
+    judge_traces: List[Dict[str, Any]] = []
+    is_pass: Optional[bool] = None
+    execution_time_ms: Optional[int] = None
+    warnings: List[str] = []
+    errors: List[str] = []
 
 
 class EvalTaskBrief(BaseModel):
@@ -29,6 +60,11 @@ class EvalTaskBrief(BaseModel):
     finished_at: Optional[datetime] = None
     created_at: datetime
     scenario_snapshot: Optional[Dict[str, Any]] = None
+    evaluation_mode: Optional[str] = "offline"
+    endpoint_target_id: Optional[int] = None
+    target_config: Optional[Dict[str, Any]] = None
+    response_mapping: Optional[Dict[str, Any]] = None
+    result_save_mode: Optional[str] = "task_only"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -66,6 +102,7 @@ class EvalRowResultResponse(BaseModel):
     eval_task_id: int
     row_index: int
     metric_scores: Optional[Dict[str, Any]] = None
+    endpoint_trace: Optional[Dict[str, Any]] = None
     is_pass: Optional[bool] = None
     execution_time_ms: Optional[int] = None
     error: Optional[str] = None
@@ -105,6 +142,81 @@ class ReportRowsResponse(BaseModel):
     items: List[EvalRowResultResponse]
 
 
+class ReportListItem(BaseModel):
+    eval_id: int
+    task_name: str
+    dataset_id: int
+    dataset_name: Optional[str] = None
+    scenario_id: int
+    scenario_name: Optional[str] = None
+    evaluation_mode: Optional[str] = "offline"
+    endpoint_target_id: Optional[int] = None
+    endpoint_name: Optional[str] = None
+    status: str
+    total_count: int
+    pass_count: int
+    fail_count: int
+    error_count: int
+    pass_rate: float
+    progress: float
+    completed_rows: int
+    total_rows: Optional[int] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class ReportListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: List[ReportListItem]
+
+
+class ReportCompareMetricDelta(BaseModel):
+    metric: str
+    current_mean: Optional[float] = None
+    baseline_mean: Optional[float] = None
+    mean_delta: Optional[float] = None
+    current_pass_rate: Optional[float] = None
+    baseline_pass_rate: Optional[float] = None
+    pass_rate_delta: Optional[float] = None
+    current_error_count: int = 0
+    baseline_error_count: int = 0
+
+
+class ReportCompareRowItem(BaseModel):
+    dataset_row_id: int
+    row_index: int
+    current_result_id: Optional[int] = None
+    baseline_result_id: Optional[int] = None
+    current_status: Optional[str] = None
+    baseline_status: Optional[str] = None
+    metric_deltas: Dict[str, Any] = {}
+    dataset_row: Optional[DatasetRowResponse] = None
+
+
+class ReportCompareSummaryDelta(BaseModel):
+    current_pass_rate: float
+    baseline_pass_rate: float
+    pass_rate_delta: float
+    current_fail_count: int
+    baseline_fail_count: int
+    fail_count_delta: int
+    current_error_count: int
+    baseline_error_count: int
+    error_count_delta: int
+
+
+class ReportCompareResponse(BaseModel):
+    current_eval: EvalTaskResponse
+    baseline_eval: EvalTaskResponse
+    summary_delta: ReportCompareSummaryDelta
+    metric_deltas: List[ReportCompareMetricDelta]
+    row_changes: Dict[str, List[ReportCompareRowItem]]
+
+
 class BlindTestTargetPayload(BaseModel):
     target_type: Literal["llm_config", "endpoint"]
     name: str
@@ -126,6 +238,23 @@ class BlindTestTargetTestResponse(BaseModel):
     success: bool
     message: str
     answer_preview: Optional[str] = None
+
+
+class EndpointEvalTargetTestRequest(BaseModel):
+    target_config: Dict[str, Any]
+    response_mapping: Optional[Dict[str, Any]] = None
+    row_data: Dict[str, Any]
+
+
+class EndpointEvalTargetTestResponse(BaseModel):
+    success: bool
+    message: str
+    request_body: Optional[Dict[str, Any]] = None
+    status_code: Optional[int] = None
+    latency_ms: Optional[int] = None
+    raw_response: Optional[str] = None
+    extracted_fields: Optional[Dict[str, Any]] = None
+    mapping_errors: Optional[Dict[str, str]] = None
 
 
 class BlindTestTaskCreate(BaseModel):

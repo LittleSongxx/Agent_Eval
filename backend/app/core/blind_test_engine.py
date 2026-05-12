@@ -10,12 +10,15 @@ import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import SessionLocal
+from app.core.prompt_manager import (
+    DEFAULT_BLIND_TEST_ENDPOINT_BODY_TEMPLATE,
+    render_template_value,
+)
 from app.models.dataset import DatasetRow
 from app.models.evaluation import BlindTestRowResult, BlindTestTask
 from app.models.llm_config import LLMConfig
 
 BLIND_TEST_CONCURRENCY = 3
-DEFAULT_ENDPOINT_BODY_TEMPLATE = '{"question":"{{question}}"}'
 
 
 def _append_log(task: BlindTestTask, message: str) -> None:
@@ -60,26 +63,6 @@ def _parse_json_text(value: str | None, default: dict[str, Any] | None = None) -
     if not isinstance(loaded, dict):
         raise ValueError("JSON 配置必须是对象")
     return loaded
-
-
-def _render_template_value(value: Any, context: dict[str, Any]) -> Any:
-    if isinstance(value, str):
-        stripped = value.strip()
-        for key, raw_value in context.items():
-            placeholder = f"{{{{{key}}}}}"
-            if stripped == placeholder:
-                return raw_value
-        rendered = value
-        for key, raw_value in context.items():
-            placeholder = f"{{{{{key}}}}}"
-            replacement = raw_value if isinstance(raw_value, str) else json.dumps(raw_value, ensure_ascii=False)
-            rendered = rendered.replace(placeholder, replacement)
-        return rendered
-    if isinstance(value, list):
-        return [_render_template_value(item, context) for item in value]
-    if isinstance(value, dict):
-        return {key: _render_template_value(item, context) for key, item in value.items()}
-    return value
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -171,7 +154,7 @@ class EndpointResponseClient:
         self.transport_mode = str(target.get("transport_mode") or "json").strip() or "json"
         self.authorization = str(target.get("authorization") or "").strip()
         self.extra_headers = str(target.get("extra_headers") or "")
-        self.body_template = str(target.get("request_body_template") or DEFAULT_ENDPOINT_BODY_TEMPLATE)
+        self.body_template = str(target.get("request_body_template") or DEFAULT_BLIND_TEST_ENDPOINT_BODY_TEMPLATE)
         self.timeout = 180
         self.max_retries = 3
 
@@ -189,7 +172,7 @@ class EndpointResponseClient:
         return headers
 
     def build_body(self, row_data: dict[str, Any]) -> dict[str, Any]:
-        default = json.loads(DEFAULT_ENDPOINT_BODY_TEMPLATE)
+        default = json.loads(DEFAULT_BLIND_TEST_ENDPOINT_BODY_TEMPLATE)
         template = _parse_json_text(self.body_template, default=default)
         user_input = row_data.get("user_input")
         question = user_input if isinstance(user_input, str) else json.dumps(user_input, ensure_ascii=False)
@@ -198,7 +181,7 @@ class EndpointResponseClient:
             "user_input": user_input,
             "row_data": row_data,
         }
-        rendered = _render_template_value(template, context)
+        rendered = render_template_value(template, context)
         if not isinstance(rendered, dict):
             raise ValueError("目标接口请求体模板渲染后必须是 JSON 对象")
         return rendered

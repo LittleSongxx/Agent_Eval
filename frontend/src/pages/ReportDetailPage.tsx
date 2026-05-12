@@ -8,12 +8,21 @@ import {
   ArrowLeftOutlined, QuestionCircleOutlined, InfoCircleOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { ReportSummary, EvalRowResult, PaginatedResponse, Dataset, DatasetRow } from '../types';
+import type { ReportSummary, EvalRowResult, PaginatedResponse, Dataset, DatasetRow, EvalTask, ReportCompareResponse, ReportCompareRowItem } from '../types';
 import * as api from '../services/api';
 import { MetricHelpDrawer, MetricHelpIcon } from '../components/MetricHelpDrawer';
 import { getMetricInfo, groupMetricNames, type MetricLayer } from '../utils/metricLayers';
 
 const { Title, Text, Paragraph } = Typography;
+
+const HelpTitle: React.FC<{ label: string; tip: string }> = ({ label, tip }) => (
+  <Space size={4}>
+    <span>{label}</span>
+    <Tooltip title={tip}>
+      <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />
+    </Tooltip>
+  </Space>
+);
 
 const layerHeaderCell = (group: MetricLayer, level: 'group' | 'metric' = 'group') => ({
   style: {
@@ -167,6 +176,10 @@ const ReportDetailPage: React.FC = () => {
   const [datasetPageSize, setDatasetPageSize] = useState(10);
   const [datasetPreviewLoading, setDatasetPreviewLoading] = useState(false);
   const [previewRow, setPreviewRow] = useState<DatasetRow | null>(null);
+  const [compareTasks, setCompareTasks] = useState<EvalTask[]>([]);
+  const [baselineEvalId, setBaselineEvalId] = useState<number | undefined>(undefined);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareData, setCompareData] = useState<ReportCompareResponse | null>(null);
   const [manualReview, setManualReview] = useState({
     manual_status: undefined as string | undefined,
     manual_score: undefined as number | undefined,
@@ -189,6 +202,41 @@ const ReportDetailPage: React.FC = () => {
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  useEffect(() => {
+    const loadCompareTasks = async () => {
+      if (!summary?.eval_task) return;
+      try {
+        const tasks: EvalTask[] = await api.listEvaluations();
+        setCompareTasks(
+          (Array.isArray(tasks) ? tasks : [])
+            .filter((task) =>
+              task.id !== evalId &&
+              task.status === 'completed' &&
+              task.dataset_id === summary.eval_task.dataset_id &&
+              task.scenario_id === summary.eval_task.scenario_id
+            )
+        );
+      } catch {
+        setCompareTasks([]);
+      }
+    };
+    loadCompareTasks();
+  }, [evalId, summary?.eval_task]);
+
+  const loadCompare = async (nextBaselineEvalId: number) => {
+    setBaselineEvalId(nextBaselineEvalId);
+    setCompareLoading(true);
+    try {
+      setCompareData(await api.compareReport(evalId, nextBaselineEvalId));
+    } catch (error: any) {
+      setCompareData(null);
+      const detail = error?.response?.data?.detail;
+      message.error(detail || '加载基线对比失败');
+    } finally {
+      setCompareLoading(false);
+    }
+  };
 
   const openDetail = async (row: EvalRowResult) => {
     setDrawerOpen(true); setDetailLoading(true);
@@ -238,6 +286,13 @@ const ReportDetailPage: React.FC = () => {
   };
 
   const passRateColor = (r: number) => r >= 0.8 ? '#52c41a' : r >= 0.6 ? '#faad14' : '#ff4d4f';
+  const deltaColor = (v?: number | null) => v == null ? '#999' : v > 0 ? '#52c41a' : v < 0 ? '#ff4d4f' : '#666';
+  const formatPercent = (v?: number | null) => v == null ? '-' : `${(v * 100).toFixed(1)}%`;
+  const formatDelta = (v?: number | null) => {
+    if (v == null) return '-';
+    const prefix = v > 0 ? '+' : '';
+    return `${prefix}${(v * 100).toFixed(1)}%`;
+  };
   const metricNames = summary ? Object.keys(summary.metric_summary || {}) : [];
   const evalTask = summary?.eval_task;
   const metricHelp = (metric: string) => (
@@ -372,21 +427,45 @@ const ReportDetailPage: React.FC = () => {
     return (
       <div>
         <Row gutter={16} style={{ marginBottom: 24 }}>
-          <Col span={6}><Card><Statistic title="通过率" value={(summary.pass_rate * 100).toFixed(1)} suffix="%" valueStyle={{ color: passRateColor(summary.pass_rate) }} /></Card></Col>
-          <Col span={6}><Card><Statistic title="总条数" value={summary.total_count} /></Card></Col>
-          <Col span={6}><Card><Statistic title="通过" value={summary.pass_count} valueStyle={{ color: '#52c41a' }} /></Card></Col>
-          <Col span={6}><Card><Statistic title="不通过" value={summary.fail_count} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
+          <Col span={6}>
+            <Card>
+              <Statistic
+                title={<HelpTitle label="样本通过率" tip="按样本维度统计：一条样本需要满足本次场景下所有参与准入判断的指标阈值，才会计为样本通过。" />}
+                value={(summary.pass_rate * 100).toFixed(1)}
+                suffix="%"
+                valueStyle={{ color: passRateColor(summary.pass_rate) }}
+              />
+            </Card>
+          </Col>
+          <Col span={6}><Card><Statistic title="评测样本数" value={summary.total_count} /></Card></Col>
+          <Col span={6}><Card><Statistic title="样本通过" value={summary.pass_count} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+          <Col span={6}><Card><Statistic title="样本不通过" value={summary.fail_count} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
         </Row>
         {summary.manual_review_summary && (
           <Row gutter={16} style={{ marginBottom: 24 }}>
-            <Col span={6}><Card><Statistic title="已人工复核" value={summary.manual_review_summary.reviewed_count || 0} /></Card></Col>
-            <Col span={6}><Card><Statistic title="人工通过" value={summary.manual_review_summary.manual_pass_count || 0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
-            <Col span={6}><Card><Statistic title="人工驳回" value={summary.manual_review_summary.manual_fail_count || 0} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
-            <Col span={6}><Card><Statistic title="待修复/待复核" value={(summary.manual_review_summary.manual_needs_fix_count || 0) + (summary.manual_review_summary.manual_needs_review_count || 0)} valueStyle={{ color: '#faad14' }} /></Card></Col>
+            <Col span={6}>
+              <Card>
+                <Statistic
+                  title={<HelpTitle label="已人工复核" tip="人工已给出复核结论的样本数，不参与自动样本通过率计算。" />}
+                  value={summary.manual_review_summary.reviewed_count || 0}
+                />
+              </Card>
+            </Col>
+            <Col span={6}><Card><Statistic title="人工判定通过" value={summary.manual_review_summary.manual_pass_count || 0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+            <Col span={6}><Card><Statistic title="人工判定驳回" value={summary.manual_review_summary.manual_fail_count || 0} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
+            <Col span={6}>
+              <Card>
+                <Statistic
+                  title={<HelpTitle label="待修复/待复核" tip="人工标记为需要修复或仍需继续复核的样本数，用于后续坏例沉淀和跟进。" />}
+                  value={(summary.manual_review_summary.manual_needs_fix_count || 0) + (summary.manual_review_summary.manual_needs_review_count || 0)}
+                  valueStyle={{ color: '#faad14' }}
+                />
+              </Card>
+            </Col>
           </Row>
         )}
 
-        <Card title="各指标得分概览" extra={<Text type="secondary">按 RAG 评测层级归类，分数范围 0~1，越高越好</Text>} style={{ marginBottom: 24 }}>
+        <Card title="各指标得分概览" extra={<Text type="secondary">指标维度统计，分数范围 0~1；通过率按单个指标阈值单独计算</Text>} style={{ marginBottom: 24 }}>
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             {metricGroups.map((group) => {
               const dataSource = group.metrics.map((name) => ({
@@ -419,7 +498,14 @@ const ReportDetailPage: React.FC = () => {
                     { title: '比较方式', key: 'compare', onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (_: unknown, r: any) => <Text type="secondary">{getMetricInfo(r.metric).short}</Text> },
                     { title: '平均分', dataIndex: 'mean', key: 'mean', width: 100, onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (v: number) => v != null ? <Text strong>{(v * 100).toFixed(1)}%</Text> : '-' },
                     { title: '最低 / 最高', key: 'range', width: 120, onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (_: unknown, r: any) => r.min != null ? `${(r.min*100).toFixed(1)}% ~ ${(r.max*100).toFixed(1)}%` : '-' },
-                    { title: '通过率', dataIndex: 'pass_rate', key: 'pass_rate', width: 100, onHeaderCell: () => layerHeaderCell(group, 'metric'), render: (v: number) => v != null ? <Text style={{ color: passRateColor(v) }}>{(v*100).toFixed(1)}%</Text> : '-' },
+                    {
+                      title: <HelpTitle label="指标通过率" tip="按单个指标统计：该指标得分达到阈值的样本数 / 该指标成功出分的样本数。它和顶部样本通过率不是同一个统计口径。" />,
+                      dataIndex: 'pass_rate',
+                      key: 'pass_rate',
+                      width: 120,
+                      onHeaderCell: () => layerHeaderCell(group, 'metric'),
+                      render: (v: number) => v != null ? <Text style={{ color: passRateColor(v) }}>{(v*100).toFixed(1)}%</Text> : '-',
+                    },
                   ]} />
                 </Card>
               );
@@ -463,6 +549,157 @@ const ReportDetailPage: React.FC = () => {
       </div>
     );
   };
+
+  const statusLabel = (status?: string | null) => {
+    const labelMap: Record<string, string> = { pass: '通过', fail: '不通过', error: '异常', unknown: '未知' };
+    const colorMap: Record<string, string> = { pass: 'success', fail: 'error', error: 'warning', unknown: 'default' };
+    return status ? <Tag color={colorMap[status] || 'default'}>{labelMap[status] || status}</Tag> : <Text type="secondary">-</Text>;
+  };
+
+  const renderCompareRows = (title: string, rows: ReportCompareRowItem[], color: string) => (
+    <Card
+      size="small"
+      title={<Space><Tag color={color}>{title}</Tag><Text type="secondary">{rows.length} 条</Text></Space>}
+      style={{ marginBottom: 16 }}
+    >
+      <Table
+        rowKey={(record) => `${title}-${record.dataset_row_id}`}
+        size="small"
+        dataSource={rows}
+        pagination={{ pageSize: 8 }}
+        columns={[
+          { title: '#', dataIndex: 'row_index', key: 'row_index', width: 70 },
+          { title: '基线状态', dataIndex: 'baseline_status', key: 'baseline_status', width: 100, render: statusLabel },
+          { title: '当前状态', dataIndex: 'current_status', key: 'current_status', width: 100, render: statusLabel },
+          {
+            title: '主要指标变化',
+            key: 'metric_delta',
+            render: (_: unknown, record: ReportCompareRowItem) => {
+              const entries = Object.entries(record.metric_deltas || {}).slice(0, 4);
+              if (entries.length === 0) return <Text type="secondary">-</Text>;
+              return (
+                <Space size={[4, 4]} wrap>
+                  {entries.map(([metric, item]) => (
+                    <Tag key={metric} color={item.delta == null ? 'default' : item.delta >= 0 ? 'green' : 'red'}>
+                      {getMetricInfo(metric).shortName || metric}: {formatDelta(item.delta)}
+                    </Tag>
+                  ))}
+                </Space>
+              );
+            },
+          },
+          {
+            title: '操作',
+            key: 'actions',
+            width: 90,
+            render: (_: unknown, record: ReportCompareRowItem) => (
+              record.current_result_id ? (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={async () => {
+                    const row = rows.find((item) => item.current_result_id === record.current_result_id);
+                    if (row?.current_result_id) {
+                      await openDetail({
+                        id: row.current_result_id,
+                        eval_task_id: evalId,
+                        row_index: row.row_index,
+                        metric_scores: {},
+                        is_pass: null,
+                        execution_time_ms: null,
+                        error: null,
+                        dataset_row: row.dataset_row || undefined,
+                        created_at: new Date().toISOString(),
+                      } as EvalRowResult);
+                    }
+                  }}
+                >
+                  详情
+                </Button>
+              ) : '-'
+            ),
+          },
+        ]}
+      />
+    </Card>
+  );
+
+  const renderCompare = () => (
+    <div>
+      <Card style={{ marginBottom: 16 }}>
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space wrap>
+            <Text strong>选择基线任务</Text>
+            <Select
+              style={{ width: 360 }}
+              placeholder="选择同数据集、同场景的历史评测任务"
+              value={baselineEvalId}
+              loading={compareLoading}
+              options={compareTasks.map((task) => ({
+                label: `${task.name} · ${new Date(task.created_at).toLocaleString('zh-CN')}`,
+                value: task.id,
+              }))}
+              onChange={loadCompare}
+            />
+          </Space>
+          <Text type="secondary">
+            本期基线对比仅支持同一数据集、同一场景、同一指标集，样本按数据行 ID 精确匹配。
+          </Text>
+          {compareTasks.length === 0 && (
+            <Alert type="info" showIcon message="暂无可对比的历史评测任务" />
+          )}
+        </Space>
+      </Card>
+
+      <Spin spinning={compareLoading}>
+        {compareData && (
+          <>
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={6}>
+                <Card>
+                  <Statistic
+                    title={<HelpTitle label="样本通过率变化" tip="对比两次评测的整体样本通过率，按样本通过/不通过结果计算。" />}
+                    value={formatDelta(compareData.summary_delta.pass_rate_delta)}
+                    valueStyle={{ color: deltaColor(compareData.summary_delta.pass_rate_delta) }}
+                  />
+                  <Text type="secondary">
+                    基线样本 {formatPercent(compareData.summary_delta.baseline_pass_rate)} / 当前样本 {formatPercent(compareData.summary_delta.current_pass_rate)}
+                  </Text>
+                </Card>
+              </Col>
+              <Col span={6}><Card><Statistic title="新增失败" value={compareData.row_changes.new_failures?.length || 0} valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="已修复" value={compareData.row_changes.fixed?.length || 0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="持续失败" value={compareData.row_changes.still_failing?.length || 0} valueStyle={{ color: '#faad14' }} /></Card></Col>
+            </Row>
+
+            <Card title="指标变化" style={{ marginBottom: 16 }}>
+              <Table
+                rowKey="metric"
+                size="small"
+                dataSource={compareData.metric_deltas}
+                pagination={false}
+                columns={[
+                  { title: '指标', dataIndex: 'metric', key: 'metric', render: (metric: string) => getMetricInfo(metric).shortName || metric },
+                  { title: '基线均分', dataIndex: 'baseline_mean', key: 'baseline_mean', render: formatPercent },
+                  { title: '当前均分', dataIndex: 'current_mean', key: 'current_mean', render: formatPercent },
+                  { title: '均分变化', dataIndex: 'mean_delta', key: 'mean_delta', render: (v: number | null) => <Text style={{ color: deltaColor(v) }}>{formatDelta(v)}</Text> },
+                  { title: <HelpTitle label="基线指标通过率" tip="基线评测中，该单个指标达到阈值的样本占比。" />, dataIndex: 'baseline_pass_rate', key: 'baseline_pass_rate', render: formatPercent },
+                  { title: <HelpTitle label="当前指标通过率" tip="当前评测中，该单个指标达到阈值的样本占比。" />, dataIndex: 'current_pass_rate', key: 'current_pass_rate', render: formatPercent },
+                  { title: <HelpTitle label="指标通过率变化" tip="当前指标通过率减去基线指标通过率。" />, dataIndex: 'pass_rate_delta', key: 'pass_rate_delta', render: (v: number | null) => <Text style={{ color: deltaColor(v) }}>{formatDelta(v)}</Text> },
+                ]}
+              />
+            </Card>
+
+            {renderCompareRows('新增失败', compareData.row_changes.new_failures || [], 'red')}
+            {renderCompareRows('已修复', compareData.row_changes.fixed || [], 'green')}
+            {renderCompareRows('持续失败', compareData.row_changes.still_failing || [], 'orange')}
+            {renderCompareRows('新增异常', compareData.row_changes.new_errors || [], 'warning')}
+            {renderCompareRows('持续通过', compareData.row_changes.still_passing || [], 'blue')}
+          </>
+        )}
+      </Spin>
+    </div>
+  );
 
   const renderDrawer = () => {
     if (!selectedRow) return null;
@@ -628,6 +865,49 @@ const ReportDetailPage: React.FC = () => {
           <DataFieldsView data={selectedRow.dataset_row.data} />
         ) : <Text type="secondary">无原始数据</Text>}
 
+        {selectedRow.endpoint_trace && (
+          <>
+            <Divider />
+            <Title level={5}>接口调用追踪</Title>
+            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              <Space wrap>
+                <Tag color={selectedRow.endpoint_trace.status === 'success' ? 'green' : 'red'}>
+                  {selectedRow.endpoint_trace.status === 'success' ? '调用成功' : '调用失败'}
+                </Tag>
+                {selectedRow.endpoint_trace.status_code && <Text type="secondary">HTTP {selectedRow.endpoint_trace.status_code}</Text>}
+                {selectedRow.endpoint_trace.latency_ms && <Text type="secondary">{selectedRow.endpoint_trace.latency_ms}ms</Text>}
+              </Space>
+              {selectedRow.endpoint_trace.extracted_fields && (
+                <Card size="small" title="解析后的评测字段">
+                  <DataFieldsView data={selectedRow.endpoint_trace.extracted_fields} />
+                </Card>
+              )}
+              {selectedRow.endpoint_trace.mapping_errors && Object.keys(selectedRow.endpoint_trace.mapping_errors).length > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="字段映射提示"
+                  description={JSON.stringify(selectedRow.endpoint_trace.mapping_errors)}
+                />
+              )}
+              {selectedRow.endpoint_trace.request_body && (
+                <Card size="small" title="请求体">
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto' }}>
+                    {JSON.stringify(selectedRow.endpoint_trace.request_body, null, 2)}
+                  </pre>
+                </Card>
+              )}
+              {selectedRow.endpoint_trace.raw_response && (
+                <Card size="small" title="原始响应">
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}>
+                    {selectedRow.endpoint_trace.raw_response}
+                  </pre>
+                </Card>
+              )}
+            </Space>
+          </>
+        )}
+
         {selectedRow.error && (
           <>
             <Divider />
@@ -710,6 +990,7 @@ const ReportDetailPage: React.FC = () => {
               </div>
             ),
           },
+          { key: 'compare', label: '基线对比', children: renderCompare() },
         ]} />
         <Modal
           title={

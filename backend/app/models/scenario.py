@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -28,6 +28,7 @@ class ScenarioMetric(Base):
     metric_definition_id = Column(Integer, ForeignKey("metric_definitions.id"), nullable=False)
     weight = Column(Float, default=1.0)
     pass_threshold = Column(Float, nullable=True)
+    prompt_override = Column(Text, nullable=True)
 
     scenario = relationship("EvalScenario", back_populates="metrics")
     metric_definition = relationship("MetricDefinition")

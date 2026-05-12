@@ -51,14 +51,40 @@ export const listRagDatasetJobSamples = (id: number, page = 1, pageSize = 20, st
   api.get(`/rag-dataset-jobs/${id}/samples`, { params: { page, page_size: pageSize, status } }).then(r => r.data);
 export const startRagDatasetJob = (id: number) => api.post(`/rag-dataset-jobs/${id}/start`).then(r => r.data);
 export const retryFailedRagDatasetJob = (id: number) => api.post(`/rag-dataset-jobs/${id}/retry-failed`).then(r => r.data);
-export const rerunRagDatasetJobSamples = (id: number, sampleIds: number[]) =>
-  api.post(`/rag-dataset-jobs/${id}/rerun-samples`, { sample_ids: sampleIds }).then(r => r.data);
 
 // ======================== Metric ========================
 
-export const listMetrics = () => api.get('/metrics').then(r => r.data);
+export const listMetrics = async () => {
+  const first = await api.get('/metrics', { params: { page: 1, page_size: 100 } }).then(r => r.data);
+  if (Array.isArray(first)) return first;
+
+  const firstItems = first?.items || [];
+  const total = Number(first?.total || firstItems.length);
+  const pageSize = Number(first?.page_size || firstItems.length || 100);
+  if (!total || firstItems.length >= total || !pageSize) return firstItems;
+
+  const pageCount = Math.ceil(total / pageSize);
+  const restPages = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) =>
+      api.get('/metrics', { params: { page: index + 2, page_size: pageSize } }).then(r => r.data)
+    )
+  );
+  return [
+    ...firstItems,
+    ...restPages.flatMap((page) => (Array.isArray(page) ? page : page?.items || [])),
+  ];
+};
 export const createMetric = (data: any) => api.post('/metrics', data).then(r => r.data);
+export const updateMetric = (id: number, data: any) => api.put(`/metrics/${id}`, data).then(r => r.data);
 export const deleteMetric = (id: number) => api.delete(`/metrics/${id}`);
+
+// ======================== Endpoint Targets ========================
+
+export const listEndpointTargets = () => api.get('/endpoint-targets').then(r => r.data);
+export const createEndpointTarget = (data: any) => api.post('/endpoint-targets', data).then(r => r.data);
+export const updateEndpointTarget = (id: number, data: any) => api.put(`/endpoint-targets/${id}`, data).then(r => r.data);
+export const deleteEndpointTarget = (id: number) => api.delete(`/endpoint-targets/${id}`);
+export const testEndpointTarget = (id: number, data: any) => api.post(`/endpoint-targets/${id}/test`, data).then(r => r.data);
 
 // ======================== Scenario ========================
 
@@ -73,12 +99,16 @@ export const getPresetScenarios = () => api.get('/scenarios/presets').then(r => 
 
 export const listEvaluations = () => api.get('/evaluations').then(r => r.data);
 export const createEvaluation = (data: any) => api.post('/evaluations', data).then(r => r.data);
+export const debugEvaluation = (data: any) => api.post('/evaluations/debug', data).then(r => r.data);
 export const getEvaluation = (id: number) => api.get(`/evaluations/${id}`).then(r => r.data);
 export const getEvaluationLogs = (id: number) => api.get(`/evaluations/${id}/logs`).then(r => r.data);
 export const cancelEvaluation = (id: number) => api.post(`/evaluations/${id}/cancel`);
+export const testEvaluationEndpoint = (data: any) => api.post('/evaluations/test-endpoint', data).then(r => r.data);
 
 // ======================== Report ========================
 
+export const listReports = (params?: any) =>
+  api.get('/reports', { params }).then(r => r.data);
 export const getReportSummary = (evalId: number) =>
   api.get(`/reports/${evalId}/summary`).then(r => r.data);
 export const getReportRows = (evalId: number, page = 1, pageSize = 20, status?: string) =>
@@ -87,6 +117,8 @@ export const getReportRowDetail = (evalId: number, rowId: number) =>
   api.get(`/reports/${evalId}/rows/${rowId}`).then(r => r.data);
 export const updateReportRowReview = (evalId: number, rowId: number, data: any) =>
   api.patch(`/reports/${evalId}/rows/${rowId}/review`, data).then(r => r.data);
+export const compareReport = (evalId: number, baselineEvalId: number) =>
+  api.get(`/reports/${evalId}/compare`, { params: { baseline_eval_id: baselineEvalId } }).then(r => r.data);
 
 // ======================== Blind Test ========================
 

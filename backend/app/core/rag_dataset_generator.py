@@ -9,15 +9,17 @@ import os
 import re
 import shutil
 import uuid
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
+from app.core.prompt_manager import (
+    QUESTION_GENERATION_PROMPT,
+    QUESTION_VALIDATION_PROMPT,
+)
 from app.models.dataset import Dataset, DatasetRow
 from app.models.llm_config import LLMConfig
 from app.models.rag_dataset_job import (
@@ -31,85 +33,6 @@ logger = logging.getLogger(__name__)
 
 RAG_JOB_TIMEOUT_SECONDS = 15 * 60
 RAG_QUESTION_GENERATION_TIMEOUT_SECONDS = 120
-RAG_TARGET_REQUEST_TIMEOUT_SECONDS = 180
-RAG_TARGET_REQUEST_RETRIES = 3
-RAG_TARGET_REQUEST_CONCURRENCY = 3
-
-QUESTION_GENERATION_PROMPT = """你是一个严谨的 RAG 测试集构建助手。请只基于给定文档分片内容，生成 {n} 个高质量问题及标准答案。
-
-## 文档
-- 文件名: {filename}
-- 分片ID: {chunk_key}
-
-## 分片内容
-{content}
-
-## 要求
-1. 问题必须能直接依据分片内容回答，不能依赖外部知识。
-2. 问题要覆盖事实、规则、步骤、例外等不同角度，避免重复。
-3. 标准答案必须简洁准确，严格以分片内容为依据。
-4. 生成数量严格为 {n} 个。
-5. 不要生成“文档里提到了什么”这类元问题。
-6. 优先生成真实业务会问的问题，而不是照抄标题。
-7. 每道题尽量只考查一个明确知识点，避免含糊表述。
-
-## 输出格式
-只输出 JSON：
-{{
-  "items": [
-    {{
-      "question": "问题文本",
-      "reference": "标准答案"
-    }}
-  ]
-}}
-"""
-
-QUESTION_VALIDATION_PROMPT = """你是一个严格的数据集质检助手。请检查下面每个候选问题是否真的适合作为 RAG 评测样本。
-
-## 分片内容
-{content}
-
-## 候选问题
-{items_json}
-
-## 评估标准
-1. 问题必须能仅凭分片内容回答。
-2. 标准答案必须被分片直接支持，不能有外推。
-3. 问题不能是“文档提到了什么”“这一节讲了什么”之类元问题。
-4. 问题应具体、清晰、像真实用户会问的问题。
-5. 重复或高度近似的问题只保留质量更高的那个。
-
-## 输出格式
-只输出 JSON：
-{{
-  "items": [
-    {{
-      "question": "原问题",
-      "keep": true,
-      "score": 0.0,
-      "reason": "一句中文理由"
-    }}
-  ]
-}}
-"""
-
-DEFAULT_TARGET_CONTEXT_PROMPT = """请使用你自己的正常 RAG / 知识库检索流程回答用户问题，并严格输出 JSON。
-
-输出字段要求：
-- answer: 最终回答
-- retrieved_contexts: 你本次回答实际使用或返回给模型的检索片段数组
-- retrieved_context_ids: 与 retrieved_contexts 对应的文档/分片 ID 数组
-
-不要输出额外解释。"""
-
-DEFAULT_TARGET_ANSWER_ONLY_PROMPT = """请回答用户问题，并严格输出 JSON：
-{
-  "answer": "你的回答"
-}
-不要输出额外解释。"""
-
-DEFAULT_TARGET_REQUEST_BODY_TEMPLATE = '{"question":"{{question}}","kb_codes":[],"payload":{"files":[]}}'
 
 _PAGE_LINE_RE = re.compile(r"^\s*第?\s*\d+\s*页(?:\s*/\s*共?\s*\d+\s*页)?\s*$")
 _DATE_RE = re.compile(r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日")
@@ -852,118 +775,6 @@ def _coerce_float(value: Any) -> float | None:
         return None
 
 
-def _parse_json_text(value: str | None, default: dict[str, Any] | None = None) -> dict[str, Any]:
-    raw = (value or "").strip()
-    if not raw:
-        return deepcopy(default or {})
-    loaded = json.loads(raw)
-    if not isinstance(loaded, dict):
-        raise ValueError("JSON 配置必须是对象")
-    return loaded
-
-
-def _render_template_value(value: Any, question: str) -> Any:
-    if isinstance(value, str):
-        return value.replace("{{question}}", question)
-    if isinstance(value, list):
-        return [_render_template_value(item, question) for item in value]
-    if isinstance(value, dict):
-        return {key: _render_template_value(item, question) for key, item in value.items()}
-    return value
-
-
-def _extract_from_dict(payload: dict[str, Any], candidates: list[str]) -> Any:
-    for path in candidates:
-        current: Any = payload
-        ok = True
-        for part in path.split("."):
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
-                current = current[int(part)]
-            else:
-                ok = False
-                break
-        if ok and current not in (None, ""):
-            return current
-    return None
-
-
-def _normalize_event_payload(payload: Any) -> dict[str, Any]:
-    if isinstance(payload, dict):
-        return payload
-    if isinstance(payload, str):
-        maybe = _extract_json_object(payload)
-        if maybe:
-            return maybe
-        return {"text": payload}
-    return {}
-
-
-def _collect_stream_message(state: dict[str, Any], payload: dict[str, Any]) -> None:
-    final_answer = _extract_from_dict(
-        payload,
-        [
-            "answer",
-            "data.answer",
-            "choices.0.message.content",
-        ],
-    )
-    if isinstance(final_answer, str) and final_answer.strip():
-        state["final_answer"] = final_answer.strip()
-
-    delta_answer = _extract_from_dict(
-        payload,
-        [
-            "content",
-            "text",
-            "delta",
-            "data.content",
-            "data.text",
-            "data.delta",
-            "choices.0.delta.content",
-        ],
-    )
-    if isinstance(delta_answer, str) and delta_answer.strip():
-        state["answer_parts"].append(delta_answer.strip())
-
-    contexts = _extract_from_dict(
-        payload,
-        ["retrieved_contexts", "data.retrieved_contexts", "sources", "data.sources"],
-    )
-    if isinstance(contexts, list):
-        normalized_contexts: list[str] = []
-        normalized_ids: list[str] = []
-        for item in contexts:
-            if isinstance(item, dict):
-                content = str(item.get("content") or item.get("text") or "").strip()
-                item_id = str(item.get("chunk_id") or item.get("id") or item.get("doc_id") or "").strip()
-                if content:
-                    normalized_contexts.append(content)
-                if item_id:
-                    normalized_ids.append(item_id)
-            else:
-                text = str(item).strip()
-                if text:
-                    normalized_contexts.append(text)
-        if normalized_contexts:
-            state["retrieved_contexts"] = normalized_contexts
-        if normalized_ids:
-            state["retrieved_context_ids"] = normalized_ids
-
-    direct_contexts = _extract_from_dict(payload, ["retrieved_contexts", "data.retrieved_contexts"])
-    if isinstance(direct_contexts, list):
-        normalized_contexts = [str(item).strip() for item in direct_contexts if str(item).strip()]
-        if normalized_contexts:
-            state["retrieved_contexts"] = normalized_contexts
-
-    direct_ids = _extract_from_dict(payload, ["retrieved_context_ids", "data.retrieved_context_ids"])
-    if isinstance(direct_ids, list):
-        normalized_ids = [str(item).strip() for item in direct_ids if str(item).strip()]
-        if normalized_ids:
-            state["retrieved_context_ids"] = normalized_ids
-
-
 class OpenAICompatibleClient:
     def __init__(self, llm_config: LLMConfig):
         from openai import AsyncOpenAI
@@ -995,139 +806,6 @@ class OpenAICompatibleClient:
                 max_tokens=self.max_tokens,
             )
         return response.choices[0].message.content or ""
-
-
-class TargetEndpointClient:
-    def __init__(self, job: RagDatasetJob):
-        self.url = (job.target_endpoint_url or "").strip()
-        self.transport_mode = (job.target_transport_mode or "sse").strip() or "sse"
-        self.authorization = (job.target_authorization or "").strip()
-        self.extra_headers = job.target_extra_headers or ""
-        self.body_template = job.target_request_body_template or DEFAULT_TARGET_REQUEST_BODY_TEMPLATE
-        self.timeout = 180
-        self.max_retries = RAG_TARGET_REQUEST_RETRIES
-
-    def build_headers(self) -> dict[str, str]:
-        headers = {
-            "content-type": "application/json",
-            "accept": "text/event-stream" if self.transport_mode == "sse" else "application/json",
-            "connection": "close",
-        }
-        if self.authorization:
-            headers["authorization"] = self.authorization
-        extra = _parse_json_text(self.extra_headers, default={})
-        for key, value in extra.items():
-            if value is None:
-                continue
-            headers[str(key)] = str(value)
-        return headers
-
-    def build_body(self, question: str) -> dict[str, Any]:
-        template = _parse_json_text(self.body_template, default=json.loads(DEFAULT_TARGET_REQUEST_BODY_TEMPLATE))
-        rendered = _render_template_value(template, question)
-        if not isinstance(rendered, dict):
-            raise ValueError("目标接口请求体模板渲染后必须是 JSON 对象")
-        return rendered
-
-    async def request(self, question: str) -> dict[str, Any]:
-        if not self.url:
-            raise ValueError("目标 chat 接口 URL 为空")
-        headers = self.build_headers()
-        body = self.build_body(question)
-        last_exc: Exception | None = None
-        limits = httpx.Limits(max_keepalive_connections=0, max_connections=10)
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=self.timeout, limits=limits, http2=False) as client:
-                    if self.transport_mode == "sse":
-                        return await self._request_sse(client, headers, body)
-                    return await self._request_json(client, headers, body)
-            except Exception as exc:
-                last_exc = exc
-                if not self._is_retryable_exception(exc) or attempt >= self.max_retries:
-                    raise
-                backoff_seconds = min(0.8 * attempt, 2.5)
-                logger.warning(
-                    "RAG target request retrying (%s/%s): %s",
-                    attempt,
-                    self.max_retries,
-                    self._describe_retryable_error(exc),
-                )
-                await asyncio.sleep(backoff_seconds)
-        assert last_exc is not None
-        raise last_exc
-
-    def _is_retryable_exception(self, exc: Exception) -> bool:
-        if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
-            return True
-        if isinstance(exc, httpx.HTTPStatusError):
-            return exc.response.status_code in {408, 409, 425, 429, 500, 502, 503, 504}
-        message = str(exc).lower()
-        retryable_patterns = (
-            "peer closed connection without sending complete message body",
-            "incomplete chunked read",
-            "server disconnected without sending a response",
-            "connection reset by peer",
-            "broken pipe",
-        )
-        return any(pattern in message for pattern in retryable_patterns)
-
-    def _describe_retryable_error(self, exc: Exception) -> str:
-        if isinstance(exc, httpx.HTTPStatusError):
-            return f"http {exc.response.status_code}"
-        return f"{type(exc).__name__}: {exc}"
-
-    async def _request_json(
-        self, client: httpx.AsyncClient, headers: dict[str, str], body: dict[str, Any]
-    ) -> dict[str, Any]:
-        response = await client.post(self.url, headers=headers, json=body)
-        response.raise_for_status()
-        content_type = (response.headers.get("content-type") or "").lower()
-        if "application/json" in content_type:
-            payload = response.json()
-            if isinstance(payload, dict):
-                return payload
-        return {"answer": response.text.strip()}
-
-    async def _request_sse(
-        self, client: httpx.AsyncClient, headers: dict[str, str], body: dict[str, Any]
-    ) -> dict[str, Any]:
-        state: dict[str, Any] = {
-            "answer_parts": [],
-            "final_answer": None,
-            "retrieved_contexts": None,
-            "retrieved_context_ids": None,
-        }
-        async with client.stream("POST", self.url, headers=headers, json=body) as response:
-            response.raise_for_status()
-            data_lines: list[str] = []
-            async for raw_line in response.aiter_lines():
-                line = raw_line.strip()
-                if not line:
-                    if data_lines:
-                        payload_text = "\n".join(data_lines).strip()
-                        data_lines = []
-                        if payload_text == "[DONE]":
-                            continue
-                        payload = _normalize_event_payload(payload_text)
-                        _collect_stream_message(state, payload)
-                    continue
-                if line.startswith("data:"):
-                    data_lines.append(line[5:].strip())
-
-            if data_lines:
-                payload_text = "\n".join(data_lines).strip()
-                if payload_text and payload_text != "[DONE]":
-                    payload = _normalize_event_payload(payload_text)
-                    _collect_stream_message(state, payload)
-
-        answer = str(state.get("final_answer") or "").strip() or "".join(state["answer_parts"]).strip()
-        result: dict[str, Any] = {"answer": answer}
-        if state.get("retrieved_contexts") is not None:
-            result["retrieved_contexts"] = state["retrieved_contexts"]
-        if state.get("retrieved_context_ids") is not None:
-            result["retrieved_context_ids"] = state["retrieved_context_ids"]
-        return result
 
 
 async def generate_chunk_samples(
@@ -1213,66 +891,9 @@ async def validate_generated_samples(
     return [item for item, _score in kept]
 
 
-async def fetch_target_answer(
-    target_client: TargetEndpointClient,
-    question: str,
-    response_mode: str,
-    target_system_prompt: str | None = None,
-) -> dict[str, Any]:
-    del target_system_prompt
-    payload = await target_client.request(question)
-
-    if response_mode == "answer_only":
-        answer = ""
-        if isinstance(payload, dict):
-            extracted = _extract_from_dict(payload, ["answer", "data.answer", "content", "data.content", "text", "data.text"])
-            answer = str(extracted or "").strip()
-        if not answer:
-            raise ValueError("目标 chat 接口未返回 answer")
-        return {"answer": answer, "retrieved_contexts": None, "retrieved_context_ids": None}
-
-    if not isinstance(payload, dict):
-        raise ValueError("目标 chat 接口未返回 JSON 对象")
-
-    answer = str(
-        _extract_from_dict(payload, ["answer", "data.answer", "content", "data.content", "text", "data.text"])
-        or ""
-    ).strip()
-    contexts = _extract_from_dict(payload, ["retrieved_contexts", "data.retrieved_contexts", "sources", "data.sources"])
-    context_ids = _extract_from_dict(payload, ["retrieved_context_ids", "data.retrieved_context_ids"])
-    if not answer:
-        raise ValueError("目标 chat 接口返回的 answer 为空")
-    if isinstance(contexts, list) and contexts and isinstance(contexts[0], dict) and not isinstance(context_ids, list):
-        derived_contexts: list[str] = []
-        derived_ids: list[str] = []
-        for item in contexts:
-            if not isinstance(item, dict):
-                continue
-            content = str(item.get("content") or item.get("text") or "").strip()
-            item_id = str(item.get("chunk_id") or item.get("id") or item.get("doc_id") or "").strip()
-            if content:
-                derived_contexts.append(content)
-            if item_id:
-                derived_ids.append(item_id)
-        contexts = derived_contexts
-        context_ids = derived_ids
-    if not isinstance(contexts, list) or not isinstance(context_ids, list):
-        raise ValueError("目标 chat 接口未返回 retrieved_contexts / retrieved_context_ids 数组")
-    normalized_contexts = [str(item).strip() for item in contexts if str(item).strip()]
-    normalized_ids = [str(item).strip() for item in context_ids if str(item).strip()]
-    if not normalized_contexts or not normalized_ids:
-        raise ValueError("retrieved_contexts / retrieved_context_ids 不能为空")
-    return {
-        "answer": answer,
-        "retrieved_contexts": normalized_contexts,
-        "retrieved_context_ids": normalized_ids,
-    }
-
-
-def build_rag_dataset_field_schema(response_mode: str) -> list[dict[str, Any]]:
+def build_rag_dataset_field_schema() -> list[dict[str, Any]]:
     schema = [
         {"name": "user_input", "type": "text", "required": True, "description": "自动生成的问题"},
-        {"name": "response", "type": "text", "required": True, "description": "目标 RAG chat 接口的真实回答"},
         {"name": "reference", "type": "text", "required": True, "description": "基于知识库分片生成的标准答案"},
         {
             "name": "reference_context_ids",
@@ -1299,60 +920,22 @@ def build_rag_dataset_field_schema(response_mode: str) -> list[dict[str, Any]]:
             "description": "生成任务、文档、分片等元信息",
         },
     ]
-    if response_mode == "answer_with_contexts":
-        schema.extend(
-            [
-                {
-                    "name": "retrieved_contexts",
-                    "type": "text_list",
-                    "required": False,
-                    "description": "目标 RAG chat 接口真实返回的检索上下文",
-                },
-                {
-                    "name": "retrieved_context_ids",
-                    "type": "text_list",
-                    "required": False,
-                    "description": "目标 RAG chat 接口真实返回的检索分片 ID",
-                },
-            ]
-        )
     return schema
 
 
-def summarize_supported_metrics(response_mode: str) -> tuple[list[str], list[str], list[str]]:
-    full = [
-        "faithfulness",
-        "context_recall",
-        "context_precision",
-        "contextual_relevancy",
-        "answer_relevancy",
-        "factual_correctness",
-        "answer_completeness",
-        "retrieval_hit_rate",
-        "retrieval_mrr",
-    ]
-    answer_only = ["answer_relevancy", "factual_correctness", "answer_completeness"]
-    if response_mode == "answer_with_contexts":
-        return full, [], []
-    unsupported = [
-        "faithfulness",
-        "context_recall",
-        "context_precision",
-        "contextual_relevancy",
-        "retrieval_hit_rate",
-        "retrieval_mrr",
-    ]
+def summarize_supported_metrics() -> tuple[list[str], list[str], list[str]]:
+    supported = ["factual_correctness", "answer_completeness"]
+    unsupported = ["answer_relevancy", "faithfulness", "context_recall", "context_precision", "contextual_relevancy", "retrieval_hit_rate", "retrieval_mrr"]
     notes = [
-        "当前目标 chat 接口只返回 answer，未返回真实 retrieved_contexts / retrieved_context_ids。",
-        "因此本次自动生成的数据集只适合回答质量评测，不应拿来评真实检索质量。",
+        "文档生成数据源只产出 user_input、reference 和标准证据分片，不再调用被测接口生成 response。",
+        "需要评测 response 或 retrieved_contexts 时，请在评测执行中选择被测接口，由执行链路实时写入相关字段。",
     ]
-    return answer_only, unsupported, notes
+    return supported, unsupported, notes
 
 
 def build_dataset_row_payload(sample: RagDatasetSample) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "user_input": sample.question,
-        "response": sample.response,
         "reference": sample.reference,
         "reference_context_ids": sample.reference_context_ids or [],
         "source_chunk_ids": sample.source_chunk_ids or [],
@@ -1363,10 +946,6 @@ def build_dataset_row_payload(sample: RagDatasetSample) -> dict[str, Any]:
             "chunk_id": sample.chunk_id,
         },
     }
-    if sample.retrieved_contexts is not None:
-        payload["retrieved_contexts"] = sample.retrieved_contexts
-    if sample.retrieved_context_ids is not None:
-        payload["retrieved_context_ids"] = sample.retrieved_context_ids
     return payload
 
 
@@ -1377,7 +956,6 @@ def _load_job(db: Session, job_id: int) -> RagDatasetJob | None:
             joinedload(RagDatasetJob.documents).joinedload(RagDatasetDocument.chunks),
             joinedload(RagDatasetJob.samples).joinedload(RagDatasetSample.document),
             joinedload(RagDatasetJob.question_llm_config),
-            joinedload(RagDatasetJob.target_llm_config),
             joinedload(RagDatasetJob.dataset),
         )
         .filter(RagDatasetJob.id == job_id)
@@ -1416,7 +994,15 @@ def _remaining_timeout(deadline: datetime, cap_seconds: float) -> float:
 
 
 def sync_generated_dataset(db: Session, job: RagDatasetJob) -> None:
-    supported_metrics, unsupported_metrics, notes = summarize_supported_metrics(job.target_response_mode)
+    # Architecture note:
+    # This is the current persistence boundary for generated test data. The RAG
+    # job keeps document/chunk/sample execution metadata, but the reusable output
+    # consumed by evaluation is always a normal Dataset with DatasetRow records.
+    # When a unified DataSource/DatasetGenerator layer is introduced, document
+    # generation, API sampling, log replay, and manual-label imports should all
+    # converge on this same Dataset/DatasetRow contract instead of making the
+    # evaluation flow depend on source-specific job tables.
+    supported_metrics, unsupported_metrics, notes = summarize_supported_metrics()
     completed_samples = [
         sample for sample in job.samples if sample.selected and sample.status == "completed"
     ]
@@ -1437,7 +1023,7 @@ def sync_generated_dataset(db: Session, job: RagDatasetJob) -> None:
             name=dataset_name,
             description=description,
             sample_type="single_turn",
-            field_schema=build_rag_dataset_field_schema(job.target_response_mode),
+            field_schema=build_rag_dataset_field_schema(),
             row_count=0,
         )
         db.add(dataset)
@@ -1449,7 +1035,7 @@ def sync_generated_dataset(db: Session, job: RagDatasetJob) -> None:
         dataset.name = dataset_name
         dataset.description = description
         dataset.sample_type = "single_turn"
-        dataset.field_schema = build_rag_dataset_field_schema(job.target_response_mode)
+        dataset.field_schema = build_rag_dataset_field_schema()
 
     next_row_index = (
         db.query(DatasetRow.row_index)
@@ -1522,68 +1108,10 @@ def recover_stale_rag_dataset_job(
     return _load_job(db, job_id)
 
 
-async def _process_rag_sample_request(
-    session_factory,
-    job_id: int,
-    sample_id: int,
-    sample_question: str,
-    target_client: TargetEndpointClient,
-    response_mode: str,
-    target_system_prompt: str | None,
-    deadline: datetime,
-    semaphore: asyncio.Semaphore,
-) -> dict[str, Any]:
-    async with semaphore:
-        try:
-            result = await asyncio.wait_for(
-                fetch_target_answer(
-                    target_client,
-                    sample_question,
-                    response_mode,
-                    target_system_prompt,
-                ),
-                timeout=_remaining_timeout(deadline, RAG_TARGET_REQUEST_TIMEOUT_SECONDS),
-            )
-        except Exception as exc:
-            db: Session = session_factory()
-            try:
-                sample = db.query(RagDatasetSample).filter(RagDatasetSample.id == sample_id).first()
-                if sample is not None:
-                    sample.status = "failed"
-                    sample.error_message = str(exc)[:1000]
-                    sample.retry_count = (sample.retry_count or 0) + 1
-                    db.commit()
-            finally:
-                db.close()
-            return {
-                "sample_id": sample_id,
-                "status": "failed",
-                "error_message": str(exc)[:1000],
-            }
-
-        db = session_factory()
-        try:
-            sample = db.query(RagDatasetSample).filter(RagDatasetSample.id == sample_id).first()
-            if sample is not None:
-                sample.response = result["answer"]
-                sample.retrieved_contexts = result["retrieved_contexts"]
-                sample.retrieved_context_ids = result["retrieved_context_ids"]
-                sample.status = "completed"
-                sample.error_message = None
-                db.commit()
-        finally:
-            db.close()
-        return {
-            "sample_id": sample_id,
-            "status": "completed",
-        }
-
-
 async def run_rag_dataset_job(
     job_id: int,
     session_factory,
     scope: str = "full",
-    sample_ids: list[int] | None = None,
 ) -> None:
     db: Session = session_factory()
     try:
@@ -1606,7 +1134,6 @@ async def run_rag_dataset_job(
             return
 
         question_client = OpenAICompatibleClient(job.question_llm_config)
-        target_client = TargetEndpointClient(job)
 
         job.status = "running"
         job.error_message = None
@@ -1624,7 +1151,6 @@ async def run_rag_dataset_job(
             chunk.allocated_question_count = allocations.get(chunk.id, 0)
         db.commit()
 
-        targeted_samples = set(sample_ids or [])
         for document in job.documents:
             for chunk in document.chunks:
                 allocated_count = chunk.allocated_question_count or 0
@@ -1667,7 +1193,7 @@ async def run_rag_dataset_job(
                             reference=item["reference"],
                             reference_context_ids=[chunk.chunk_key],
                             source_chunk_ids=[chunk.chunk_key],
-                            status="pending",
+                            status="completed",
                         )
                         db.add(sample)
                     chunk.generation_status = "completed"
@@ -1683,64 +1209,6 @@ async def run_rag_dataset_job(
                     chunk.generation_error = str(exc)[:1000]
                     _log(job, f"✗ 问题生成失败：{exc}")
                 db.commit()
-
-        db.expire_all()
-        job = _load_job(db, job_id)
-        if job is None:
-            return
-
-        samples_to_process: list[RagDatasetSample] = []
-        if scope == "rerun_samples" and targeted_samples:
-            samples_to_process = [sample for sample in job.samples if sample.id in targeted_samples]
-        elif scope == "retry_failed":
-            samples_to_process = [sample for sample in job.samples if sample.selected and sample.status == "failed"]
-        else:
-            samples_to_process = [
-                sample
-                for sample in job.samples
-                if sample.selected and sample.status in {"pending", "failed"}
-            ]
-
-        if samples_to_process:
-            _log(
-                job,
-                f"开始并发调用目标 chat：{len(samples_to_process)} 条样本，最大并发 {RAG_TARGET_REQUEST_CONCURRENCY}",
-            )
-        for sample in samples_to_process:
-            _remaining_timeout(deadline, RAG_TARGET_REQUEST_TIMEOUT_SECONDS)
-            _log(job, f"调用目标 chat：样本 #{sample.id} / {sample.question[:40]}")
-            sample.status = "running"
-            sample.error_message = None
-        db.commit()
-
-        semaphore = asyncio.Semaphore(RAG_TARGET_REQUEST_CONCURRENCY)
-        sample_results = await asyncio.gather(
-            *[
-                _process_rag_sample_request(
-                    session_factory=session_factory,
-                    job_id=job.id,
-                    sample_id=sample.id,
-                    sample_question=sample.question,
-                    target_client=target_client,
-                    response_mode=job.target_response_mode,
-                    target_system_prompt=job.target_system_prompt,
-                    deadline=deadline,
-                    semaphore=semaphore,
-                )
-                for sample in samples_to_process
-            ]
-        )
-
-        db.expire_all()
-        job = _load_job(db, job_id)
-        if job is None:
-            return
-        for result in sample_results:
-            if result["status"] == "completed":
-                _log(job, f"✓ 样本 #{result['sample_id']} 已完成")
-            else:
-                _log(job, f"✗ 样本 #{result['sample_id']} 失败：{result['error_message']}")
-        db.commit()
 
         db.expire_all()
         job = _load_job(db, job_id)
