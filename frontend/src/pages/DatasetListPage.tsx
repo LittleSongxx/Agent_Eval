@@ -182,7 +182,7 @@ const DatasetListPage: React.FC = () => {
         </Title>
         <Space>
           <Button icon={<FileSearchOutlined />} onClick={() => navigate('/datasets/rag-builder')}>
-            生成 RAG 数据集
+            上传文档生成测试数据
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建数据集

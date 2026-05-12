@@ -51,8 +51,6 @@ export const listRagDatasetJobSamples = (id: number, page = 1, pageSize = 20, st
   api.get(`/rag-dataset-jobs/${id}/samples`, { params: { page, page_size: pageSize, status } }).then(r => r.data);
 export const startRagDatasetJob = (id: number) => api.post(`/rag-dataset-jobs/${id}/start`).then(r => r.data);
 export const retryFailedRagDatasetJob = (id: number) => api.post(`/rag-dataset-jobs/${id}/retry-failed`).then(r => r.data);
-export const rerunRagDatasetJobSamples = (id: number, sampleIds: number[]) =>
-  api.post(`/rag-dataset-jobs/${id}/rerun-samples`, { sample_ids: sampleIds }).then(r => r.data);
 
 // ======================== Metric ========================
 

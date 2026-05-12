@@ -340,9 +340,6 @@ export interface RagDatasetSample {
   reference: string;
   reference_context_ids: string[];
   source_chunk_ids: string[];
-  response?: string | null;
-  retrieved_contexts?: string[] | null;
-  retrieved_context_ids?: string[] | null;
   status: string;
   error_message?: string | null;
   retry_count: number;
@@ -356,13 +353,6 @@ export interface RagDatasetJob {
   name: string;
   description?: string | null;
   status: string;
-  target_endpoint_url?: string | null;
-  target_transport_mode: 'json' | 'sse';
-  target_authorization_masked: string;
-  target_extra_headers: string;
-  target_request_body_template: string;
-  target_response_mode: 'answer_only' | 'answer_with_contexts';
-  target_system_prompt?: string | null;
   question_count_mode: 'auto' | 'custom';
   requested_question_count?: number | null;
   suggested_question_count?: number | null;
@@ -380,7 +370,6 @@ export interface RagDatasetJob {
   dataset_id?: number | null;
   dataset?: Dataset | null;
   question_llm_config?: LLMConfig | null;
-  target_llm_config?: LLMConfig | null;
   documents: RagDatasetDocument[];
   generation_summary?: {
     supported_metrics: string[];

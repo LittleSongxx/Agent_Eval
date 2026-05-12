@@ -31,16 +31,22 @@ from app.schemas.rag_dataset_job import (
     RagDatasetJobCreate,
     RagDatasetJobDetailResponse,
     RagDatasetJobResponse,
-    RagDatasetJobRunRequest,
     RagDatasetJobRunResponse,
     RagDatasetSampleResponse,
     RagDatasetSamplesResponse,
 )
 
+# Architecture note:
+# This router is a specialized "upload documents -> generate test dataset" workflow.
+# The generated output is still normalized into the platform's generic Dataset /
+# DatasetRow model. A future unified DataSource/DatasetGenerator layer should own
+# document upload, API sampling, log replay, manual-label imports, and similar
+# dataset source workflows; this endpoint should then become one adapter behind
+# that common ingestion boundary rather than the public abstraction itself.
 router = APIRouter(prefix="/rag-dataset-jobs", tags=["RAG Dataset Jobs"])
 
 
-def _launch_rag_job(job_id: int, scope: str, sample_ids: list[int] | None = None) -> str:
+def _launch_rag_job(job_id: int, scope: str) -> str:
     task_id = f"rag-job-{job_id}-{scope}"
 
     def runner() -> None:
@@ -49,7 +55,6 @@ def _launch_rag_job(job_id: int, scope: str, sample_ids: list[int] | None = None
                 job_id=job_id,
                 session_factory=SessionLocal,
                 scope=scope,
-                sample_ids=sample_ids,
             )
         )
 
@@ -67,7 +72,6 @@ def _load_job_query(db: Session):
         joinedload(RagDatasetJob.documents),
         joinedload(RagDatasetJob.dataset),
         joinedload(RagDatasetJob.question_llm_config),
-        joinedload(RagDatasetJob.target_llm_config),
     )
 
 
@@ -86,27 +90,12 @@ def _serialize_llm_config(config: Optional[LLMConfig]) -> Optional[dict]:
     return LLMConfigResponse.from_orm_with_mask(config).model_dump()
 
 
-def _mask_secret(value: Optional[str]) -> str:
-    secret = (value or "").strip()
-    if not secret:
-        return ""
-    return secret[:3] + "****" + secret[-4:] if len(secret) > 8 else "****"
-
-
 def _serialize_job(job: RagDatasetJob, detail: bool = False) -> dict:
     payload = {
         "id": job.id,
         "name": job.name,
         "description": job.description,
         "status": job.status,
-        "target_endpoint_url": job.target_endpoint_url,
-        "target_transport_mode": job.target_transport_mode or "sse",
-        "target_authorization_masked": _mask_secret(job.target_authorization),
-        "target_extra_headers": job.target_extra_headers or "",
-        "target_request_body_template": job.target_request_body_template
-        or '{"question":"{{question}}","kb_codes":[],"payload":{"files":[]}}',
-        "target_response_mode": job.target_response_mode,
-        "target_system_prompt": job.target_system_prompt,
         "question_count_mode": job.question_count_mode,
         "requested_question_count": job.requested_question_count,
         "suggested_question_count": job.suggested_question_count,
@@ -129,9 +118,8 @@ def _serialize_job(job: RagDatasetJob, detail: bool = False) -> dict:
         ],
     }
     payload["question_llm_config"] = _serialize_llm_config(job.question_llm_config)
-    payload["target_llm_config"] = _serialize_llm_config(job.target_llm_config)
     if detail:
-        supported, unsupported, notes = summarize_supported_metrics(job.target_response_mode)
+        supported, unsupported, notes = summarize_supported_metrics()
         payload["generation_summary"] = {
             "supported_metrics": supported,
             "unsupported_metrics": unsupported,
@@ -181,13 +169,10 @@ def create_rag_dataset_job(payload: RagDatasetJobCreate, db: Session = Depends(g
     if not question_llm:
         raise HTTPException(status_code=404, detail="Question LLM config not found")
 
-    target_llm_id = payload.target_llm_config_id or payload.question_llm_config_id
-    target_llm = db.query(LLMConfig).filter(LLMConfig.id == target_llm_id).first()
-    if not target_llm:
-        raise HTTPException(status_code=404, detail="Fallback target LLM config not found")
-
-    job = RagDatasetJob(**payload.model_dump(exclude={"target_llm_config_id"}))
-    job.target_llm_config_id = target_llm_id
+    job = RagDatasetJob(**payload.model_dump())
+    # Compatibility for older local SQLite tables where target_llm_config_id is
+    # still NOT NULL from the former coupled target-chat workflow.
+    job.target_llm_config_id = payload.question_llm_config_id
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -320,7 +305,7 @@ def start_rag_dataset_job(job_id: int, db: Session = Depends(get_db)):
         job_id=job_id,
         status="running",
         scope="full",
-        message="已启动 RAG 数据集生成任务",
+        message="已启动文档测试数据生成任务",
     )
 
 
@@ -338,36 +323,4 @@ def retry_failed_rag_dataset_job(job_id: int, db: Session = Depends(get_db)):
         status="running",
         scope="retry_failed",
         message="已启动失败样本重试",
-    )
-
-
-@router.post("/{job_id}/rerun-samples", response_model=RagDatasetJobRunResponse)
-def rerun_selected_rag_samples(
-    job_id: int,
-    payload: RagDatasetJobRunRequest,
-    db: Session = Depends(get_db),
-):
-    _recover_stale_job(db, job_id)
-    job = db.query(RagDatasetJob).filter(RagDatasetJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="RAG dataset job not found")
-    _ensure_job_not_running(job)
-    sample_ids = payload.sample_ids or []
-    if not sample_ids:
-        raise HTTPException(status_code=422, detail="请至少选择一条样本")
-    existing = (
-        db.query(RagDatasetSample.id)
-        .filter(RagDatasetSample.job_id == job_id, RagDatasetSample.id.in_(sample_ids))
-        .all()
-    )
-    if len(existing) != len(sample_ids):
-        raise HTTPException(status_code=404, detail="部分样本不存在")
-    task_id = _launch_rag_job(job_id, scope="rerun_samples", sample_ids=sample_ids)
-    return RagDatasetJobRunResponse(
-        task_id=task_id,
-        job_id=job_id,
-        status="running",
-        scope="rerun_samples",
-        sample_ids=sample_ids,
-        message="已启动局部重跑",
     )

@@ -91,7 +91,7 @@ const metricRequiredFields: Record<string, string[]> = {
 };
 
 type EvaluationMode = 'offline' | 'endpoint';
-type ResourceSource = 'existing' | 'create';
+type ResourceSource = 'existing' | 'create' | 'document';
 type TestStatus = 'idle' | 'success' | 'failed';
 
 interface MetricOverrideDraft {
@@ -764,6 +764,12 @@ const ExperimentWorkbenchPage: React.FC = () => {
       return (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Title level={4}>准备测试数据</Title>
+          {/* Architecture note:
+              This is the first UI-level test-data source selector. Document
+              generation still delegates to the existing RAG job page, but the
+              product model here should grow into a unified source picker for
+              document upload, API sampling, log replay, manual-label import,
+              and other sources while all results land in Dataset/DatasetRow. */}
           <Radio.Group
             value={datasetSource}
             onChange={(event) => setDatasetSource(event.target.value)}
@@ -772,6 +778,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
             options={[
               { label: '使用已有数据集', value: 'existing' },
               { label: '新建数据集', value: 'create' },
+              { label: '上传文档自动生成', value: 'document' },
             ]}
           />
           {datasetSource === 'existing' ? (
@@ -787,11 +794,28 @@ const ExperimentWorkbenchPage: React.FC = () => {
                 value: dataset.id,
               }))}
             />
-          ) : (
+          ) : datasetSource === 'create' ? (
             <Card size="small">
               <Space direction="vertical" size={12}>
                 <Text>先创建数据集字段结构；创建成功后继续在本节点导入数据或添加一行。</Text>
                 <Button type="primary" onClick={() => setDatasetModalOpen(true)}>打开新建数据集弹窗</Button>
+              </Space>
+            </Card>
+          ) : (
+            <Card size="small" title="上传文档自动生成测试数据">
+              <Space direction="vertical" size={12}>
+                <Text>
+                  上传知识库、产品文档或业务材料后，系统会自动解析分片，生成 user_input、reference 等测试数据字段，并同步为普通数据集。
+                </Text>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="这是测试数据来源之一"
+                  description="当前实现复用文档生成任务页面；生成完成后回到这里选择新生成的数据集继续评测。"
+                />
+                <Button type="primary" icon={<FileSearchOutlined />} onClick={() => navigate('/datasets/rag-builder')}>
+                  去上传文档生成测试数据
+                </Button>
               </Space>
             </Card>
           )}

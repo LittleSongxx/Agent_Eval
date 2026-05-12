@@ -64,6 +64,12 @@ const getErrorMessage = (error: any, fallback: string) => {
   return fallback;
 };
 
+// Architecture note:
+// This page currently exposes the document-upload implementation of test data
+// generation. The RAG naming is historical and should not become the long-term
+// product boundary. When the platform adds a unified test-data ingestion layer,
+// this flow should move behind a generic "data source" entry alongside API
+// sampling, log replay, and manual-label imports.
 const RagDatasetBuilderPage: React.FC = () => {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<RagDatasetJob[]>([]);
@@ -80,7 +86,6 @@ const RagDatasetBuilderPage: React.FC = () => {
   const [samplePage, setSamplePage] = useState(1);
   const [samplePageSize, setSamplePageSize] = useState(20);
   const [sampleStatus, setSampleStatus] = useState<string | undefined>(undefined);
-  const [selectedSampleIds, setSelectedSampleIds] = useState<number[]>([]);
   const [chunkPreview, setChunkPreview] = useState<RagDatasetChunk | null>(null);
   const [sampleChunkPreview, setSampleChunkPreview] = useState<RagDatasetChunk[]>([]);
   const [sampleChunkPreviewTitle, setSampleChunkPreviewTitle] = useState('');
@@ -98,7 +103,7 @@ const RagDatasetBuilderPage: React.FC = () => {
         setSelectedJobId(items[0].id);
       }
     } catch {
-      message.error('加载 RAG 数据集生成器失败');
+      message.error('加载文档生成测试数据任务失败');
     } finally {
       setLoading(false);
     }
@@ -157,17 +162,11 @@ const RagDatasetBuilderPage: React.FC = () => {
         name: values.name,
         description: values.description || '',
         question_llm_config_id: values.question_llm_config_id,
-        target_endpoint_url: values.target_endpoint_url,
-        target_transport_mode: values.target_transport_mode,
-        target_authorization: values.target_authorization || '',
-        target_extra_headers: values.target_extra_headers || '',
-        target_request_body_template: values.target_request_body_template,
-        target_response_mode: values.target_response_mode,
         question_count_mode: values.question_count_mode,
         requested_question_count:
           values.question_count_mode === 'custom' ? values.requested_question_count : null,
       });
-      message.success('已创建 RAG 数据集生成任务');
+      message.success('已创建文档生成测试数据任务');
       setSelectedJobId(job.id);
       setPendingFiles([]);
       jobForm.resetFields();
@@ -222,21 +221,6 @@ const RagDatasetBuilderPage: React.FC = () => {
     }
   };
 
-  const handleRerunSelected = async () => {
-    if (!selectedJobId || selectedSampleIds.length === 0) {
-      message.warning('请先选择要局部重跑的样本');
-      return;
-    }
-    try {
-      await api.rerunRagDatasetJobSamples(selectedJobId, selectedSampleIds);
-      message.success('已启动局部重跑');
-      setSelectedSampleIds([]);
-      fetchJobDetail();
-    } catch (error: any) {
-      message.error(getErrorMessage(error, '启动局部重跑失败'));
-    }
-  };
-
   const chunkColumns = [
     { title: '分片', dataIndex: 'chunk_key', key: 'chunk_key', width: 180 },
     {
@@ -246,8 +230,8 @@ const RagDatasetBuilderPage: React.FC = () => {
       render: (_: unknown, record: RagDatasetChunk) =>
         selectedJob?.documents.find((item) => item.id === record.document_id)?.filename || `文档 #${record.document_id}`,
     },
-    { title: '建议题数', dataIndex: 'suggested_question_count', key: 'suggested', width: 90 },
-    { title: '分配题数', dataIndex: 'allocated_question_count', key: 'allocated', width: 90 },
+    { title: '建议条数', dataIndex: 'suggested_question_count', key: 'suggested', width: 90 },
+    { title: '分配条数', dataIndex: 'allocated_question_count', key: 'allocated', width: 90 },
     {
       title: '质量',
       key: 'quality',
@@ -300,14 +284,6 @@ const RagDatasetBuilderPage: React.FC = () => {
       ellipsis: true,
     },
     {
-      title: '目标回答',
-      dataIndex: 'response',
-      key: 'response',
-      width: 280,
-      ellipsis: true,
-      render: (value: string | null | undefined) => value || <Text type="secondary">-</Text>,
-    },
-    {
       title: '引用 chunk',
       key: 'source_chunks',
       width: 130,
@@ -342,9 +318,6 @@ const RagDatasetBuilderPage: React.FC = () => {
 
   const selectedJobRunning = selectedJob?.status === 'running';
   const canViewDataset = !!selectedJob?.dataset_id;
-  const supportedMetrics = selectedJob?.generation_summary?.supported_metrics || [];
-  const unsupportedMetrics = selectedJob?.generation_summary?.unsupported_metrics || [];
-  const generationNotes = selectedJob?.generation_summary?.notes || [];
 
   const uploadFileList = useMemo(
     () =>
@@ -373,7 +346,7 @@ const RagDatasetBuilderPage: React.FC = () => {
           返回数据集
         </Button>
         <Title level={4} style={{ margin: 0 }}>
-          RAG 数据集生成器
+          文档生成测试数据
         </Title>
       </Space>
 
@@ -381,8 +354,7 @@ const RagDatasetBuilderPage: React.FC = () => {
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="第一阶段实现：基于知识库文档自动出题、生成标准答案、调用目标 chat 接口生成真实回答，并同步为评测数据集。"
-        description="如果目标接口没有返回 retrieved_contexts / retrieved_context_ids，系统会明确降级为“只适合回答质量评测”的数据集，不会把平台自己的 chunk 当成被测系统真实检索结果。"
+        message="上传知识库文档，自动解析分片并生成测试数据（问题 + 参考答案），同步为普通评测数据集。"
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: '360px minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
@@ -393,73 +365,24 @@ const RagDatasetBuilderPage: React.FC = () => {
               layout="vertical"
               initialValues={{
                 question_count_mode: 'auto',
-                target_endpoint_url: 'https://api.indusmind.me/chat-ai/sh/chat/send-stream',
-                target_transport_mode: 'sse',
-                target_response_mode: 'answer_with_contexts',
-                target_request_body_template:
-                  '{\n  "question": "{{question}}",\n  "kb_codes": [],\n  "payload": {\n    "files": []\n  }\n}',
-                target_extra_headers:
-                  '{\n  "origin": "https://coreagent.indusmind.me",\n  "pfb": "pfb19",\n  "referer": "https://coreagent.indusmind.me/"\n}',
               }}
             >
               <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
-                <Input placeholder="例如：员工手册 RAG 数据集生成" />
+                <Input placeholder="例如：员工手册文档测试数据生成" />
               </Form.Item>
               <Form.Item name="description" label="描述">
                 <Input.TextArea rows={2} placeholder="可选说明" />
               </Form.Item>
-              <Form.Item name="question_llm_config_id" label="出题模型" rules={[{ required: true, message: '请选择出题模型' }]}>
+              <Form.Item name="question_llm_config_id" label="生成模型" rules={[{ required: true, message: '请选择生成模型' }]}>
                 <Select
-                  placeholder="选择用于出题和标准答案生成的模型"
+                  placeholder="选择用于生成数据和标准答案的模型"
                   options={llmConfigs.map((item) => ({ label: item.name, value: item.id }))}
                 />
               </Form.Item>
-              <Form.Item name="target_endpoint_url" label="目标 Chat 接口 URL" rules={[{ required: true, message: '请输入目标接口 URL' }]}>
-                <Input placeholder="例如：https://api.indusmind.me/chat-ai/sh/chat/send-stream" />
-              </Form.Item>
-              <Form.Item name="target_transport_mode" label="接口返回方式" rules={[{ required: true }]}>
-                <Radio.Group>
-                  <Radio.Button value="sse">SSE 流式</Radio.Button>
-                  <Radio.Button value="json">普通 JSON</Radio.Button>
-                </Radio.Group>
-              </Form.Item>
-              <Form.Item name="target_authorization" label="Authorization">
-                <Input.Password placeholder="例如：AT-xxxxxxxx" visibilityToggle />
-              </Form.Item>
-              <Form.Item name="target_extra_headers" label="附加 Headers (JSON)">
-                <Input.TextArea rows={5} />
-              </Form.Item>
-              <Form.Item
-                name="target_request_body_template"
-                label="请求体模板 (JSON)"
-                extra="支持 {{question}} 占位符，系统会把自动生成的问题填进去。"
-                rules={[{ required: true, message: '请输入请求体模板' }]}
-              >
-                <Input.TextArea rows={7} />
-              </Form.Item>
-              <Form.Item name="target_response_mode" label="目标接口返回模式" rules={[{ required: true }]}>
-                <Radio.Group>
-                  <Radio.Button value="answer_with_contexts">答案 + 检索上下文</Radio.Button>
-                  <Radio.Button value="answer_only">仅答案</Radio.Button>
-                </Radio.Group>
-              </Form.Item>
-              <Form.Item noStyle shouldUpdate={(prev, next) => prev.target_response_mode !== next.target_response_mode}>
-                {({ getFieldValue }) =>
-                  getFieldValue('target_response_mode') === 'answer_only' ? (
-                    <Alert
-                      type="warning"
-                      showIcon
-                      style={{ marginBottom: 16 }}
-                      message="仅答案模式"
-                      description="这种模式不会生成真实 retrieved_contexts / retrieved_context_ids，因此生成的数据集只能正式用于回答质量相关指标。"
-                    />
-                  ) : null
-                }
-              </Form.Item>
-              <Form.Item name="question_count_mode" label="题量策略" rules={[{ required: true }]}>
+              <Form.Item name="question_count_mode" label="数量策略" rules={[{ required: true }]}>
                 <Radio.Group>
                   <Radio.Button value="auto">自动建议</Radio.Button>
-                  <Radio.Button value="custom">自定义总题数</Radio.Button>
+                  <Radio.Button value="custom">自定义总数</Radio.Button>
                 </Radio.Group>
               </Form.Item>
               <Form.Item noStyle shouldUpdate={(prev, next) => prev.question_count_mode !== next.question_count_mode}>
@@ -467,8 +390,8 @@ const RagDatasetBuilderPage: React.FC = () => {
                   getFieldValue('question_count_mode') === 'custom' ? (
                     <Form.Item
                       name="requested_question_count"
-                      label="总题数"
-                      rules={[{ required: true, message: '请输入总题数' }]}
+                      label="总条数"
+                      rules={[{ required: true, message: '请输入总条数' }]}
                     >
                       <InputNumber min={1} max={200} style={{ width: '100%' }} />
                     </Form.Item>
@@ -521,9 +444,6 @@ const RagDatasetBuilderPage: React.FC = () => {
                     <Button icon={<ReloadOutlined />} onClick={handleRetryFailed} disabled={selectedJobRunning}>
                       重试失败项
                     </Button>
-                    <Button icon={<ReloadOutlined />} onClick={handleRerunSelected} disabled={selectedJobRunning || selectedSampleIds.length === 0}>
-                      局部重跑
-                    </Button>
                     {canViewDataset && (
                       <Button icon={<DatabaseOutlined />} onClick={() => navigate(`/datasets/${selectedJob.dataset_id}`)}>
                         查看数据集
@@ -538,53 +458,13 @@ const RagDatasetBuilderPage: React.FC = () => {
                   </Descriptions.Item>
                   <Descriptions.Item label="文档数">{selectedJob.total_documents}</Descriptions.Item>
                   <Descriptions.Item label="分片数">{selectedJob.total_chunks}</Descriptions.Item>
-                  <Descriptions.Item label="建议题数">{selectedJob.suggested_question_count ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label="建议条数">{selectedJob.suggested_question_count ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="总样本">{selectedJob.total_samples}</Descriptions.Item>
                   <Descriptions.Item label="成功">{selectedJob.completed_samples}</Descriptions.Item>
                   <Descriptions.Item label="失败">{selectedJob.failed_samples}</Descriptions.Item>
-                  <Descriptions.Item label="返回模式">{selectedJob.target_response_mode}</Descriptions.Item>
-                  <Descriptions.Item label="接口方式">{selectedJob.target_transport_mode.toUpperCase()}</Descriptions.Item>
-                  <Descriptions.Item label="目标 URL" span={3}>
-                    <Text code>{selectedJob.target_endpoint_url || '-'}</Text>
-                  </Descriptions.Item>
                 </Descriptions>
                 {selectedJob.error_message && (
                   <Alert type="error" showIcon style={{ marginTop: 16 }} message={selectedJob.error_message} />
-                )}
-                <div style={{ marginTop: 12 }}>
-                  <Text strong>Authorization：</Text>{' '}
-                  <Text type="secondary">{selectedJob.target_authorization_masked || '未配置'}</Text>
-                </div>
-                <div style={{ marginTop: 16 }}>
-                  <Text strong>支持指标：</Text>
-                  <Space size={[4, 4]} wrap>
-                    {supportedMetrics.map((item) => (
-                      <Tag key={item} color="blue">
-                        {item}
-                      </Tag>
-                    ))}
-                  </Space>
-                </div>
-                {unsupportedMetrics.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <Text strong>当前不支持：</Text>
-                    <Space size={[4, 4]} wrap>
-                      {unsupportedMetrics.map((item) => (
-                        <Tag key={item} color="orange">
-                          {item}
-                        </Tag>
-                      ))}
-                    </Space>
-                  </div>
-                )}
-                {generationNotes.length > 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    {generationNotes.map((note) => (
-                      <Paragraph key={note} type="secondary" style={{ marginBottom: 4 }}>
-                        {note}
-                      </Paragraph>
-                    ))}
-                  </div>
                 )}
               </Card>
 
@@ -641,10 +521,6 @@ const RagDatasetBuilderPage: React.FC = () => {
                   size="small"
                   dataSource={samples}
                   columns={sampleColumns}
-                  rowSelection={{
-                    selectedRowKeys: selectedSampleIds,
-                    onChange: (keys) => setSelectedSampleIds(keys as number[]),
-                  }}
                   scroll={{ x: 'max-content' }}
                   pagination={{
                     current: samplePage,
@@ -716,8 +592,8 @@ const RagDatasetBuilderPage: React.FC = () => {
                 extra={<Text type="secondary">{item.char_count} chars</Text>}
               >
                 <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
-                  <Descriptions.Item label="建议题数">{item.suggested_question_count}</Descriptions.Item>
-                  <Descriptions.Item label="分配题数">{item.allocated_question_count}</Descriptions.Item>
+                  <Descriptions.Item label="建议条数">{item.suggested_question_count}</Descriptions.Item>
+                  <Descriptions.Item label="分配条数">{item.allocated_question_count}</Descriptions.Item>
                   <Descriptions.Item label="状态">{item.generation_status}</Descriptions.Item>
                 </Descriptions>
                 <pre
@@ -742,8 +618,8 @@ const RagDatasetBuilderPage: React.FC = () => {
         ) : chunkPreview ? (
           <>
             <Descriptions size="small" column={3} style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="建议题数">{chunkPreview.suggested_question_count}</Descriptions.Item>
-              <Descriptions.Item label="分配题数">{chunkPreview.allocated_question_count}</Descriptions.Item>
+              <Descriptions.Item label="建议条数">{chunkPreview.suggested_question_count}</Descriptions.Item>
+              <Descriptions.Item label="分配条数">{chunkPreview.allocated_question_count}</Descriptions.Item>
               <Descriptions.Item label="状态">{chunkPreview.generation_status}</Descriptions.Item>
               <Descriptions.Item label="质量">
                 <Tag color={chunkQualityColorMap[chunkPreview.quality_label] || 'default'}>

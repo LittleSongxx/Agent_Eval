@@ -122,8 +122,8 @@ const App: React.FC = () => {
               <Route path="/workbench" element={<ExperimentWorkbenchPage />} />
               <Route path="/llm-configs" element={<LLMConfigPage />} />
               <Route path="/datasets" element={<DatasetListPage />} />
-              <Route path="/datasets/:id" element={<DatasetDetailPage />} />
               <Route path="/datasets/rag-builder" element={<RagDatasetBuilderPage />} />
+              <Route path="/datasets/:id" element={<DatasetDetailPage />} />
               <Route path="/metrics" element={<MetricListPage />} />
               <Route path="/endpoint-targets" element={<EndpointTargetPage />} />
               <Route path="/scenarios" element={<ScenarioListPage />} />

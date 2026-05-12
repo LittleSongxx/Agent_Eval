@@ -11,14 +11,6 @@ class RagDatasetJobCreate(BaseModel):
     name: str
     description: str = ""
     question_llm_config_id: int
-    target_llm_config_id: Optional[int] = None
-    target_endpoint_url: str
-    target_transport_mode: Literal["json", "sse"] = "sse"
-    target_authorization: str = ""
-    target_extra_headers: str = ""
-    target_request_body_template: str = '{"question":"{{question}}","kb_codes":[],"payload":{"files":[]}}'
-    target_response_mode: Literal["answer_only", "answer_with_contexts"] = "answer_with_contexts"
-    target_system_prompt: str = ""
     question_count_mode: Literal["auto", "custom"] = "auto"
     requested_question_count: Optional[int] = None
 
@@ -26,8 +18,6 @@ class RagDatasetJobCreate(BaseModel):
     def validate_question_count(self):
         if self.question_count_mode == "custom" and not self.requested_question_count:
             raise ValueError("自定义总题数模式下必须提供 requested_question_count")
-        if not (self.target_endpoint_url or "").strip():
-            raise ValueError("必须提供 target_endpoint_url")
         return self
 
 
@@ -72,9 +62,6 @@ class RagDatasetSampleResponse(BaseModel):
     reference: str
     reference_context_ids: List[str] = []
     source_chunk_ids: List[str] = []
-    response: Optional[str] = None
-    retrieved_contexts: Optional[List[str]] = None
-    retrieved_context_ids: Optional[List[str]] = None
     status: str
     error_message: Optional[str] = None
     retry_count: int
@@ -101,13 +88,6 @@ class RagDatasetJobResponse(BaseModel):
     name: str
     description: Optional[str] = None
     status: str
-    target_endpoint_url: Optional[str] = None
-    target_transport_mode: str
-    target_authorization_masked: str = ""
-    target_extra_headers: str = ""
-    target_request_body_template: str = ""
-    target_response_mode: str
-    target_system_prompt: Optional[str] = None
     question_count_mode: str
     requested_question_count: Optional[int] = None
     suggested_question_count: Optional[int] = None
@@ -125,7 +105,6 @@ class RagDatasetJobResponse(BaseModel):
     dataset_id: Optional[int] = None
     dataset: Optional[DatasetResponse] = None
     question_llm_config: Optional[LLMConfigResponse] = None
-    target_llm_config: Optional[LLMConfigResponse] = None
     documents: List[RagDatasetDocumentResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -133,7 +112,6 @@ class RagDatasetJobResponse(BaseModel):
 
 class RagDatasetJobRunRequest(BaseModel):
     chunk_ids: Optional[List[int]] = None
-    sample_ids: Optional[List[int]] = None
 
 
 class RagDatasetJobRunResponse(BaseModel):
@@ -141,7 +119,6 @@ class RagDatasetJobRunResponse(BaseModel):
     job_id: int
     status: str
     scope: str
-    sample_ids: List[int] = []
     chunk_ids: List[int] = []
     message: str = ""
 

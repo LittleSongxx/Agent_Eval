@@ -22,7 +22,10 @@ class RagDatasetJob(Base):
     description = Column(Text, nullable=True)
     status = Column(String(50), default="draft", nullable=False)
     question_llm_config_id = Column(Integer, ForeignKey("llm_configs.id"), nullable=False)
-    target_llm_config_id = Column(Integer, ForeignKey("llm_configs.id"), nullable=False)
+    # Legacy compatibility columns retained for existing SQLite databases that
+    # were created when this workflow also called a target chat endpoint. The
+    # document data source no longer exposes or uses target endpoint settings.
+    target_llm_config_id = Column(Integer, ForeignKey("llm_configs.id"), nullable=True)
     target_endpoint_url = Column(String(1000), nullable=True)
     target_transport_mode = Column(String(50), default="sse", nullable=False)
     target_authorization = Column(Text, nullable=True)
@@ -47,7 +50,6 @@ class RagDatasetJob(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     question_llm_config = relationship("LLMConfig", foreign_keys=[question_llm_config_id])
-    target_llm_config = relationship("LLMConfig", foreign_keys=[target_llm_config_id])
     dataset = relationship("Dataset")
     documents = relationship(
         "RagDatasetDocument",
@@ -120,9 +122,6 @@ class RagDatasetSample(Base):
     reference = Column(Text, nullable=False)
     reference_context_ids = Column(JSON, nullable=False)
     source_chunk_ids = Column(JSON, nullable=False)
-    response = Column(Text, nullable=True)
-    retrieved_contexts = Column(JSON, nullable=True)
-    retrieved_context_ids = Column(JSON, nullable=True)
     status = Column(String(50), default="pending", nullable=False)
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
