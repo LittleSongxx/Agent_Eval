@@ -76,7 +76,7 @@ const metricRequiredFields: Record<string, string[]> = {
 };
 
 const DEFAULT_DEEPSEEK_ENDPOINT_URL = 'https://api.deepseek.com/v1/chat/completions';
-const DEFAULT_DEEPSEEK_AUTHORIZATION = 'Bearer sk-kkkk';
+const DEFAULT_DEEPSEEK_AUTHORIZATION = 'Bearer xxx';
 const DEFAULT_DEEPSEEK_TEST_INPUT = '请用三句话介绍一下 DeepSeek，并说明它适合做哪些 AI 应用测试。';
 const DEFAULT_ENDPOINT_BODY = JSON.stringify(
   {
@@ -408,6 +408,7 @@ const EvaluationPage: React.FC = () => {
         user_input: form.getFieldValue('endpoint_test_user_input') || DEFAULT_DEEPSEEK_TEST_INPUT,
       };
       const result = await api.testEvaluationEndpoint({
+        endpoint_target_id: form.getFieldValue('endpoint_target_id'),
         target_config: {
           ...(form.getFieldValue('target_config') || {}),
           request_body_template: form.getFieldValue(['target_config', 'request_body_template']) || DEFAULT_ENDPOINT_BODY,
@@ -453,7 +454,7 @@ const EvaluationPage: React.FC = () => {
       target_config: {
         endpoint_url: target.endpoint_url,
         transport_mode: target.transport_mode || 'json',
-        authorization: target.authorization || '',
+        authorization: '',
         extra_headers: target.extra_headers || '{}',
         request_body_template: target.request_body_template || DEFAULT_ENDPOINT_BODY,
       },

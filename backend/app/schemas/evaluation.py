@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.schemas.dataset import DatasetRowResponse
+from app.schemas.sensitive import redact_sensitive_mapping
 
 
 class MetricOverridePayload(BaseModel):
@@ -67,6 +68,11 @@ class EvalTaskBrief(BaseModel):
     result_save_mode: Optional[str] = "task_only"
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def hide_target_config_secrets(self):
+        self.target_config = redact_sensitive_mapping(self.target_config)
+        return self
 
 
 class DatasetBrief(BaseModel):
@@ -241,6 +247,7 @@ class BlindTestTargetTestResponse(BaseModel):
 
 
 class EndpointEvalTargetTestRequest(BaseModel):
+    endpoint_target_id: Optional[int] = None
     target_config: Dict[str, Any]
     response_mapping: Optional[Dict[str, Any]] = None
     row_data: Dict[str, Any]
@@ -284,6 +291,12 @@ class BlindTestTaskBrief(BaseModel):
     target_b: Dict[str, Any]
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def hide_target_secrets(self):
+        self.target_a = redact_sensitive_mapping(self.target_a)
+        self.target_b = redact_sensitive_mapping(self.target_b)
+        return self
 
 
 class BlindTestTaskResponse(BlindTestTaskBrief):

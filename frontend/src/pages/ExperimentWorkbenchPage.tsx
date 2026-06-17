@@ -671,7 +671,7 @@ const ExperimentWorkbenchPage: React.FC = () => {
       payload.target_config = {
         endpoint_url: selectedEndpoint.endpoint_url,
         transport_mode: selectedEndpoint.transport_mode || 'json',
-        authorization: selectedEndpoint.authorization || '',
+        authorization: '',
         extra_headers: selectedEndpoint.extra_headers || '{}',
         request_body_template: selectedEndpoint.request_body_template,
       };

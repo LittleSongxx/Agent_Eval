@@ -60,6 +60,8 @@ def update_endpoint_target(
     data = payload.model_dump(exclude_unset=True)
     if "endpoint_url" in data and not str(data["endpoint_url"] or "").strip():
         raise HTTPException(status_code=400, detail="endpoint_url is required")
+    if "authorization" in data and not str(data["authorization"] or "").strip():
+        data.pop("authorization")
     for key, value in data.items():
         setattr(target, key, value)
     db.commit()

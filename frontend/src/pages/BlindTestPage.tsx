@@ -42,9 +42,9 @@ const statusColorMap: Record<string, string> = {
 };
 
 const DEFAULT_ENDPOINT_BODY = '{\n  "question": "{{question}}"\n}';
-const DEFAULT_BLIND_TEST_ENDPOINT_URL = 'https://api.indusmind.me/chat-ai/sh/chat/send-stream';
-const DEFAULT_BLIND_TEST_AUTHORIZATION = 'AT-45fa963979fc438baff70ed7e5f346f1';
-const DEFAULT_BLIND_TEST_HEADERS = '{\n  "origin": "https://coreagent.indusmind.me",\n  "pfb": "pfb19",\n  "referer": "https://coreagent.indusmind.me/"\n}';
+const DEFAULT_BLIND_TEST_ENDPOINT_URL = 'https://example.com/chat/completions';
+const DEFAULT_BLIND_TEST_AUTHORIZATION = 'Bearer xxx';
+const DEFAULT_BLIND_TEST_HEADERS = '{\n  "origin": "https://example.com",\n  "X-App-Id": "xxx",\n  "referer": "https://example.com/"\n}';
 const DEFAULT_BLIND_TEST_BODY = '{\n  "question": "{{question}}",\n  "kb_codes": [],\n  "payload": {\n    "files": []\n  }\n}';
 
 type TargetFieldPrefix = 'target_a' | 'target_b';

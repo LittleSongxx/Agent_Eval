@@ -31,7 +31,7 @@ def test_llm_config_draft_smoke_test(client, monkeypatch):
         json={
             "name": "Draft Test",
             "api_base_url": "https://example.com/v1",
-            "api_key": "test-key",
+            "api_key": "xxx",
             "model_name": "demo-model",
         },
     )

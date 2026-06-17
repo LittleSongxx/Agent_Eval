@@ -121,7 +121,7 @@ npm run dev
 
 如果对比对象选择 `Chat 接口`，表单会默认预填和 RAG 数据集生成器一致的接口参数：
 
-- URL：`https://api.indusmind.me/chat-ai/sh/chat/send-stream`
+- URL：`https://example.com/chat/completions`
 - 返回方式：`SSE`
 - 请求体模板：
 
@@ -139,9 +139,9 @@ npm run dev
 
 ```json
 {
-  "origin": "https://coreagent.indusmind.me",
-  "pfb": "pfb19",
-  "referer": "https://coreagent.indusmind.me/"
+  "origin": "https://example.com",
+  "X-App-Id": "xxx",
+  "referer": "https://example.com/"
 }
 ```
 

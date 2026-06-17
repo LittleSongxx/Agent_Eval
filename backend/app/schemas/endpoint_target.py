@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
+
+from app.schemas.sensitive import mask_secret
 
 
 class EndpointTargetBase(BaseModel):
@@ -40,14 +42,12 @@ class EndpointTargetResponse(EndpointTargetBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @classmethod
-    def model_validate(cls, obj, *args, **kwargs):
-        data = super().model_validate(obj, *args, **kwargs)
-        auth = data.authorization or ""
-        if auth:
-            data.authorization_masked = auth[:8] + "****" + auth[-4:] if len(auth) > 16 else "****"
-        data.authorization = auth
-        return data
+    @model_validator(mode="after")
+    def hide_authorization(self):
+        auth = self.authorization or ""
+        self.authorization_masked = mask_secret(auth)
+        self.authorization = None
+        return self
 
 
 class EndpointTargetTestRequest(BaseModel):

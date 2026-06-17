@@ -74,7 +74,7 @@ const EndpointTargetModal: React.FC<EndpointTargetModalProps> = ({ open, target,
     if (target) {
       form.setFieldsValue({
         ...target,
-        authorization: target.authorization || '',
+        authorization: '',
         response_mapping: { ...defaultMapping, ...(target.response_mapping || {}) },
       });
     } else {
@@ -83,7 +83,7 @@ const EndpointTargetModal: React.FC<EndpointTargetModalProps> = ({ open, target,
         name: 'DeepSeek Chat',
         endpoint_url: 'https://api.deepseek.com/v1/chat/completions',
         transport_mode: 'json',
-        authorization: 'Bearer sk-kkkk',
+        authorization: 'Bearer xxx',
         extra_headers: '{}',
         request_body_template: DEFAULT_BODY,
         response_mapping: defaultMapping,
@@ -97,6 +97,9 @@ const EndpointTargetModal: React.FC<EndpointTargetModalProps> = ({ open, target,
       const values = await form.validateFields();
       setSubmitting(true);
       const payload = { ...values, response_mapping: values.response_mapping || {} };
+      if (target && !payload.authorization?.trim()) {
+        delete payload.authorization;
+      }
       const saved = target
         ? await api.updateEndpointTarget(target.id, payload)
         : await api.createEndpointTarget(payload);
@@ -115,6 +118,7 @@ const EndpointTargetModal: React.FC<EndpointTargetModalProps> = ({ open, target,
       const values = await form.validateFields();
       setTesting(true);
       const result = await api.testEvaluationEndpoint({
+        endpoint_target_id: target?.id,
         target_config: {
           endpoint_url: values.endpoint_url,
           transport_mode: values.transport_mode || 'json',
@@ -197,8 +201,11 @@ const EndpointTargetModal: React.FC<EndpointTargetModalProps> = ({ open, target,
             </Form.Item>
           </Col>
           <Col span={5}>
-            <Form.Item name="authorization" label="Authorization">
-              <Input placeholder="Bearer sk-..." />
+            <Form.Item
+              name="authorization"
+              label={target ? `Authorization（已保存：${target.authorization_masked || '空'}）` : 'Authorization'}
+            >
+              <Input placeholder={target ? '留空则不修改' : 'Bearer sk-...'} />
             </Form.Item>
           </Col>
           <Col span={24}>

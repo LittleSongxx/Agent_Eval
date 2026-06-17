@@ -16,7 +16,7 @@ def _create_llm_config(client, name="Judge LLM"):
         json={
             "name": name,
             "api_base_url": "https://example.com/v1",
-            "api_key": "test-key",
+            "api_key": "xxx",
             "model_name": "test-model",
         },
     )
@@ -50,6 +50,7 @@ def test_blind_test_flow_with_model_and_endpoint(client, monkeypatch):
                 "name": "接口 B",
                 "endpoint_url": "https://example.com/chat",
                 "transport_mode": "json",
+                "authorization": "Bearer xxx",
                 "request_body_template": '{"question":"{{question}}"}',
             },
         },
@@ -57,6 +58,8 @@ def test_blind_test_flow_with_model_and_endpoint(client, monkeypatch):
     assert resp.status_code == 201
     task = resp.json()
     assert task["total_rows"] == 2
+    assert task["target_b"]["authorization"] is None
+    assert task["target_b"]["authorization_masked"] == "****"
 
     async def fake_llm_answer(self, row_data):
         return f"LLM::{row_data['user_input']}"

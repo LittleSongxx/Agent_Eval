@@ -333,7 +333,7 @@ def test_endpoint_target_crud_and_evaluation_snapshot(client, test_llm_payload):
             "name": "DeepSeek Chat",
             "endpoint_url": "https://api.deepseek.com/v1/chat/completions",
             "transport_mode": "json",
-            "authorization": "Bearer test-key",
+            "authorization": "Bearer xxx",
             "extra_headers": "{}",
             "request_body_template": '{"model":"deepseek-chat","messages":[{"role":"user","content":"{{user_input}}"}]}',
             "response_mapping": {"response_path": "choices.0.message.content"},
@@ -342,6 +342,8 @@ def test_endpoint_target_crud_and_evaluation_snapshot(client, test_llm_payload):
     )
     assert target_resp.status_code == 201
     target = target_resp.json()
+    assert target["authorization"] is None
+    assert target["authorization_masked"] == "****"
 
     task_resp = client.post(
         "/api/evaluations",
@@ -359,6 +361,8 @@ def test_endpoint_target_crud_and_evaluation_snapshot(client, test_llm_payload):
     task = task_resp.json()
     assert task["endpoint_target_id"] == target["id"]
     assert task["target_config"]["endpoint_url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert task["target_config"]["authorization"] is None
+    assert task["target_config"]["authorization_masked"] == "****"
     assert task["response_mapping"]["response_path"] == "choices.0.message.content"
 
     client.put(
@@ -367,6 +371,94 @@ def test_endpoint_target_crud_and_evaluation_snapshot(client, test_llm_payload):
     )
     existing_task = client.get(f"/api/evaluations/{task['id']}").json()
     assert existing_task["target_config"]["endpoint_url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert existing_task["target_config"]["authorization"] is None
+
+
+def test_endpoint_target_update_keeps_authorization_when_blank(client, db, monkeypatch):
+    target_resp = client.post(
+        "/api/endpoint-targets",
+        json={
+            "name": "Private API",
+            "endpoint_url": "https://example.com/chat",
+            "transport_mode": "json",
+            "authorization": "Bearer xxx",
+            "extra_headers": "{}",
+            "request_body_template": '{"question":"{{user_input}}"}',
+            "response_mapping": {"response_path": "data.answer"},
+        },
+    )
+    assert target_resp.status_code == 201
+
+    update_resp = client.put(
+        f"/api/endpoint-targets/{target_resp.json()['id']}",
+        json={"description": "updated", "authorization": ""},
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["authorization"] is None
+    assert update_resp.json()["authorization_masked"] == "****"
+
+    async def fake_invoke_endpoint(row_data, target_config):
+        assert target_config["authorization"] == "Bearer xxx"
+        return {
+            "status_code": 200,
+            "latency_ms": 1,
+            "request_body": {"question": row_data["user_input"]},
+            "raw_response": '{"data":{"answer":"ok"}}',
+            "parsed_response": {"data": {"answer": "ok"}},
+        }
+
+    monkeypatch.setattr("app.api.endpoint_target.invoke_endpoint", fake_invoke_endpoint)
+    test_resp = client.post(
+        f"/api/endpoint-targets/{target_resp.json()['id']}/test",
+        json={"row_data": {"user_input": "hello"}},
+    )
+    assert test_resp.status_code == 200
+    assert test_resp.json()["success"] is True
+
+
+def test_evaluation_endpoint_draft_test_uses_saved_authorization(client, monkeypatch):
+    target_resp = client.post(
+        "/api/endpoint-targets",
+        json={
+            "name": "Private API",
+            "endpoint_url": "https://example.com/chat",
+            "transport_mode": "json",
+            "authorization": "Bearer xxx",
+            "extra_headers": "{}",
+            "request_body_template": '{"question":"{{user_input}}"}',
+            "response_mapping": {"response_path": "data.answer"},
+        },
+    )
+    assert target_resp.status_code == 201
+
+    async def fake_invoke_endpoint(row_data, target_config):
+        assert target_config["authorization"] == "Bearer xxx"
+        return {
+            "status_code": 200,
+            "latency_ms": 1,
+            "request_body": {"question": row_data["user_input"]},
+            "raw_response": '{"data":{"answer":"ok"}}',
+            "parsed_response": {"data": {"answer": "ok"}},
+        }
+
+    monkeypatch.setattr("app.core.endpoint_eval.invoke_endpoint", fake_invoke_endpoint)
+    resp = client.post(
+        "/api/evaluations/test-endpoint",
+        json={
+            "endpoint_target_id": target_resp.json()["id"],
+            "target_config": {
+                "endpoint_url": "https://example.com/chat",
+                "transport_mode": "json",
+                "authorization": "",
+                "request_body_template": '{"question":"{{user_input}}"}',
+            },
+            "response_mapping": {"response_path": "data.answer"},
+            "row_data": {"user_input": "hello"},
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert resp.json()["extracted_fields"]["response"] == "ok"
 
 
 def test_endpoint_evaluation_merges_extracted_fields_without_writeback(

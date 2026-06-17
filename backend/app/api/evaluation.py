@@ -66,6 +66,33 @@ def _snapshot_endpoint_config(payload: EvalTaskCreate, db: Session) -> tuple[dic
     return target_config, target.response_mapping or {}
 
 
+def _resolve_endpoint_test_config(
+    payload: EndpointEvalTargetTestRequest,
+    db: Session,
+) -> tuple[dict, dict]:
+    target_config = dict(payload.target_config or {})
+    response_mapping = dict(payload.response_mapping or {})
+    if not payload.endpoint_target_id:
+        return target_config, response_mapping
+
+    target = db.query(EndpointTarget).filter(EndpointTarget.id == payload.endpoint_target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Endpoint target not found")
+
+    stored_config = {
+        "endpoint_url": target.endpoint_url,
+        "transport_mode": target.transport_mode or "json",
+        "authorization": target.authorization or "",
+        "extra_headers": target.extra_headers or "{}",
+        "request_body_template": target.request_body_template or "",
+    }
+    stored_config.update({key: value for key, value in target_config.items() if value is not None})
+    if not str(target_config.get("authorization") or "").strip():
+        stored_config["authorization"] = target.authorization or ""
+
+    return stored_config, response_mapping or target.response_mapping or {}
+
+
 @router.get("", response_model=List[EvalTaskResponse])
 def list_evaluations(db: Session = Depends(get_db)):
     return db.query(EvalTask).order_by(EvalTask.created_at.desc()).all()
@@ -127,14 +154,18 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
 
 
 @router.post("/test-endpoint", response_model=EndpointEvalTargetTestResponse)
-async def test_endpoint_eval_target(payload: EndpointEvalTargetTestRequest):
+async def test_endpoint_eval_target(
+    payload: EndpointEvalTargetTestRequest,
+    db: Session = Depends(get_db),
+):
     from app.core.endpoint_eval import extract_eval_fields, invoke_endpoint
 
     try:
-        response_payload = await invoke_endpoint(payload.row_data or {}, payload.target_config or {})
+        target_config, response_mapping = _resolve_endpoint_test_config(payload, db)
+        response_payload = await invoke_endpoint(payload.row_data or {}, target_config)
         extracted_fields, mapping_errors = extract_eval_fields(
             response_payload,
-            payload.response_mapping or {},
+            response_mapping,
         )
         return EndpointEvalTargetTestResponse(
             success=True,
