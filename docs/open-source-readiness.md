@@ -26,7 +26,7 @@
 - [ ] 检查 `README.md` 的模型供应商说明是否符合你的公开定位。
 - [ ] 确认所有示例域名、Authorization、Headers 都是占位值或公开测试值。
 - [ ] 运行后端测试和前端构建。
-- [ ] 创建首个 release tag，例如 `v0.1.0`。
+- [x] 创建首个 release tag，例如 `v0.1.0`。
 
 ## Recommended Repository Files / 推荐开源文件
 
@@ -36,6 +36,7 @@
 - `LICENSE`: 开源许可证。
 - `SECURITY.md`: 安全披露说明。
 - `CONTRIBUTING.md`: 贡献指南。
+- `CHANGELOG.md`: 版本发布记录。
 - `.env.example`: 环境变量样例。
 - `.gitignore`: 忽略本地密钥、数据库、上传文件和构建产物。
 - `docs/database-and-storage.md`: 存储架构建议。

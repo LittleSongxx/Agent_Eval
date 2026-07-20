@@ -5,6 +5,7 @@
 面向 RAG、AI Agent、多轮对话、LLM-as-a-Judge、接口评测、评测报告和人工盲测的自托管 AI 应用评测工作台。
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/huangyiminghappy/ai-eval-platform?include_prereleases&label=release)](https://github.com/huangyiminghappy/ai-eval-platform/releases)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](backend)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb.svg)](frontend)
 [![LLM](https://img.shields.io/badge/LLM-OpenAI--compatible-black.svg)](#配置项)
@@ -218,6 +219,16 @@ http://localhost:5173
 6. 结合人工复核或盲测结果做上线决策
 ```
 
+## 路线图
+
+首个公开版本聚焦完整的本地评测工作流。后续会继续补齐部署、运维、协作和扩展能力，让项目更适合团队长期使用。
+
+- v0.2：补充 Docker Compose 快速启动、GitHub Actions CI 和发布检查自动化。
+- v0.3：引入 Alembic migration，完善 PostgreSQL 部署指南，并为大规模评测数据补充索引。
+- v0.4：增加登录认证、RBAC、审计日志和敏感字段加密存储。
+- v0.5：补充更多内置场景模板、导入导出示例和 benchmark 数据集。
+- 后续：提供 SDK/CLI 集成、可插拔 Judge Provider、可观测性集成和公开 Demo 素材。
+
 ## 文档
 
 - [使用指南](docs/usage-guide.md)
@@ -225,6 +236,7 @@ http://localhost:5173
 - [开源发布检查清单](docs/open-source-readiness.md)
 - [数据库与存储选型](docs/database-and-storage.md)
 - [同类项目对比](docs/comparison.md)
+- [版本日志](CHANGELOG.zh-CN.md)
 
 ## 配置项
 

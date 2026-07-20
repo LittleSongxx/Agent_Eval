@@ -5,6 +5,7 @@
 Self-hosted AI evaluation workbench for RAG, AI Agents, multi-turn conversations, LLM-as-a-Judge, endpoint evaluation, reports, and human blind testing.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/huangyiminghappy/ai-eval-platform?include_prereleases&label=release)](https://github.com/huangyiminghappy/ai-eval-platform/releases)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](backend)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb.svg)](frontend)
 [![LLM](https://img.shields.io/badge/LLM-OpenAI--compatible-black.svg)](#configuration)
@@ -218,6 +219,16 @@ http://localhost:5173
 6. Use manual review or blind test results for release decisions
 ```
 
+## Roadmap
+
+The first public release focuses on a complete local evaluation workflow. Upcoming work will make the project easier to deploy, operate, and extend in team environments.
+
+- v0.2: Docker Compose quick start, GitHub Actions CI, and release checklist automation.
+- v0.3: Alembic migrations, richer PostgreSQL deployment guidance, and indexes for larger evaluation datasets.
+- v0.4: Authentication, RBAC, audit logs, and encrypted storage for sensitive fields.
+- v0.5: More built-in scenario templates, import/export examples, and benchmark datasets.
+- Later: SDK/CLI integration, pluggable judge providers, observability integration, and public demo assets.
+
 ## Documentation
 
 - [Usage Guide](docs/usage-guide.md)
@@ -225,6 +236,7 @@ http://localhost:5173
 - [Open Source Readiness](docs/open-source-readiness.md)
 - [Database and Storage](docs/database-and-storage.md)
 - [Comparison](docs/comparison.md)
+- [Changelog](CHANGELOG.md)
 
 ## Configuration
 
