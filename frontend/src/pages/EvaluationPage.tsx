@@ -119,6 +119,23 @@ const validateJsonText = (_: unknown, value?: string) => {
   }
 };
 
+/** 将 WS 推送的日志尾段合并进已有日志：按公共后缀去重，避免重复行 */
+const mergeLogTail = (prev: string, tail: string) => {
+  if (!tail) return prev;
+  if (!prev) return tail;
+  const prevLines = prev.split('\n');
+  const tailLines = tail.split('\n');
+  let overlap = 0;
+  for (let i = 1; i <= Math.min(prevLines.length, tailLines.length); i++) {
+    const p = prevLines[prevLines.length - i];
+    const t = tailLines[tailLines.length - i];
+    if (p !== '' && p === t) overlap = i;
+    else break;
+  }
+  const newLines = tailLines.slice(0, tailLines.length - overlap);
+  return newLines.length ? `${prev}\n${newLines.join('\n')}` : prev;
+};
+
 const EvaluationPage: React.FC = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<EvalTask[]>([]);
@@ -138,6 +155,8 @@ const EvaluationPage: React.FC = () => {
   const [debugResult, setDebugResult] = useState<any>(null);
   const [debugModalOpen, setDebugModalOpen] = useState(false);
   const consoleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const consoleBoxRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -209,14 +228,68 @@ const EvaluationPage: React.FC = () => {
   const closeConsole = () => {
     setConsoleTaskId(null);
     setConsoleLogs('');
-    if (consoleTimerRef.current) {
-      clearInterval(consoleTimerRef.current);
-      consoleTimerRef.current = null;
-    }
+    closeConsoleWs();
   };
 
+  const closeConsoleWs = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setWsConnected(false);
+  }, []);
+
+  // WebSocket 实时进度：任务日志与状态由服务端推送，断开后自动回退轮询
   useEffect(() => {
     if (consoleTaskId === null) return;
+    let disposed = false;
+
+    const connectWs = () => {
+      const ws = new WebSocket(api.evaluationWsUrl(consoleTaskId));
+      wsRef.current = ws;
+      ws.onopen = () => { if (!disposed) setWsConnected(true); };
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type !== 'task_progress' || disposed) return;
+          setConsoleLogs((prev) => mergeLogTail(prev, msg.log_tail || ''));
+          setConsoleStatus(msg.status || '');
+          setTasks((prev) => prev.map((t) =>
+            t.id === msg.task_id
+              ? {
+                  ...t,
+                  status: msg.status,
+                  progress: msg.progress,
+                  completed_rows: msg.completed_rows,
+                  total_rows: msg.total_rows,
+                }
+              : t
+          ));
+          if (!userScrolledUp.current && consoleBoxRef.current) {
+            setTimeout(() => {
+              const box = consoleBoxRef.current;
+              if (box) box.scrollTop = box.scrollHeight;
+            }, 100);
+          }
+        } catch { /* 忽略异常消息 */ }
+      };
+      ws.onclose = () => { if (!disposed) { setWsConnected(false); wsRef.current = null; } };
+      ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
+    };
+
+    connectWs();
+
+    return () => {
+      disposed = true;
+      closeConsoleWs();
+    };
+  }, [consoleTaskId, closeConsoleWs]);
+
+  // 轮询兜底：仅在 WebSocket 未连接时启动
+  useEffect(() => {
+    if (consoleTaskId === null || wsConnected) return;
 
     const pollLogs = async () => {
       try {
@@ -241,7 +314,7 @@ const EvaluationPage: React.FC = () => {
         consoleTimerRef.current = null;
       }
     };
-  }, [consoleTaskId]);
+  }, [consoleTaskId, wsConnected]);
 
   const handleCreate = async () => {
     try {
@@ -909,7 +982,7 @@ const EvaluationPage: React.FC = () => {
                 总计 {progressTask.total_rows || 0} 条，已完成 {progressTask.completed_rows || 0} 条
               </Text>
               {progressTask.status === 'running' && (
-                <Text type="secondary">每 1 秒自动刷新一次</Text>
+                <Text type="secondary">{wsConnected ? 'WebSocket 实时推送中' : '每 1 秒自动刷新一次（WS 断开降级）'}</Text>
               )}
             </Space>
             <Progress
@@ -1072,6 +1145,9 @@ const EvaluationPage: React.FC = () => {
               >
                 {statusLabelMap[consoleStatus] || consoleStatus}
               </Tag>
+              {wsConnected && (
+                <Tag color="cyan" style={{ fontSize: 11 }}>实时推送</Tag>
+              )}
             </Space>
             <Button
               type="text"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import typing as t
@@ -83,7 +84,17 @@ def build_headers(target_config: dict[str, t.Any]) -> dict[str, str]:
     return headers
 
 
-async def invoke_endpoint(row_data: dict[str, t.Any], target_config: dict[str, t.Any]) -> dict[str, t.Any]:
+async def invoke_endpoint(
+    row_data: dict[str, t.Any],
+    target_config: dict[str, t.Any],
+    max_retries: int = 3,
+) -> dict[str, t.Any]:
+    """
+    Call the endpoint under test with bounded retries.
+
+    网络抖动、5xx 或限流时按 0.5s/1s 退避重试（max_retries 为总尝试次数，
+    与盲测侧行为对齐）；配置类错误（URL 为空、模板非法）快速失败，不重试。
+    """
     url = str(target_config.get("endpoint_url") or "").strip()
     if not url:
         raise ValueError("被测接口地址为空")
@@ -92,18 +103,31 @@ async def invoke_endpoint(row_data: dict[str, t.Any], target_config: dict[str, t
     timeout = float(target_config.get("timeout_seconds") or 180)
     request_body = build_request_body(row_data, str(target_config.get("request_body_template") or ""))
     headers = build_headers(target_config)
-    started_at = time.time()
     limits = httpx.Limits(max_keepalive_connections=0, max_connections=10)
 
-    async with httpx.AsyncClient(timeout=timeout, limits=limits, http2=False) as client:
-        if transport_mode == "sse":
-            response_payload = await _invoke_sse(client, url, headers, request_body)
-        else:
-            response_payload = await _invoke_json(client, url, headers, request_body)
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        started_at = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=timeout, limits=limits, http2=False) as client:
+                if transport_mode == "sse":
+                    response_payload = await _invoke_sse(client, url, headers, request_body)
+                else:
+                    response_payload = await _invoke_json(client, url, headers, request_body)
+            response_payload["latency_ms"] = int((time.time() - started_at) * 1000)
+            response_payload["request_body"] = request_body
+            return response_payload
+        except ValueError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_retries:
+                raise
+            await asyncio.sleep(min(0.5 * attempt, 2.0))
 
-    response_payload["latency_ms"] = int((time.time() - started_at) * 1000)
-    response_payload["request_body"] = request_body
-    return response_payload
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("接口调用失败")
 
 
 def extract_eval_fields(

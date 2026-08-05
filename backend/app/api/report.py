@@ -149,6 +149,11 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
     pass_rate = (pass_count / total_count) if total_count > 0 else 0.0
 
     metric_summary = _normalize_metric_summary(task.summary_scores or {}, row_results)
+    # 平台级聚合结果（加权总分/成本/Judge 稳定性）从指标维度统计中剥离
+    weighted_total_score = metric_summary.pop("weighted_total_score", None)
+    cost = metric_summary.pop("cost", None)
+    judge_reliability = metric_summary.pop("judge_reliability", None)
+
     manual_review_summary = {
         "reviewed_count": sum(1 for r in row_results if r.manual_status is not None),
         "manual_pass_count": sum(1 for r in row_results if r.manual_status == "pass"),
@@ -156,6 +161,20 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
         "manual_needs_fix_count": sum(1 for r in row_results if r.manual_status == "needs_fix"),
         "manual_needs_review_count": sum(1 for r in row_results if r.manual_status == "needs_review"),
     }
+
+    # 自动 vs 人工一致性：仅统计已给出明确通过/驳回结论且自动评分无异常的行
+    comparable_reviews = [
+        r
+        for r in row_results
+        if r.manual_status in ("pass", "fail") and r.is_pass is not None and r.error is None
+    ]
+    agreed = sum(
+        1 for r in comparable_reviews if (r.manual_status == "pass") == (r.is_pass is True)
+    )
+    manual_auto_agreement_rate = (
+        round(agreed / len(comparable_reviews), 4) if comparable_reviews else None
+    )
+    manual_auto_disagreement_count = len(comparable_reviews) - agreed
 
     return ReportSummary(
         eval_task=EvalTaskResponse.model_validate(task),
@@ -166,6 +185,11 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
         pass_rate=round(pass_rate, 4),
         metric_summary=metric_summary,
         manual_review_summary=manual_review_summary,
+        weighted_total_score=weighted_total_score,
+        cost=cost,
+        judge_reliability=judge_reliability,
+        manual_auto_agreement_rate=manual_auto_agreement_rate,
+        manual_auto_disagreement_count=manual_auto_disagreement_count,
     )
 
 

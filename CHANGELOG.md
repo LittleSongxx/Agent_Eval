@@ -4,6 +4,19 @@ All notable changes to AI Evaluation Platform are documented in this file.
 
 This project follows semantic versioning where practical. The early releases are expected to evolve quickly while the public APIs and deployment workflow stabilize.
 
+## [Unreleased]
+
+### Added
+
+- **Weighted total score**: reports now include an overall score aggregated by scenario snapshot weights, giving experiments a single comparable number.
+- **Judge reliability quantification**: optional multi-sample judging (`EVAL_JUDGE_SAMPLES`); reports expose per-metric sampling std and low-confidence row counts.
+- **Cost tracking**: per-row judge token usage is recorded; reports show total tokens and an estimated cost (unit price configurable).
+- **Manual agreement**: reports show agreement between automatic scores and human review conclusions for cross-validation.
+- **WebSocket live progress**: evaluation logs and progress are pushed over WebSocket, with automatic polling fallback on disconnect.
+- **Stale task recovery & endpoint retries**: tasks left running after a restart are marked failed; endpoint calls retry with backoff.
+- Added evaluation dataset building guide (docs/eval-dataset-guide.md).
+- Added meta-evaluation guide (docs/meta-evaluation.md) with a RAGAS comparison script (scripts/compare_with_ragas.py) and real experiment records.
+
 ## [v0.1.0] - 2026-07-20
 
 ### Highlights
@@ -36,4 +49,4 @@ This project follows semantic versioning where practical. The early releases are
 - Alembic migrations are not included yet; the current version uses SQLAlchemy table creation for quick start.
 - Docker Compose and GitHub Actions CI are planned for a later release.
 
-[v0.1.0]: https://github.com/huangyiminghappy/ai-eval-platform/releases/tag/v0.1.0
+[v0.1.0]: #v010-2026-07-20

@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +19,43 @@ from app.schemas.evaluation import EvalDebugRequest, EvalDebugResponse, EvalTask
 from app.schemas.evaluation import EndpointEvalTargetTestRequest, EndpointEvalTargetTestResponse
 
 router = APIRouter(prefix="/evaluations", tags=["Evaluations"])
+
+EVAL_TASK_STALE_MINUTES = 30
+
+
+def recover_stale_eval_tasks(db: Session, older_than_minutes: int = EVAL_TASK_STALE_MINUTES) -> int:
+    """Mark tasks stuck in running/pending beyond a heartbeat window as failed.
+
+    Judge 调用超时或进程异常都会让任务停留在 running；与 RAG 生成任务的
+    陈旧回收机制对齐，避免任务永久悬挂。进程内存活的任务会通过心跳表
+    刷新时间戳，不会被误杀。
+    """
+    from app.core.evaluation_engine import task_heartbeats
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+    stale = (
+        db.query(EvalTask)
+        .filter(
+            EvalTask.status.in_(["pending", "running"]),
+            EvalTask.started_at.isnot(None),
+            EvalTask.started_at < cutoff,
+        )
+        .all()
+    )
+    recovered = 0
+    now = time.time()
+    for task in stale:
+        last_beat = task_heartbeats.get(task.id)
+        if last_beat is not None and (now - last_beat) < older_than_minutes * 60:
+            continue
+        task.status = "failed"
+        task.error_message = (
+            f"评测任务超过 {older_than_minutes} 分钟未完成，已自动标记为失败（可能为进程中断）"
+        )
+        task.finished_at = datetime.now(timezone.utc)
+        recovered += 1
+    db.commit()
+    return recovered
 
 
 def _launch_evaluation(task_id: int) -> None:
@@ -95,6 +133,7 @@ def _resolve_endpoint_test_config(
 
 @router.get("", response_model=List[EvalTaskResponse])
 def list_evaluations(db: Session = Depends(get_db)):
+    recover_stale_eval_tasks(db)
     return db.query(EvalTask).order_by(EvalTask.created_at.desc()).all()
 
 
@@ -354,6 +393,7 @@ async def debug_evaluation_flow(payload: EvalDebugRequest, db: Session = Depends
 
 @router.get("/{task_id}", response_model=EvalTaskResponse)
 def get_evaluation(task_id: int, db: Session = Depends(get_db)):
+    recover_stale_eval_tasks(db)
     task = db.query(EvalTask).filter(EvalTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Evaluation task not found")
@@ -362,6 +402,7 @@ def get_evaluation(task_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{task_id}/logs")
 def get_evaluation_logs(task_id: int, db: Session = Depends(get_db)):
+    recover_stale_eval_tasks(db)
     task = db.query(EvalTask).filter(EvalTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Evaluation task not found")

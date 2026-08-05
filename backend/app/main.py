@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -9,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import engine, Base, ensure_runtime_schema
+from app.core.ws_manager import manager
 
 
 def _configure_app_logging() -> None:
@@ -47,6 +49,9 @@ async def lifespan(application: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema()
 
+    # Bind the server event loop for cross-thread WebSocket progress push
+    manager.bind_loop(asyncio.get_running_loop())
+
     # Ensure upload directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
@@ -61,6 +66,7 @@ async def lifespan(application: FastAPI):
             db.close()
 
     _backfill_eval_task_scenario_snapshots()
+    _recover_interrupted_eval_tasks()
 
     yield
 
@@ -106,6 +112,34 @@ def _backfill_eval_task_scenario_snapshots() -> None:
         db.close()
 
 
+def _recover_interrupted_eval_tasks() -> int:
+    """Mark tasks left in pending/running by a previous process as failed.
+
+    评测任务由 daemon 线程执行，服务重启后这些线程随之消失；启动时统一
+    回收，避免任务永久悬挂在运行中状态。
+    """
+    from datetime import datetime, timezone
+
+    from app.core.database import SessionLocal
+    from app.models.evaluation import EvalTask
+
+    db = SessionLocal()
+    try:
+        tasks = (
+            db.query(EvalTask)
+            .filter(EvalTask.status.in_(["pending", "running"]))
+            .all()
+        )
+        for task in tasks:
+            task.status = "failed"
+            task.error_message = "服务重启导致评测任务中断，请重新创建评测任务"
+            task.finished_at = datetime.now(timezone.utc)
+        db.commit()
+        return len(tasks)
+    finally:
+        db.close()
+
+
 app = FastAPI(
     title="AI Evaluation Platform",
     description="Backend API for the AI Evaluation Platform",
@@ -132,6 +166,7 @@ from app.api.evaluation import router as evaluation_router
 from app.api.report import router as report_router
 from app.api.rag_dataset_job import router as rag_dataset_job_router
 from app.api.blind_test import router as blind_test_router
+from app.api.ws import router as ws_router
 
 app.include_router(llm_config_router, prefix="/api")
 app.include_router(dataset_router, prefix="/api")
@@ -142,6 +177,8 @@ app.include_router(evaluation_router, prefix="/api")
 app.include_router(report_router, prefix="/api")
 app.include_router(rag_dataset_job_router, prefix="/api")
 app.include_router(blind_test_router, prefix="/api")
+# WebSocket 路由走独立的 /ws 前缀（与 vite 代理 /ws 对齐）
+app.include_router(ws_router)
 
 # Static file serving for uploads
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

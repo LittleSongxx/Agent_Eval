@@ -105,6 +105,12 @@ export const getEvaluationLogs = (id: number) => api.get(`/evaluations/${id}/log
 export const cancelEvaluation = (id: number) => api.post(`/evaluations/${id}/cancel`);
 export const testEvaluationEndpoint = (data: any) => api.post('/evaluations/test-endpoint', data).then(r => r.data);
 
+// WebSocket 实时进度：走 vite /ws 代理到后端，断开时前端会回退到轮询
+export const evaluationWsUrl = (taskId: number) => {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${window.location.host}/ws/evaluations/${taskId}`;
+};
+
 // ======================== Report ========================
 
 export const listReports = (params?: any) =>

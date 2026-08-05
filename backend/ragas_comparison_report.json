@@ -1,0 +1,33 @@
+{
+  "rows": 25,
+  "metrics": {
+    "faithfulness": {
+      "platform_mean": 0.7120000000000002,
+      "ragas_mean": 0.7219047619047619,
+      "pearson": 0.5843,
+      "spearman": 0.6863,
+      "n": 25
+    },
+    "answer_relevancy": {
+      "platform_mean": 0.7,
+      "ragas_mean": 0.8001423143944733,
+      "pearson": 0.3505,
+      "spearman": 0.2916,
+      "n": 25
+    },
+    "context_precision": {
+      "platform_mean": 0.9520000000000001,
+      "ragas_mean": 0.9999999998999993,
+      "pearson": -0.0,
+      "spearman": NaN,
+      "n": 25
+    },
+    "context_recall": {
+      "platform_mean": 0.972,
+      "ragas_mean": 1.0,
+      "pearson": NaN,
+      "spearman": NaN,
+      "n": 25
+    }
+  }
+}

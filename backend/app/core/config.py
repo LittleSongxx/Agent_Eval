@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.01
     LLM_MAX_TOKENS: int = 1024
 
+    # Judge 可靠性：每行每指标的独立采样次数（>1 开启多采样，用标准差量化评分稳定性）
+    EVAL_JUDGE_SAMPLES: int = 1
+    # 行级采样标准差超过该阈值的样本标记为低置信度
+    JUDGE_STD_THRESHOLD: float = 0.1
+    # Judge 调用成本估算单价（元 / 1K tokens，按 DashScope qwen-plus 参考价）
+    LLM_INPUT_PRICE_PER_1K: float = 0.0008
+    LLM_OUTPUT_PRICE_PER_1K: float = 0.002
+
     model_config = SettingsConfigDict(
         env_file=(".env", "backend/.env"),
         env_file_encoding="utf-8",

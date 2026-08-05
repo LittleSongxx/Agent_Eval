@@ -12,10 +12,12 @@ import asyncio
 import json
 import logging
 import re
+import statistics
 import time
 import typing as t
 from datetime import datetime, timezone
 
+from app.core.config import settings
 from app.core.endpoint_eval import extract_eval_fields, invoke_endpoint
 from app.core.prompt_manager import (
     ASPECT_CRITIC_INSTRUCTION,
@@ -36,6 +38,13 @@ logger = logging.getLogger(__name__)
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 DEFAULT_SUMMARY_PASS_THRESHOLD = 0.7
+
+# 汇总统计里保留给平台级聚合结果的键，不会出现在指标维度统计中
+RESERVED_SUMMARY_KEYS = ("weighted_total_score", "cost", "judge_reliability")
+
+# 进程内任务心跳：daemon 工作线程在处理每一行/每个指标时刷新时间戳，
+# API 层据此判断任务是否仍存活，避免把长任务误判为陈旧任务
+task_heartbeats: dict[int, float] = {}
 _DECIMAL_SCORE_RANGE_RE = re.compile(
     r"(?:0\.\d+\s*(?:到|至|~|-)\s*(?:0\.\d+|1(?:\.0)?))|(?:0\s*(?:到|至|~|-)\s*1(?:\.0)?)"
 )
@@ -61,12 +70,30 @@ class OpenAIJudgeClient:
         self.max_tokens = min(int(llm_config.max_tokens or 1024), 1200)
         self.last_messages: list[dict[str, str]] | None = None
         self.last_raw_response: str | None = None
+        self.row_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self.client = AsyncOpenAI(
             base_url=llm_config.api_base_url,
             api_key=llm_config.api_key,
             timeout=180,
             max_retries=2,
         )
+
+    def reset_row_usage(self) -> None:
+        """Clear per-row token accounting (called before each metric evaluation)."""
+        self.row_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    def take_row_usage(self) -> dict[str, int]:
+        """Return the tokens consumed for the current row/metric and reset."""
+        usage = dict(self.row_usage)
+        self.reset_row_usage()
+        return usage
+
+    def _accumulate_usage(self, usage) -> None:
+        if usage is None:
+            return
+        self.row_usage["prompt_tokens"] += int(getattr(usage, "prompt_tokens", 0) or 0)
+        self.row_usage["completion_tokens"] += int(getattr(usage, "completion_tokens", 0) or 0)
+        self.row_usage["total_tokens"] += int(getattr(usage, "total_tokens", 0) or 0)
 
     async def judge_json(self, payload: dict[str, t.Any]) -> dict[str, t.Any]:
         user_prompt = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -98,6 +125,7 @@ class OpenAIJudgeClient:
                 max_tokens=self.max_tokens,
             )
 
+        self._accumulate_usage(getattr(response, "usage", None))
         content = response.choices[0].message.content or ""
         self.last_raw_response = content
         return _parse_json_object(content)
@@ -571,6 +599,84 @@ def diagnose_metric_prompt(
     return warnings
 
 
+def _is_llm_metric(metric_instance: t.Any) -> bool:
+    """LLM-based metrics can be sampled; deterministic metrics have zero variance."""
+    return isinstance(metric_instance, (NativeBuiltinLLMMetric, NativePromptMetric))
+
+
+async def _score_metric_with_sampling(
+    metric_instance: t.Any,
+    row_data: dict[str, t.Any],
+    judge: OpenAIJudgeClient,
+) -> tuple[_MetricResult, dict[str, t.Any]]:
+    """
+    Score one metric, optionally sampling the judge multiple times.
+
+    When ``EVAL_JUDGE_SAMPLES > 1``, the LLM judge is called N times for the
+    same row. Numeric scores are aggregated by mean and the sample standard
+    deviation is reported as a stability signal; discrete labels fall back to
+    majority voting. Deterministic metrics are always evaluated once.
+    """
+    if not _is_llm_metric(metric_instance) or int(settings.EVAL_JUDGE_SAMPLES) <= 1:
+        result = await metric_instance.ascore(row_data, judge)
+        return result, {}
+
+    sample_count = int(settings.EVAL_JUDGE_SAMPLES)
+    results: list[_MetricResult] = [
+        await metric_instance.ascore(row_data, judge) for _ in range(sample_count)
+    ]
+    stats: dict[str, t.Any] = {"sample_count": sample_count}
+
+    numeric = [
+        float(result.value) for result in results
+        if isinstance(result.value, (int, float)) and result.value is not None
+    ]
+    if len(numeric) == len(results) and numeric:
+        mean = sum(numeric) / len(numeric)
+        std = statistics.pstdev(numeric) if len(numeric) > 1 else 0.0
+        # 选择分数最接近均值的采样作为展示理由，保证 reason 与 score 口径一致
+        best = min(results, key=lambda result: abs(float(result.value) - mean))
+        stats["score_std"] = round(std, 4)
+        stats["sample_scores"] = [round(value, 4) for value in numeric]
+        return _MetricResult(mean, best.reason), stats
+
+    # 非数值标签（如 discrete）：取多数票
+    from collections import Counter
+
+    counter = Counter(str(result.value) for result in results)
+    majority_label, _ = counter.most_common(1)[0]
+    best = next(result for result in results if str(result.value) == majority_label)
+    stats["score_std"] = None
+    stats["sample_scores"] = [str(result.value) for result in results]
+    return _MetricResult(majority_label, best.reason), stats
+
+
+def _last_log_lines(logs: str, count: int = 8) -> str:
+    lines = [line for line in (logs or "").split("\n") if line.strip()]
+    return "\n".join(lines[-count:])
+
+
+def _broadcast_progress(task) -> None:
+    """Push task progress to WebSocket subscribers without blocking the runner."""
+    try:
+        from app.core.ws_manager import manager
+
+        manager.send_json(
+            task.id,
+            {
+                "type": "task_progress",
+                "task_id": task.id,
+                "status": task.status,
+                "progress": task.progress or 0,
+                "total_rows": task.total_rows or 0,
+                "completed_rows": task.completed_rows or 0,
+                "log_tail": _last_log_lines(task.logs or ""),
+            },
+        )
+    except Exception:
+        logger.debug("WS progress push failed for task %s", getattr(task, "id", None), exc_info=True)
+
+
 async def run_evaluation(task_id: int, session_factory) -> None:
     """
     Execute a full evaluation run for the given EvalTask.
@@ -645,6 +751,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         _log(task, f"指标数: {len(scenario_metrics)} 个")
         _log(task, f"进度: 0/{total_rows} (0%)")
         db.commit()
+        _broadcast_progress(task)
 
         _log(task, "正在构建原生评判 LLM 客户端...")
         db.commit()
@@ -675,6 +782,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         db.commit()
 
         all_row_scores: list[dict[str, t.Any]] = []
+        task_token_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         for idx, dataset_row in enumerate(dataset_rows):
             db.refresh(task)
@@ -683,6 +791,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 db.commit()
                 break
 
+            task_heartbeats[task_id] = time.time()
             row_start = time.time()
             base_row_data: dict = dict(dataset_row.data or {})
             row_data: dict = {**base_row_data, "_dataset_data": base_row_data}
@@ -756,13 +865,22 @@ async def run_evaluation(task_id: int, session_factory) -> None:
 
                 _log(task, f"  ▸ 评测指标 [{metric_name}]...")
                 db.commit()
+                task_heartbeats[task_id] = time.time()
+                judge_client.reset_row_usage()
                 try:
-                    result = await metric_instance.ascore(row_data, judge_client)
+                    result, judge_stats = await _score_metric_with_sampling(
+                        metric_instance, row_data, judge_client
+                    )
                     val = result.value
                     if isinstance(val, (int, float)):
                         val = round(float(val), 4)
                     reason = str(result.reason or "")[:800]
                     metric_scores[metric_name] = {"score": val, "reason": reason}
+                    if judge_stats:
+                        metric_scores[metric_name].update(judge_stats)
+                    usage = judge_client.take_row_usage()
+                    if usage.get("total_tokens", 0) > 0:
+                        metric_scores[metric_name]["judge_tokens"] = usage
                     if val is None:
                         _log(task, f"  ✗ [{metric_name}] 无法评分: {reason[:200]}")
                     else:
@@ -804,7 +922,17 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             )
             db.commit()
 
+            for entry in metric_scores.values():
+                if not isinstance(entry, dict):
+                    continue
+                row_usage = entry.get("judge_tokens")
+                if isinstance(row_usage, dict):
+                    task_token_usage["prompt_tokens"] += int(row_usage.get("prompt_tokens") or 0)
+                    task_token_usage["completion_tokens"] += int(row_usage.get("completion_tokens") or 0)
+                    task_token_usage["total_tokens"] += int(row_usage.get("total_tokens") or 0)
+
             all_row_scores.append(metric_scores)
+            _broadcast_progress(task)
             await asyncio.sleep(0)
 
         db.refresh(task)
@@ -812,10 +940,12 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             _log(task, "========== 评测已取消 ==========")
             task.finished_at = datetime.now(timezone.utc)
             db.commit()
+            _broadcast_progress(task)
         else:
             _log(task, "========== 计算汇总统计 ==========")
             db.commit()
             summary_scores = _compute_summary_scores(all_row_scores, metrics)
+            _attach_task_level_aggregates(summary_scores, task_token_usage)
             task.status = "completed"
             task.finished_at = datetime.now(timezone.utc)
             task.summary_scores = summary_scores
@@ -829,6 +959,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 _log(task, f"  {m_name}: 均值={mean}, 通过率={pr}")
             _log(task, "========== 评测完成 ==========")
             db.commit()
+            _broadcast_progress(task)
 
     except Exception as exc:
         logger.exception("Evaluation failed for task %d", task_id)
@@ -842,6 +973,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 _log(task, f"✗✗✗ 评测失败: {str(exc)[:500]}")
                 _log(task, "========== 评测异常终止 ==========")
                 db.commit()
+                _broadcast_progress(task)
         except Exception:
             logger.exception("Failed to persist error status for task %d", task_id)
     finally:
@@ -942,9 +1074,15 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
     {
         "faithfulness": {
             "mean": 0.85, "min": 0.6, "max": 1.0,
-            "pass_rate": 0.9, "count": 10, "error_count": 0
-        }
+            "pass_rate": 0.9, "count": 10, "error_count": 0,
+            "judge_std_mean": 0.02, "low_confidence_count": 1
+        },
+        "weighted_total_score": {"weighted_mean": 0.81, ...}
     }
+
+    ``weighted_total_score`` aggregates numeric metrics using the scenario
+    weights frozen in the task snapshot, so different experiments with the same
+    scenario remain comparable on a single headline number.
     """
     thresholds = {name: sm.pass_threshold for name, _, sm in metrics}
     summary: dict = {}
@@ -952,6 +1090,8 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
     for metric_name, _, _ in metrics:
         numeric_values: list[float] = []
         error_count = 0
+        std_values: list[float] = []
+        low_confidence_count = 0
 
         for row_scores in all_row_scores:
             raw = row_scores.get(metric_name)
@@ -968,6 +1108,13 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
                 )
             else:
                 numeric_values.append(float(score))
+
+            # 多采样场景下记录 judge 稳定性信号
+            row_std = raw.get("score_std") if isinstance(raw, dict) else None
+            if isinstance(row_std, (int, float)):
+                std_values.append(float(row_std))
+                if float(row_std) > settings.JUDGE_STD_THRESHOLD:
+                    low_confidence_count += 1
 
         if numeric_values:
             mean_val = sum(numeric_values) / len(numeric_values)
@@ -997,9 +1144,75 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
             ),
             "count": len(numeric_values),
             "error_count": error_count,
+            "judge_std_mean": (
+                round(sum(std_values) / len(std_values), 4) if std_values else None
+            ),
+            "low_confidence_count": low_confidence_count,
+        }
+
+    # 总体加权总分：仅统计有数值均值的指标，权重来自任务创建时冻结的场景快照
+    weighted_parts: list[tuple[str, float, float]] = []
+    for metric_name, _instance, scenario_metric in metrics:
+        info = summary.get(metric_name) or {}
+        if info.get("mean") is None:
+            continue
+        try:
+            weight = float(getattr(scenario_metric, "weight", None) or 0.0)
+        except (TypeError, ValueError):
+            weight = 0.0
+        if weight > 0:
+            weighted_parts.append((metric_name, float(info["mean"]), weight))
+
+    if weighted_parts:
+        weight_sum = sum(weight for _name, _mean, weight in weighted_parts)
+        weighted_mean = sum(mean * weight for _name, mean, weight in weighted_parts) / weight_sum
+        summary["weighted_total_score"] = {
+            "weighted_mean": round(weighted_mean, 4),
+            "metric_count": len(weighted_parts),
+            "weights": {name: weight for name, _mean, weight in weighted_parts},
         }
 
     return summary
+
+
+def _attach_task_level_aggregates(summary_scores: dict, token_usage: dict[str, int]) -> None:
+    """Attach task-level aggregates (cost, judge reliability) to the summary dict."""
+    if token_usage.get("total_tokens", 0) > 0:
+        prompt_tokens = int(token_usage.get("prompt_tokens") or 0)
+        completion_tokens = int(token_usage.get("completion_tokens") or 0)
+        estimated_cost = (
+            prompt_tokens / 1000 * settings.LLM_INPUT_PRICE_PER_1K
+            + completion_tokens / 1000 * settings.LLM_OUTPUT_PRICE_PER_1K
+        )
+        summary_scores["cost"] = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": int(token_usage.get("total_tokens") or 0),
+            "estimated_cost": round(estimated_cost, 6),
+            "currency": "CNY",
+            "pricing_per_1k": {
+                "input": settings.LLM_INPUT_PRICE_PER_1K,
+                "output": settings.LLM_OUTPUT_PRICE_PER_1K,
+            },
+        }
+
+    std_means = [
+        info.get("judge_std_mean")
+        for info in summary_scores.values()
+        if isinstance(info, dict) and info.get("judge_std_mean") is not None
+    ]
+    if std_means:
+        low_confidence = sum(
+            int(info.get("low_confidence_count") or 0)
+            for info in summary_scores.values()
+            if isinstance(info, dict)
+        )
+        summary_scores["judge_reliability"] = {
+            "sampled_metric_count": len(std_means),
+            "mean_std": round(sum(std_means) / len(std_means), 4),
+            "low_confidence_row_count": low_confidence,
+            "std_threshold": settings.JUDGE_STD_THRESHOLD,
+        }
 
 
 def _parse_json_object(content: str) -> dict[str, t.Any]:

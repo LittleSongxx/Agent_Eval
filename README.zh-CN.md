@@ -5,7 +5,6 @@
 面向 RAG、AI Agent、多轮对话、LLM-as-a-Judge、接口评测、评测报告和人工盲测的自托管 AI 应用评测工作台。
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/huangyiminghappy/ai-eval-platform?include_prereleases&label=release)](https://github.com/huangyiminghappy/ai-eval-platform/releases)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](backend)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb.svg)](frontend)
 [![LLM](https://img.shields.io/badge/LLM-OpenAI--compatible-black.svg)](#配置项)
@@ -86,6 +85,8 @@ AI Evaluation Platform 帮助团队把大模型应用评测做成可复用的工
 | 人工盲测 | 支持 LLM vs LLM、Endpoint vs Endpoint、LLM vs Endpoint 主观对比 |
 | 报告与复核 | 任务进度、汇总分、逐条评分理由、人工状态、报告对比 |
 | OpenAI 兼容 Judge | 默认 DashScope Qwen Plus，可替换为任意 OpenAI 兼容 Chat 模型 |
+| 加权总分与 Judge 稳定性 | 按场景快照权重聚合加权总分；支持多采样评分，报告量化采样标准差与低置信度样本 |
+| 评测成本统计 | 逐行记录 Judge token 用量，报告展示总用量与估算成本（单价可配置） |
 
 ## 核心场景
 
@@ -236,6 +237,8 @@ http://localhost:5173
 - [开源发布检查清单](docs/open-source-readiness.md)
 - [数据库与存储选型](docs/database-and-storage.md)
 - [同类项目对比](docs/comparison.md)
+- [评测数据集构建指南](docs/eval-dataset-guide.md)
+- [评测系统的元评价指南](docs/meta-evaluation.md)
 - [版本日志](CHANGELOG.zh-CN.md)
 
 ## 配置项
@@ -289,10 +292,6 @@ npm run build
 
 如果这个项目对你的 RAG、AI Agent、多轮对话评测或 AI Infra 工作有帮助，欢迎给项目一个 Star，也欢迎关注后续更新、提交 Issue、贡献 PR 或分享你的真实评测场景。
 
-作者长期从事一线互联网公司后端开发与架构工作，近几年持续关注并实践 AI Agent、AI Infra、LLM 应用评测和工程化落地。如果你也在做相关方向，欢迎交流想法、使用反馈和共建建议。
-
-- 微信：`huangyiminghappy`
-- 邮箱：`huangyiminghappy@gmail.com`
 
 ## License
 

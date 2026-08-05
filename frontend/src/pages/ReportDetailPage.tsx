@@ -388,7 +388,16 @@ const ReportDetailPage: React.FC = () => {
           const ms = record.metric_scores?.[metric];
           if (!ms) return <Text type="secondary">-</Text>;
           const { display, color } = formatScore(ms.score, metric);
-          return <Text style={{ color, fontWeight: 500 }}>{display}</Text>;
+          return (
+            <Space size={2}>
+              <Text style={{ color, fontWeight: 500 }}>{display}</Text>
+              {ms.score_std != null && (
+                <Text type="secondary" style={{ fontSize: 11 }} title={`${ms.sample_count ?? 1} 次采样标准差`}>
+                  ±{ms.score_std}
+                </Text>
+              )}
+            </Space>
+          );
         },
       })),
     })),
@@ -462,6 +471,66 @@ const ReportDetailPage: React.FC = () => {
                 />
               </Card>
             </Col>
+          </Row>
+        )}
+
+        {(summary.weighted_total_score || summary.cost || summary.judge_reliability || summary.manual_auto_agreement_rate != null) && (
+          <Row gutter={16} style={{ marginBottom: 24 }}>
+            {summary.weighted_total_score && (
+              <Col span={6}>
+                <Card>
+                  <Statistic
+                    title={<HelpTitle label="加权总分" tip="按任务创建时冻结的场景快照中的指标权重，聚合各指标均值。不同权重配置的实验也能在同一把尺子上对比。" />}
+                    value={summary.weighted_total_score.weighted_mean}
+                    precision={4}
+                    valueStyle={{ color: passRateColor(summary.weighted_total_score.weighted_mean) }}
+                  />
+                </Card>
+              </Col>
+            )}
+            {summary.cost && (
+              <Col span={6}>
+                <Card>
+                  <Statistic
+                    title={<HelpTitle label="Judge 成本估算" tip="本次评测 Judge 调用的 token 用量与估算成本（单价按配置，默认 DashScope qwen-plus 参考价）。" />}
+                    value={`${summary.cost.total_tokens ?? 0} tokens`}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    ≈ ¥{Number(summary.cost.estimated_cost || 0).toFixed(6)}
+                  </Text>
+                </Card>
+              </Col>
+            )}
+            {summary.judge_reliability && (
+              <Col span={6}>
+                <Card>
+                  <Statistic
+                    title={<HelpTitle label="Judge 稳定性" tip="多采样标准差均值：越低说明 Judge 评分越稳定；低置信度行数大于 0 时建议人工复核。" />}
+                    value={summary.judge_reliability.mean_std ?? '-'}
+                    precision={4}
+                    valueStyle={{ color: (summary.judge_reliability.mean_std ?? 1) > 0.1 ? '#faad14' : '#52c41a' }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    低置信度 {summary.judge_reliability.low_confidence_row_count ?? 0} 行
+                  </Text>
+                </Card>
+              </Col>
+            )}
+            {summary.manual_auto_agreement_rate != null && (
+              <Col span={6}>
+                <Card>
+                  <Statistic
+                    title={<HelpTitle label="人工一致性" tip="人工复核结论与自动评分一致的样本占比，用于交叉验证自动评测的可信度。" />}
+                    value={(summary.manual_auto_agreement_rate * 100).toFixed(1)}
+                    suffix="%"
+                    valueStyle={{ color: passRateColor(summary.manual_auto_agreement_rate) }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    分歧 {summary.manual_auto_disagreement_count ?? 0} 条
+                  </Text>
+                </Card>
+              </Col>
+            )}
           </Row>
         )}
 

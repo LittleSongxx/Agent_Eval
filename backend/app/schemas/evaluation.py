@@ -139,6 +139,13 @@ class ReportSummary(BaseModel):
     pass_rate: float
     metric_summary: Optional[Dict[str, Any]] = None
     manual_review_summary: Optional[Dict[str, int]] = None
+    # 平台级聚合结果（从 metric_summary 中剥离的保留键）
+    weighted_total_score: Optional[Dict[str, Any]] = None
+    cost: Optional[Dict[str, Any]] = None
+    judge_reliability: Optional[Dict[str, Any]] = None
+    # 人工复核与自动评分的一致性（自动+人工双通道交叉验证）
+    manual_auto_agreement_rate: Optional[float] = None
+    manual_auto_disagreement_count: int = 0
 
 
 class ReportRowsResponse(BaseModel):

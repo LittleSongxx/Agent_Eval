@@ -5,7 +5,6 @@
 Self-hosted AI evaluation workbench for RAG, AI Agents, multi-turn conversations, LLM-as-a-Judge, endpoint evaluation, reports, and human blind testing.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/huangyiminghappy/ai-eval-platform?include_prereleases&label=release)](https://github.com/huangyiminghappy/ai-eval-platform/releases)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](backend)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb.svg)](frontend)
 [![LLM](https://img.shields.io/badge/LLM-OpenAI--compatible-black.svg)](#configuration)
@@ -86,6 +85,8 @@ Compared with library-first tools such as Ragas, rag_eval, or dataset-focused to
 | Human blind testing | Compare LLM vs LLM, endpoint vs endpoint, or LLM vs endpoint outputs |
 | Reports and review | Task progress, summary score, row-level judge reasons, manual status, and report comparison |
 | OpenAI-compatible judge | Default Qwen Plus through DashScope compatible mode; replaceable with any compatible chat model |
+| Weighted total & judge stability | Weighted total score aggregated by scenario snapshot weights; optional multi-sample judging with per-metric std and low-confidence rows |
+| Evaluation cost tracking | Per-row judge token usage recorded, total tokens and estimated cost shown in reports (unit price configurable) |
 
 ## Core Scenarios
 
@@ -289,10 +290,6 @@ See [SECURITY.md](SECURITY.md) for disclosure guidance.
 
 If this project is useful for your RAG, AI Agent, multi-turn conversation evaluation, or AI infrastructure work, a Star would be greatly appreciated. You are also welcome to watch the repository, open issues, contribute pull requests, or share real evaluation use cases.
 
-The author has years of hands-on backend engineering and architecture experience in large-scale internet systems, and has recently been working in AI Agent, AI infrastructure, LLM application evaluation, and production-oriented AI engineering. Feel free to reach out for technical discussions, feedback, or collaboration.
-
-- WeChat: `huangyiminghappy`
-- Email: `huangyiminghappy@gmail.com`
 
 ## License
 

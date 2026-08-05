@@ -1,3 +1,6 @@
+import pytest
+
+
 def _setup_eval_prerequisites(client, test_llm_payload):
     """Create LLM config, metric, scenario, and dataset with one row.
 
@@ -1412,3 +1415,354 @@ def test_prompt_renderer_keeps_json_braces_and_deduplicates_sample_fields():
     assert "response" not in sample
     assert sample["user_input"] == "问题"
     assert sample["reference"] == "标准答案"
+
+
+# ======================== 平台级聚合：加权总分 / 采样稳定性 / 成本 / 一致性 ========================
+
+
+def test_weighted_total_score_in_summary():
+    """加权总分应按场景快照冻结的权重聚合数值型指标均值。"""
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import _compute_summary_scores
+
+    metrics = [
+        ("faithfulness", object(), SimpleNamespace(pass_threshold=0.5, weight=1.0)),
+        ("answer_relevancy", object(), SimpleNamespace(pass_threshold=0.5, weight=3.0)),
+    ]
+    all_row_scores = [
+        {
+            "faithfulness": {"score": 0.8, "reason": "a"},
+            "answer_relevancy": {"score": 0.6, "reason": "b"},
+        },
+        {
+            "faithfulness": {"score": 1.0, "reason": "a"},
+            "answer_relevancy": {"score": 0.4, "reason": "b"},
+        },
+    ]
+    summary = _compute_summary_scores(all_row_scores, metrics)
+
+    assert summary["faithfulness"]["mean"] == 0.9
+    assert summary["answer_relevancy"]["mean"] == 0.5
+    weighted = summary["weighted_total_score"]
+    # (0.9 * 1 + 0.5 * 3) / (1 + 3) = 0.6
+    assert weighted["weighted_mean"] == pytest.approx(0.6)
+    assert weighted["weights"] == {"faithfulness": 1.0, "answer_relevancy": 3.0}
+    assert weighted["metric_count"] == 2
+
+
+def test_weighted_total_score_skips_metrics_without_numeric_mean():
+    """无数值均值（全部评分失败）的指标不应进入加权总分。"""
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import _compute_summary_scores
+
+    metrics = [
+        ("ok_metric", object(), SimpleNamespace(pass_threshold=0.5, weight=2.0)),
+        ("broken_metric", object(), SimpleNamespace(pass_threshold=0.5, weight=1.0)),
+    ]
+    all_row_scores = [
+        {"ok_metric": {"score": 1.0, "reason": "a"}, "broken_metric": {"score": None, "reason": "judge failed"}},
+        {"ok_metric": {"score": 0.8, "reason": "a"}, "broken_metric": {"score": None, "reason": "judge failed"}},
+    ]
+    summary = _compute_summary_scores(all_row_scores, metrics)
+
+    assert summary["broken_metric"]["mean"] is None
+    weighted = summary["weighted_total_score"]
+    assert weighted["weighted_mean"] == pytest.approx(0.9)
+    assert weighted["metric_count"] == 1
+
+
+def test_judge_multi_sampling_aggregates_mean_and_std():
+    """EVAL_JUDGE_SAMPLES > 1 时应对同一行多次采样，取均值并报告标准差。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.config import settings
+    from app.core.evaluation_engine import _score_metric_with_sampling, build_metric
+
+    class FakeJudge:
+        def __init__(self):
+            self.calls = 0
+
+        async def judge_json(self, payload):
+            self.calls += 1
+            scores = [0.8, 0.6, 0.7]
+            idx = (self.calls - 1) % len(scores)
+            return {"score": scores[idx], "reason": f"第 {self.calls} 次采样理由"}
+
+    metric_def = SimpleNamespace(
+        name="answer_relevancy",
+        display_name="回答相关性",
+        metric_type="builtin_answer_relevancy",
+        config={},
+    )
+    _kind, metric = build_metric(metric_def, llm=None)
+
+    original = settings.EVAL_JUDGE_SAMPLES
+    settings.EVAL_JUDGE_SAMPLES = 3
+    try:
+        result, stats = asyncio.run(
+            _score_metric_with_sampling(metric, {"user_input": "q", "response": "a"}, FakeJudge())
+        )
+    finally:
+        settings.EVAL_JUDGE_SAMPLES = original
+
+    assert stats["sample_count"] == 3
+    assert result.value == pytest.approx(0.7)  # mean(0.8, 0.6, 0.7)
+    assert stats["score_std"] == pytest.approx(0.0816, abs=1e-3)  # pstdev
+    assert len(stats["sample_scores"]) == 3
+
+
+def test_judge_multi_sampling_keeps_single_call_by_default():
+    """默认 EVAL_JUDGE_SAMPLES=1 时保持单次采样，不产生额外统计。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.config import settings
+    from app.core.evaluation_engine import _score_metric_with_sampling, build_metric
+
+    class FakeJudge:
+        def __init__(self):
+            self.calls = 0
+
+        async def judge_json(self, payload):
+            self.calls += 1
+            return {"score": 0.9, "reason": "单次采样"}
+
+    metric_def = SimpleNamespace(
+        name="answer_relevancy",
+        display_name="回答相关性",
+        metric_type="builtin_answer_relevancy",
+        config={},
+    )
+    _kind, metric = build_metric(metric_def, llm=None)
+
+    judge = FakeJudge()
+    original = settings.EVAL_JUDGE_SAMPLES
+    settings.EVAL_JUDGE_SAMPLES = 1
+    try:
+        result, stats = asyncio.run(
+            _score_metric_with_sampling(metric, {"user_input": "q", "response": "a"}, judge)
+        )
+    finally:
+        settings.EVAL_JUDGE_SAMPLES = original
+
+    assert judge.calls == 1
+    assert stats == {}
+    assert result.value == 0.9
+
+
+def test_judge_json_parse_recovers_embedded_object_and_coerce_float():
+    """Judge 返回带前后缀文本时仍能解析 JSON；字符串分数可提取数值。"""
+    from app.core.evaluation_engine import _coerce_float, _parse_json_object
+
+    parsed = _parse_json_object('好的，评分如下：{"score": 0.85, "reason": "回复完整"}。')
+    assert parsed["score"] == 0.85
+    assert parsed["reason"] == "回复完整"
+
+    assert _coerce_float("得分 0.82 分") == pytest.approx(0.82)
+    assert _coerce_float("pass") is None
+    assert _coerce_float(1) == 1.0
+
+    with pytest.raises(ValueError):
+        _parse_json_object("没有 JSON 的纯文本")
+
+
+def test_report_summary_exposes_platform_aggregates_and_manual_agreement(client, db, test_llm_payload):
+    """报告摘要应剥离平台级保留键并暴露加权总分/成本/Judge 稳定性/人工一致性。"""
+    from app.models.dataset import DatasetRow
+    from app.models.evaluation import EvalRowResult, EvalTask
+
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Aggregate Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    )
+    eval_id = resp.json()["id"]
+
+    dataset_row = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset["id"]).first()
+    task = db.query(EvalTask).filter(EvalTask.id == eval_id).first()
+    task.summary_scores = {
+        "test_metric": {"mean": 0.8, "pass_rate": 0.9, "count": 1},
+        "weighted_total_score": {"weighted_mean": 0.78, "metric_count": 1},
+        "cost": {"total_tokens": 1000, "estimated_cost": 0.003, "currency": "CNY"},
+        "judge_reliability": {"mean_std": 0.02, "low_confidence_row_count": 0},
+    }
+    db.add(
+        EvalRowResult(
+            eval_task_id=eval_id,
+            dataset_row_id=dataset_row.id,
+            row_index=1,
+            metric_scores={"test_metric": {"score": 0.8, "reason": "ok"}},
+            is_pass=True,
+            manual_status="pass",
+        )
+    )
+    db.commit()
+
+    summary = client.get(f"/api/reports/{eval_id}/summary").json()
+
+    assert summary["weighted_total_score"]["weighted_mean"] == 0.78
+    assert summary["cost"]["total_tokens"] == 1000
+    assert summary["judge_reliability"]["mean_std"] == 0.02
+    assert "weighted_total_score" not in summary["metric_summary"]
+    assert "cost" not in summary["metric_summary"]
+    assert summary["manual_auto_agreement_rate"] == 1.0
+    assert summary["manual_auto_disagreement_count"] == 0
+
+
+def test_manual_auto_disagreement_counted_in_summary(client, db, test_llm_payload):
+    """人工判定与自动判定不一致的行应被计入分歧数。"""
+    from app.models.dataset import DatasetRow
+    from app.models.evaluation import EvalRowResult, EvalTask
+
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Disagree Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    )
+    eval_id = resp.json()["id"]
+
+    dataset_row = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset["id"]).first()
+    db.add(
+        EvalRowResult(
+            eval_task_id=eval_id,
+            dataset_row_id=dataset_row.id,
+            row_index=1,
+            metric_scores={},
+            is_pass=True,
+            manual_status="fail",
+        )
+    )
+    db.commit()
+
+    summary = client.get(f"/api/reports/{eval_id}/summary").json()
+    assert summary["manual_auto_agreement_rate"] == 0.0
+    assert summary["manual_auto_disagreement_count"] == 1
+
+
+def test_recover_stale_eval_tasks_uses_heartbeat(db, test_llm_payload):
+    """陈旧回收应参考进程内心跳，避免误杀仍在运行的长任务。"""
+    import time as time_module
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.evaluation import recover_stale_eval_tasks
+    from app.core.evaluation_engine import task_heartbeats
+    from app.models.dataset import Dataset, DatasetRow
+    from app.models.evaluation import EvalTask
+    from app.models.llm_config import LLMConfig
+    from app.models.scenario import EvalScenario
+
+    dataset = Dataset(name="hb-ds", sample_type="single_turn", field_schema=[], row_count=1)
+    db.add(dataset)
+    db.commit()
+    db.refresh(dataset)
+    db.add(DatasetRow(dataset_id=dataset.id, row_index=1, data={"user_input": "q"}))
+    llm = LLMConfig(name="hb-llm", api_base_url="http://x", api_key="k", model_name="m")
+    db.add(llm)
+    scenario = EvalScenario(name="hb-sc", scene_type="rag", sample_type="single_turn")
+    db.add(scenario)
+    db.commit()
+    db.refresh(llm)
+    db.refresh(scenario)
+
+    task = EvalTask(
+        name="hb-task",
+        dataset_id=dataset.id,
+        scenario_id=scenario.id,
+        llm_config_id=llm.id,
+        status="running",
+        started_at=datetime.now(timezone.utc) - timedelta(minutes=60),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    try:
+        # 有心跳 → 不回收
+        task_heartbeats[task.id] = time_module.time()
+        assert recover_stale_eval_tasks(db) == 0
+        db.refresh(task)
+        assert task.status == "running"
+
+        # 心跳过期 → 回收
+        task_heartbeats.pop(task.id, None)
+        assert recover_stale_eval_tasks(db) == 1
+        db.refresh(task)
+        assert task.status == "failed"
+        assert "自动标记为失败" in task.error_message
+    finally:
+        task_heartbeats.clear()
+
+
+def test_invoke_endpoint_retries_transient_failures(monkeypatch):
+    """接口调用应针对 5xx/网络抖动做有限次退避重试。"""
+    import asyncio
+    import httpx
+
+    import app.core.endpoint_eval as endpoint_eval
+
+    calls = {"count": 0}
+
+    class _FakeResponse:
+        status_code = 200
+        text = '{"answer": "ok"}'
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"answer": "ok"}
+
+        def raise_for_status(self):
+            return None
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise httpx.HTTPStatusError(
+                    "boom",
+                    request=httpx.Request("POST", "http://example.com"),
+                    response=httpx.Response(500, request=httpx.Request("POST", "http://example.com")),
+                )
+            return _FakeResponse()
+
+    monkeypatch.setattr(endpoint_eval.httpx, "AsyncClient", _FakeClient)
+
+    result = asyncio.run(
+        endpoint_eval.invoke_endpoint(
+            {"user_input": "hi"},
+            {"endpoint_url": "http://example.com/chat", "transport_mode": "json"},
+        )
+    )
+    assert calls["count"] == 3
+    assert result["answer"] == "ok"
+
+
+def test_invoke_endpoint_fails_fast_on_config_error(monkeypatch):
+    """配置类错误（缺少 endpoint_url）不应触发重试。"""
+    import asyncio
+
+    import app.core.endpoint_eval as endpoint_eval
+
+    with pytest.raises(ValueError):
+        asyncio.run(endpoint_eval.invoke_endpoint({"user_input": "hi"}, {"transport_mode": "json"}))

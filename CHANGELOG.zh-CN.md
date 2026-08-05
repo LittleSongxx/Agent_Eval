@@ -4,6 +4,19 @@
 
 项目会尽量遵循语义化版本。早期版本会围绕公开 API、部署流程和团队协作能力快速演进。
 
+## [Unreleased]
+
+### 新增
+
+- **加权总分**：报告摘要新增按场景快照权重聚合的加权总分，跨实验对比有了统一标尺。
+- **Judge 可靠性量化**：支持对同一行样本多次采样评分（`EVAL_JUDGE_SAMPLES`），报告展示采样标准差与低置信度行数，用数据回答"LLM-as-Judge 打分稳不稳"。
+- **评测成本统计**：Judge 调用逐行记录 token 用量，报告展示总用量与估算成本（单价可配置）。
+- **人工一致性**：报告摘要展示自动评分与人工复核结论的一致性，支持自动 + 人工双通道交叉验证。
+- **WebSocket 实时进度**：评测日志与进度改为服务端推送，前端断线自动回退轮询。
+- **陈旧任务回收与重试**：进程重启后遗留的 running 任务自动标记失败；接口评测增加退避重试。
+- 新增评测数据集构建指南（docs/eval-dataset-guide.md）。
+- 新增评测系统元评价指南（docs/meta-evaluation.md，含与 RAGAS 对照实验脚本 scripts/compare_with_ragas.py 与真实运行数据）。
+
 ## [v0.1.0] - 2026-07-20
 
 ### 亮点
@@ -36,4 +49,4 @@
 - 暂未引入 Alembic migration；当前版本仍以 SQLAlchemy 自动建表支持快速启动。
 - Docker Compose 和 GitHub Actions CI 会在后续版本补充。
 
-[v0.1.0]: https://github.com/huangyiminghappy/ai-eval-platform/releases/tag/v0.1.0
+[v0.1.0]: #v010-2026-07-20

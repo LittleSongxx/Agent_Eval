@@ -132,7 +132,14 @@ export interface EvalRowResult {
   id: number;
   eval_task_id: number;
   row_index: number;
-  metric_scores: Record<string, { score: number | null; reason: string }>;
+  metric_scores: Record<string, {
+    score: number | null;
+    reason: string;
+    score_std?: number | null;
+    sample_count?: number;
+    sample_scores?: (number | string)[];
+    judge_tokens?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  }>;
   endpoint_trace?: Record<string, any> | null;
   is_pass: boolean | null;
   execution_time_ms: number | null;
@@ -155,6 +162,11 @@ export interface ReportSummary {
   pass_rate: number;
   metric_summary: Record<string, { mean: number; min: number; max: number; pass_rate: number }>;
   manual_review_summary?: Record<string, number>;
+  weighted_total_score?: { weighted_mean: number; metric_count: number; weights: Record<string, number> };
+  cost?: { prompt_tokens: number; completion_tokens: number; total_tokens: number; estimated_cost: number; currency: string };
+  judge_reliability?: { sampled_metric_count: number; mean_std: number; low_confidence_row_count: number; std_threshold: number };
+  manual_auto_agreement_rate?: number | null;
+  manual_auto_disagreement_count?: number;
 }
 
 export interface ReportListItem {
