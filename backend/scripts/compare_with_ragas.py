@@ -36,9 +36,16 @@ from types import SimpleNamespace
 
 logger = logging.getLogger("compare_with_ragas")
 
-COMPARABLE_METRICS = ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
-# answer_relevancy 需要 embedding 模型
-METRICS_REQUIRING_EMBEDDINGS = {"answer_relevancy"}
+COMPARABLE_METRICS = [
+    "faithfulness",
+    "faithfulness_claim",
+    "answer_relevancy",
+    "answer_relevancy_generative",
+    "context_precision",
+    "context_recall",
+]
+# answer_relevancy（RAGAS 侧）需要 embedding 模型；平台生成式指标同样依赖 embedding
+METRICS_REQUIRING_EMBEDDINGS = {"answer_relevancy", "answer_relevancy_generative"}
 
 
 def _install_ragas_shim() -> None:
@@ -141,9 +148,13 @@ async def _run_ragas_scores(
         print("未安装 ragas，跳过 RAGAS 对照（pip install ragas==0.3.7 langchain-openai）")
         return {}
 
+    # 平台指标 → RAGAS 指标的映射：断言级忠实度对标 RAGAS faithfulness（同为
+    # claim 级判定），生成式相关性对标 RAGAS answer_relevancy（同为生成式判定）
     ragas_metric_by_name = {
         "faithfulness": faithfulness,
+        "faithfulness_claim": faithfulness,
         "answer_relevancy": answer_relevancy,
+        "answer_relevancy_generative": answer_relevancy,
         "context_precision": context_precision,
         "context_recall": context_recall,
     }

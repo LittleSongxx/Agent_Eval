@@ -2069,3 +2069,40 @@ def test_report_kappa_and_calibration_suggestion(client, db, test_llm_payload):
     assert summary["manual_auto_agreement_rate"] == pytest.approx(0.8)
     assert summary["calibration_suggestion"] is not None
     assert "0.7" in summary["calibration_suggestion"]
+
+
+def test_build_metric_routes_dual_channel_metrics_to_dedicated_executors():
+    """双通道指标必须走专用执行器，而非被 spec 分支遮蔽成通用 Judge。"""
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import (
+        ClaimFaithfulnessMetric,
+        GenerativeAnswerRelevancyMetric,
+        build_metric,
+    )
+
+    claim_def = SimpleNamespace(
+        name="faithfulness_claim",
+        display_name="断言级忠实度",
+        metric_type="builtin_faithfulness_claim",
+        config={},
+        required_fields=[],
+        category="rag",
+        is_builtin=True,
+    )
+    kind, metric = build_metric(claim_def, llm=None)
+    assert kind == "llm"
+    assert isinstance(metric, ClaimFaithfulnessMetric)
+
+    gen_def = SimpleNamespace(
+        name="answer_relevancy_generative",
+        display_name="生成式相关性",
+        metric_type="builtin_answer_relevancy_generative",
+        config={},
+        required_fields=[],
+        category="rag",
+        is_builtin=True,
+    )
+    kind, metric = build_metric(gen_def, llm=None)
+    assert kind == "llm"
+    assert isinstance(metric, GenerativeAnswerRelevancyMetric)

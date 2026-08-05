@@ -649,6 +649,30 @@ def build_metric(
     metric_type: str = metric_def.metric_type
     config: dict = metric_def.config or {}
 
+    # 平台原生复合指标（多步结构化判定：断言拆解 / 生成式语义比较）优先于通用
+    # Judge 路径——它们的 spec 条目仅用于指标元数据，实际执行走专用执行器
+    if metric_type == "builtin_faithfulness_claim":
+        return (
+            "llm",
+            ClaimFaithfulnessMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_answer_relevancy_generative":
+        return (
+            "llm",
+            GenerativeAnswerRelevancyMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
     spec = NAMED_LLM_METRIC_SPECS.get(metric_def.name) or BUILTIN_LLM_METRIC_SPECS.get(metric_type)
     if spec:
         return (
@@ -676,28 +700,6 @@ def build_metric(
 
     if metric_type == "builtin_step_efficiency":
         return ("simple", StepEfficiencyMetric())
-
-    if metric_type == "builtin_faithfulness_claim":
-        return (
-            "llm",
-            ClaimFaithfulnessMetric(
-                metric_def,
-                prompt_override=prompt_override,
-                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
-                weight=getattr(scenario_metric, "weight", None),
-            ),
-        )
-
-    if metric_type == "builtin_answer_relevancy_generative":
-        return (
-            "llm",
-            GenerativeAnswerRelevancyMetric(
-                metric_def,
-                prompt_override=prompt_override,
-                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
-                weight=getattr(scenario_metric, "weight", None),
-            ),
-        )
 
     if metric_type in {"numeric", "discrete", "aspect_critic"}:
         return (
