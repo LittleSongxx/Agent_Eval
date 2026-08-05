@@ -387,7 +387,9 @@ class ClaimFaithfulnessMetric:
 
         claims = [str(item).strip() for item in (decomp.get("claims") or []) if str(item).strip()]
         if not claims:
-            return _MetricResult(1.0, "回答无可验证断言（或为空），按无捏造处理。")
+            # 无断言 = 回答未基于检索上下文给出任何可核验内容（如答非所问），
+            # 忠实性按 0 处理：回答没有扎根于上下文，与 RAGAS 行为一致
+            return _MetricResult(0.0, "回答未包含可核验断言（未基于检索上下文作答），忠实性按 0 处理。")
 
         contexts_text = "\n".join(contexts)
         supported = 0

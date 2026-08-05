@@ -2126,3 +2126,28 @@ def test_is_llm_metric_covers_dual_channel_metrics():
     )
     assert _is_llm_metric(claim) is True
     assert _is_llm_metric(generative) is True
+
+
+def test_claim_faithfulness_empty_claims_scores_zero():
+    """回答未包含可核验断言时（答非所问/未基于上下文），忠实性按 0 处理。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import ClaimFaithfulnessMetric
+
+    class EmptyDecompositionJudge:
+        api_base_url = "http://x"
+        api_key = "k"
+        model = "m"
+
+        async def chat_json(self, system_prompt, user_prompt):
+            return {"claims": []}
+
+    metric = ClaimFaithfulnessMetric(
+        SimpleNamespace(name="faithfulness_claim", display_name="x", metric_type="builtin_faithfulness_claim", config={})
+    )
+    result = asyncio.run(
+        metric.ascore({"response": "今天天气不错。", "retrieved_contexts": ["Python 列表是可变序列。"]}, EmptyDecompositionJudge())
+    )
+    assert result.value == 0.0
+    assert "未包含可核验断言" in result.reason
