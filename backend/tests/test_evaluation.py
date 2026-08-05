@@ -2106,3 +2106,23 @@ def test_build_metric_routes_dual_channel_metrics_to_dedicated_executors():
     kind, metric = build_metric(gen_def, llm=None)
     assert kind == "llm"
     assert isinstance(metric, GenerativeAnswerRelevancyMetric)
+
+
+def test_is_llm_metric_covers_dual_channel_metrics():
+    """双通道指标必须被识别为 LLM 指标（参与多裁判面板与换序互评）。"""
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import (
+        ClaimFaithfulnessMetric,
+        GenerativeAnswerRelevancyMetric,
+        _is_llm_metric,
+    )
+
+    claim = ClaimFaithfulnessMetric(
+        SimpleNamespace(name="faithfulness_claim", display_name="x", metric_type="builtin_faithfulness_claim", config={})
+    )
+    generative = GenerativeAnswerRelevancyMetric(
+        SimpleNamespace(name="answer_relevancy_generative", display_name="x", metric_type="builtin_answer_relevancy_generative", config={})
+    )
+    assert _is_llm_metric(claim) is True
+    assert _is_llm_metric(generative) is True

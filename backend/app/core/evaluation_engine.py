@@ -816,8 +816,16 @@ def diagnose_metric_prompt(
 
 
 def _is_llm_metric(metric_instance: t.Any) -> bool:
-    """LLM-based metrics can be sampled; deterministic metrics have zero variance."""
-    return isinstance(metric_instance, (NativeBuiltinLLMMetric, NativePromptMetric))
+    """LLM-based metrics can be sampled/paneled/swapped; deterministic metrics have zero variance."""
+    return isinstance(
+        metric_instance,
+        (
+            NativeBuiltinLLMMetric,
+            NativePromptMetric,
+            ClaimFaithfulnessMetric,
+            GenerativeAnswerRelevancyMetric,
+        ),
+    )
 
 
 async def _score_metric_with_sampling(

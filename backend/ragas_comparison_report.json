@@ -1,33 +1,47 @@
 {
-  "rows": 25,
+  "rows": 10,
   "metrics": {
     "faithfulness": {
-      "platform_mean": 0.7120000000000002,
-      "ragas_mean": 0.7219047619047619,
-      "pearson": 0.5843,
-      "spearman": 0.6863,
-      "n": 25
+      "platform_mean": 0.9099999999999999,
+      "ragas_mean": 0.95,
+      "pearson": 1.0,
+      "spearman": 1.0,
+      "n": 10
+    },
+    "faithfulness_claim": {
+      "platform_mean": 0.86667,
+      "ragas_mean": 0.95,
+      "pearson": 0.9456,
+      "spearman": 0.7454,
+      "n": 10
     },
     "answer_relevancy": {
-      "platform_mean": 0.7,
-      "ragas_mean": 0.8001423143944733,
-      "pearson": 0.3505,
-      "spearman": 0.2916,
-      "n": 25
+      "platform_mean": 0.9199999999999999,
+      "ragas_mean": 0.8987578341348277,
+      "pearson": 0.0813,
+      "spearman": 0.1741,
+      "n": 10
+    },
+    "answer_relevancy_generative": {
+      "platform_mean": 0.9502900000000001,
+      "ragas_mean": 0.8921345155752309,
+      "pearson": 0.4707,
+      "spearman": 0.1636,
+      "n": 10
     },
     "context_precision": {
-      "platform_mean": 0.9520000000000001,
-      "ragas_mean": 0.9999999998999993,
-      "pearson": -0.0,
+      "platform_mean": 1.0,
+      "ragas_mean": 0.9999999999,
+      "pearson": NaN,
       "spearman": NaN,
-      "n": 25
+      "n": 10
     },
     "context_recall": {
-      "platform_mean": 0.972,
+      "platform_mean": 1.0,
       "ragas_mean": 1.0,
       "pearson": NaN,
       "spearman": NaN,
-      "n": 25
+      "n": 10
     }
   }
 }
