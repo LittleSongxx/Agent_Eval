@@ -30,6 +30,7 @@ class DatasetResponse(BaseModel):
     sample_type: str
     field_schema: Optional[List[FieldDefinition]] = None
     row_count: int
+    version: Optional[int] = 1
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

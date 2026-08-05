@@ -167,6 +167,8 @@ export interface ReportSummary {
   judge_reliability?: { sampled_metric_count: number; mean_std: number; low_confidence_row_count: number; std_threshold: number };
   manual_auto_agreement_rate?: number | null;
   manual_auto_disagreement_count?: number;
+  manual_auto_kappa?: number | null;
+  calibration_suggestion?: string | null;
 }
 
 export interface ReportListItem {

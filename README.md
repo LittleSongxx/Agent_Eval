@@ -87,6 +87,11 @@ Compared with library-first tools such as Ragas, rag_eval, or dataset-focused to
 | OpenAI-compatible judge | Default Qwen Plus through DashScope compatible mode; replaceable with any compatible chat model |
 | Weighted total & judge stability | Weighted total score aggregated by scenario snapshot weights; optional multi-sample judging with per-metric std and low-confidence rows |
 | Evaluation cost tracking | Per-row judge token usage recorded, total tokens and estimated cost shown in reports (unit price configurable) |
+| Dual-channel metrics | Generative answer relevancy (reverse-question + semantic similarity) and claim-level faithfulness (atomic claim decomposition and verification), coexisting with holistic metrics for cross-validation |
+| Judge engineering | Optional forced CoT, position-swap consistency check, multi-judge panel aggregation (mean/majority + inter-judge MAD) |
+| Human calibration loop | Reports compute Cohen's kappa between manual and automatic scores, suggesting rubric revisions below 0.7 |
+| Dataset versioning | Version auto-increments on row changes and is frozen at task creation for traceability |
+| Dataset governance tools | Contamination check (n-gram + embedding similarity), retrieval noise injection experiment, zero-dependency Chinese BM25 mock retriever |
 
 ## Core Scenarios
 

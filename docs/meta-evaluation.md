@@ -113,6 +113,13 @@ EVAL_JUDGE_SAMPLES=5 python run.py   # 开启 5 次采样
 | 成本/延迟/失败率 | 报告 `cost` / `execution_time_ms` / `error_count` |
 | 回归稳定性 | 报告对比（baseline vs current） |
 | 盲测去偏 | 盲测 md5 随机化左右展示 |
+| 位置偏置检测 | `EVAL_SWAP_CHECK` 换序互评（反转列表字段复评，报告一致性） |
+| 评分者间一致性 | 多裁判面板（`judge_llm_config_ids`）+ 裁判间 MAD；报告 Cohen's kappa |
+| 人工校准闭环 | 报告 kappa < 0.7 自动提示修订判分标准 |
+| 检索侧区分度 | `scripts/retrieval_noise_experiment.py` 噪声注入 |
+| 检索链路演示 | `scripts/bm25_mock_retriever.py` 零依赖中文 BM25 |
+| 评测集防污染 | `scripts/check_dataset_contamination.py`（n-gram + embedding 双信号） |
+| 双通道交叉验证 | 生成式相关性 / 断言级忠实度 与整体判定指标并存 |
 
 ---
 

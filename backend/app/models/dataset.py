@@ -14,6 +14,8 @@ class Dataset(Base):
     sample_type = Column(String(50), default="single_turn")  # single_turn / multi_turn
     field_schema = Column(JSON, nullable=True)
     row_count = Column(Integer, default=0)
+    # 数据集版本：任何行级变更（增删改/导入）自增，评测任务创建时冻结版本号
+    version = Column(Integer, default=1, nullable=False)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

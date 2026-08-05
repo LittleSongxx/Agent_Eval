@@ -17,6 +17,12 @@ This project follows semantic versioning where practical. The early releases are
 - Added evaluation dataset building guide (docs/eval-dataset-guide.md).
 - Added meta-evaluation guide (docs/meta-evaluation.md) with a RAGAS comparison script (scripts/compare_with_ragas.py) and real experiment records.
 
+- Added dual-channel metrics: generative answer relevancy (reverse-question + semantic similarity) and claim-level faithfulness (atomic claim decomposition & verification).
+- Judge engineering: forced CoT (JUDGE_COT_MODE), position-swap consistency check (EVAL_SWAP_CHECK), multi-judge panel (judge_llm_config_ids) with mean/majority aggregation and inter-judge MAD.
+- Human calibration loop: reports compute Cohen's kappa and suggest rubric revisions below 0.7.
+- Dataset versioning: version auto-increments on row changes and is frozen at task creation.
+- Dataset governance tools: contamination check (n-gram + embedding), retrieval noise injection experiment, zero-dependency Chinese BM25 mock retriever (backend/scripts/).
+
 ## [v0.1.0] - 2026-07-20
 
 ### Highlights

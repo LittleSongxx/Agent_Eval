@@ -1766,3 +1766,306 @@ def test_invoke_endpoint_fails_fast_on_config_error(monkeypatch):
 
     with pytest.raises(ValueError):
         asyncio.run(endpoint_eval.invoke_endpoint({"user_input": "hi"}, {"transport_mode": "json"}))
+
+
+# ======================== 双通道指标 / 断言级忠实度 / 多裁判 / 换序 / kappa / 版本化 ========================
+
+
+def test_claim_faithfulness_metric_decomposes_and_verifies():
+    """断言级忠实度：拆解回答为原子断言，逐条核验上下文支持，按占比计分。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import ClaimFaithfulnessMetric
+
+    class FakeJudge:
+        api_base_url = "http://x"
+        api_key = "k"
+        model = "m"
+
+        async def chat_json(self, system_prompt, user_prompt):
+            if "拆解" in user_prompt:
+                return {"claims": ["元组是不可变的", "元组可以用 append 添加元素"]}
+            if "append" in user_prompt:
+                return {"verdict": "unsupported", "reason": "上下文只说明元组不可变"}
+            return {"verdict": "supported", "reason": "上下文明确支持"}
+
+    metric = ClaimFaithfulnessMetric(
+        SimpleNamespace(
+            name="faithfulness_claim",
+            display_name="断言级忠实度",
+            metric_type="builtin_faithfulness_claim",
+            config={},
+        )
+    )
+    result = asyncio.run(
+        metric.ascore(
+            {
+                "response": "元组是不可变的，可以用 append 修改。",
+                "retrieved_contexts": ["元组(tuple)是不可变序列，一旦创建就不能修改。"],
+            },
+            FakeJudge(),
+        )
+    )
+    assert result.value == 0.5  # 只有第一条断言被支持
+    assert "2 条断言" in result.reason
+
+
+def test_claim_faithfulness_missing_context_returns_none():
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import ClaimFaithfulnessMetric
+
+    metric = ClaimFaithfulnessMetric(
+        SimpleNamespace(
+            name="faithfulness_claim",
+            display_name="断言级忠实度",
+            metric_type="builtin_faithfulness_claim",
+            config={},
+        )
+    )
+    result = asyncio.run(metric.ascore({"response": "x"}, None))
+    assert result.value is None
+    assert "retrieved_contexts" in result.reason
+
+
+def test_generative_answer_relevancy_uses_embeddings(monkeypatch):
+    """生成式相关性：反推问题 + embedding 相似度，取最大相似度。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import GenerativeAnswerRelevancyMetric
+
+    class FakeJudge:
+        api_base_url = "http://x"
+        api_key = "k"
+        model = "m"
+
+        async def chat_json(self, system_prompt, user_prompt):
+            return {"questions": ["列表和元组有什么区别？", "元组可以修改吗？"]}
+
+    class FakeEmbeddingClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def embed_texts(self, texts):
+            vectors = []
+            for idx, _text in enumerate(texts):
+                vectors.append([1.0, 0.0, 0.0] if idx in (0, 1) else [0.5, 0.5, 0.0])
+            return vectors
+
+        @staticmethod
+        def cosine_similarity(a, b):
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(x * x for x in b) ** 0.5
+            return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
+    monkeypatch.setattr(
+        "app.core.evaluation_engine.OpenAICompatibleEmbeddingClient", FakeEmbeddingClient
+    )
+
+    metric = GenerativeAnswerRelevancyMetric(
+        SimpleNamespace(
+            name="answer_relevancy_generative",
+            display_name="生成式相关性",
+            metric_type="builtin_answer_relevancy_generative",
+            config={},
+        )
+    )
+    result = asyncio.run(
+        metric.ascore(
+            {"user_input": "列表和元组有什么区别？", "response": "列表可变，元组不可变。"},
+            FakeJudge(),
+        )
+    )
+    assert result.value == 1.0
+    assert "最大语义相似度" in result.reason
+
+
+def test_generative_answer_relevancy_noncommittal_scores_zero():
+    """反推问题全部为回避式时记 0 分（回答未正面回应问题）。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import GenerativeAnswerRelevancyMetric
+
+    class FakeJudge:
+        api_base_url = "http://x"
+        api_key = "k"
+        model = "m"
+
+        async def chat_json(self, system_prompt, user_prompt):
+            return {"questions": ["这个问题我不清楚", "不知道，无法回答"]}
+
+    metric = GenerativeAnswerRelevancyMetric(
+        SimpleNamespace(
+            name="answer_relevancy_generative",
+            display_name="生成式相关性",
+            metric_type="builtin_answer_relevancy_generative",
+            config={},
+        )
+    )
+    result = asyncio.run(
+        metric.ascore({"user_input": "q", "response": "敷衍回答"}, FakeJudge())
+    )
+    assert result.value == 0.0
+    assert "回避式" in result.reason
+
+
+def test_aggregate_judge_results_numeric_mean_and_discrete_majority():
+    """多裁判聚合：数值取均值 + 裁判间 MAD；离散标签取多数票。"""
+    from app.core.evaluation_engine import _MetricResult, _aggregate_judge_results
+
+    numeric = [
+        ("judge-a", _MetricResult(0.8, "r1"), {}),
+        ("judge-b", _MetricResult(0.6, "r2"), {}),
+        ("judge-c", _MetricResult(0.7, "r3"), {}),
+    ]
+    value, reason, stats = _aggregate_judge_results(numeric)
+    assert value == pytest.approx(0.7)
+    assert stats["judge_count"] == 3
+    assert stats["judge_mad"] == pytest.approx(0.0667, abs=1e-3)
+    assert stats["judge_scores"] == {"judge-a": 0.8, "judge-b": 0.6, "judge-c": 0.7}
+
+    discrete = [
+        ("judge-a", _MetricResult("pass", "r1"), {}),
+        ("judge-b", _MetricResult("fail", "r2"), {}),
+        ("judge-c", _MetricResult("pass", "r3"), {}),
+    ]
+    value, reason, stats = _aggregate_judge_results(discrete)
+    assert value == "pass"
+    assert stats["judge_mad"] is None
+
+    all_none = [("judge-a", _MetricResult(None, "x"), {}), ("judge-b", _MetricResult(None, "x"), {})]
+    value, reason, stats = _aggregate_judge_results(all_none)
+    assert value is None
+    assert "未返回有效分数" in reason
+
+
+def test_swap_row_data_reverses_list_fields():
+    """换序互评：仅反转列表字段，标量字段保持不变。"""
+    from app.core.evaluation_engine import _swap_row_data
+
+    swapped = _swap_row_data(
+        {"user_input": "q", "retrieved_contexts": ["a", "b"], "reference": "r"}
+    )
+    assert swapped["retrieved_contexts"] == ["b", "a"]
+    assert swapped["user_input"] == "q"
+    assert swapped["reference"] == "r"
+
+
+def test_swap_consistency_aggregated_in_summary():
+    """换序一致性在指标摘要中聚合，低于阈值的行计数。"""
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import _compute_summary_scores
+
+    metrics = [("m1", object(), SimpleNamespace(pass_threshold=None, weight=1.0))]
+    rows = [
+        {"m1": {"score": 0.8, "reason": "a", "swap_consistency": 0.95}},
+        {"m1": {"score": 0.6, "reason": "b", "swap_consistency": 0.85}},
+    ]
+    summary = _compute_summary_scores(rows, metrics)
+    assert summary["m1"]["swap_consistency_mean"] == pytest.approx(0.9)
+    assert summary["m1"]["swap_inconsistent_count"] == 1
+
+
+def test_dataset_version_bumps_on_row_operations(client):
+    """数据集行变更（增/删/导入）后版本自增。"""
+    ds = client.post(
+        "/api/datasets",
+        json={"name": "Version DS", "sample_type": "single_turn", "field_schema": []},
+    ).json()
+    assert ds["version"] == 1
+
+    client.post(f"/api/datasets/{ds['id']}/rows", json={"data": {"user_input": "q1"}})
+    assert client.get(f"/api/datasets/{ds['id']}").json()["version"] == 2
+
+    client.post(f"/api/datasets/{ds['id']}/rows", json={"data": {"user_input": "q2"}})
+    rows = client.get(f"/api/datasets/{ds['id']}/rows").json()["items"]
+    assert client.get(f"/api/datasets/{ds['id']}").json()["version"] == 3
+
+    client.delete(f"/api/datasets/{ds['id']}/rows/{rows[0]['id']}")
+    assert client.get(f"/api/datasets/{ds['id']}").json()["version"] == 4
+
+
+def test_eval_task_records_dataset_version_and_judge_panel(client, test_llm_payload):
+    """任务创建时冻结数据集版本与多裁判面板。"""
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    llm2 = client.post(
+        "/api/llm-configs", json={**test_llm_payload, "name": "Panel Judge 2"}
+    ).json()
+
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Panel Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "judge_llm_config_ids": [llm2["id"]],
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["judge_panel"] == [llm2["id"]]
+    assert body["dataset_version"] == 2  # 预置数据已加一行，版本自增到 2
+
+
+def test_eval_task_rejects_missing_panel_judge(client, test_llm_payload):
+    """面板裁判配置不存在时返回 404。"""
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Bad Panel",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+            "judge_llm_config_ids": [99999],
+        },
+    )
+    assert resp.status_code == 404
+
+
+def test_report_kappa_and_calibration_suggestion(client, db, test_llm_payload):
+    """报告计算人工 vs 自动二分类 Cohen's kappa，低 kappa 给出校准提示。"""
+    from app.models.dataset import DatasetRow
+    from app.models.evaluation import EvalRowResult, EvalTask
+
+    llm, dataset, scenario = _setup_eval_prerequisites(client, test_llm_payload)
+    resp = client.post(
+        "/api/evaluations",
+        json={
+            "name": "Kappa Eval",
+            "dataset_id": dataset["id"],
+            "scenario_id": scenario["id"],
+            "llm_config_id": llm["id"],
+        },
+    )
+    eval_id = resp.json()["id"]
+    dataset_row = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset["id"]).first()
+
+    # 10 条可比较复核：4 双通过 / 4 双失败 / 1 人工过自动挂 / 1 人工挂自动过
+    pattern = [("pass", True)] * 4 + [("fail", False)] * 4 + [("pass", False), ("fail", True)]
+    for idx, (manual, auto_pass) in enumerate(pattern):
+        db.add(
+            EvalRowResult(
+                eval_task_id=eval_id,
+                dataset_row_id=dataset_row.id,
+                row_index=idx,
+                metric_scores={},
+                is_pass=auto_pass,
+                manual_status=manual,
+            )
+        )
+    db.commit()
+
+    summary = client.get(f"/api/reports/{eval_id}/summary").json()
+    # a=4, b=1, c=1, d=4 → observed=0.8, expected=0.5, kappa=0.6
+    assert summary["manual_auto_kappa"] == pytest.approx(0.6, abs=1e-3)
+    assert summary["manual_auto_agreement_rate"] == pytest.approx(0.8)
+    assert summary["calibration_suggestion"] is not None
+    assert "0.7" in summary["calibration_suggestion"]

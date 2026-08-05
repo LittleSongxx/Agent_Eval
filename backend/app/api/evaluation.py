@@ -168,6 +168,14 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
     )
     dataset.row_count = actual_row_count
 
+    # 多裁判面板：校验附加裁判配置存在，任务创建时冻结面板
+    judge_panel: list[int] = []
+    for panel_config_id in list(payload.judge_llm_config_ids or []):
+        if not db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first():
+            raise HTTPException(status_code=404, detail=f"裁判 LLM 配置 {panel_config_id} 不存在")
+        if panel_config_id != payload.llm_config_id:
+            judge_panel.append(panel_config_id)
+
     task = EvalTask(
         name=payload.name,
         dataset_id=payload.dataset_id,
@@ -181,6 +189,8 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         target_config=target_config,
         response_mapping=response_mapping,
         result_save_mode=payload.result_save_mode,
+        judge_panel=judge_panel or None,
+        dataset_version=dataset.version,
     )
     db.add(task)
     db.commit()

@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     # Judge 调用成本估算单价（元 / 1K tokens，按 DashScope qwen-plus 参考价）
     LLM_INPUT_PRICE_PER_1K: float = 0.0008
     LLM_OUTPUT_PRICE_PER_1K: float = 0.002
+    # Judge 工程化：强制 Judge 先输出推理过程再给分数（提升一致性，成本略增）
+    JUDGE_COT_MODE: bool = False
+    # 换序互评：对 LLM 指标额外用打乱字段顺序的样本复评一次，报告一致性（防位置偏置）
+    EVAL_SWAP_CHECK: bool = False
+    # 生成式指标与污染检测共用的 embedding 模型（OpenAI 兼容 /embeddings）
+    LLM_EMBEDDING_MODEL: str = "text-embedding-v3"
+    # 生成式相关性指标的反推问题数量
+    GENERATIVE_RELEVANCY_STRICTNESS: int = 3
 
     model_config = SettingsConfigDict(
         env_file=(".env", "backend/.env"),

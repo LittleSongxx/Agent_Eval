@@ -44,6 +44,8 @@ def ensure_runtime_schema() -> None:
         "target_config": "ALTER TABLE eval_tasks ADD COLUMN target_config JSON",
         "response_mapping": "ALTER TABLE eval_tasks ADD COLUMN response_mapping JSON",
         "result_save_mode": "ALTER TABLE eval_tasks ADD COLUMN result_save_mode VARCHAR(50) DEFAULT 'task_only'",
+        "judge_panel": "ALTER TABLE eval_tasks ADD COLUMN judge_panel JSON",
+        "dataset_version": "ALTER TABLE eval_tasks ADD COLUMN dataset_version INTEGER",
     }
     missing_eval_task_sql = [
         sql for name, sql in eval_task_additions.items() if name not in eval_task_columns
@@ -52,6 +54,12 @@ def ensure_runtime_schema() -> None:
         with engine.begin() as connection:
             for sql in missing_eval_task_sql:
                 connection.execute(text(sql))
+
+    if "datasets" in table_names:
+        dataset_columns = {column["name"] for column in inspector.get_columns("datasets")}
+        if "version" not in dataset_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE datasets ADD COLUMN version INTEGER DEFAULT 1 NOT NULL"))
 
     if "rag_dataset_jobs" in table_names:
         rag_job_columns = {column["name"] for column in inspector.get_columns("rag_dataset_jobs")}

@@ -18,15 +18,22 @@ import typing as t
 from datetime import datetime, timezone
 
 from app.core.config import settings
+from app.core.embedding_client import OpenAICompatibleEmbeddingClient
 from app.core.endpoint_eval import extract_eval_fields, invoke_endpoint
 from app.core.prompt_manager import (
     ASPECT_CRITIC_INSTRUCTION,
     BUILTIN_LLM_METRIC_SPECS,
     BUILTIN_LLM_SCORE_INSTRUCTION,
+    CLAIM_DECOMPOSITION_PROMPT,
+    CLAIM_VERIFICATION_PROMPT,
     DISCRETE_SCORE_INSTRUCTION,
+    GENERATIVE_QUESTION_PROMPT,
     JUDGE_SYSTEM_PROMPT,
+    JUDGE_SYSTEM_PROMPT_COT,
     NAMED_LLM_METRIC_SPECS,
+    NONCOMMITTAL_QUESTION_MARKERS,
     NUMERIC_SCORE_INSTRUCTION,
+    STRUCTURED_JSON_SYSTEM_PROMPT,
     extract_prompt_variables,
     render_prompt,
     resolve_prompt_variable,
@@ -66,6 +73,8 @@ class OpenAIJudgeClient:
         from openai import AsyncOpenAI
 
         self.model = llm_config.model_name
+        self.api_base_url = llm_config.api_base_url
+        self.api_key = llm_config.api_key
         self.temperature = llm_config.temperature if llm_config.temperature is not None else 0.01
         self.max_tokens = min(int(llm_config.max_tokens or 1024), 1200)
         self.last_messages: list[dict[str, str]] | None = None
@@ -95,10 +104,44 @@ class OpenAIJudgeClient:
         self.row_usage["completion_tokens"] += int(getattr(usage, "completion_tokens", 0) or 0)
         self.row_usage["total_tokens"] += int(getattr(usage, "total_tokens", 0) or 0)
 
+    async def chat_json(self, system_prompt: str, user_prompt: str) -> dict[str, t.Any]:
+        """与 judge 判定解耦的结构化调用（断言拆解/核验、问题反推等中间步骤）。
+
+        复用同一 OpenAI 兼容客户端与 token 核算，但系统提示词由调用方指定，
+        不受 JUDGE_SYSTEM_PROMPT 的评分格式约束。
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        self.last_messages = messages
+        self.last_raw_response = None
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            logger.warning("chat_json JSON mode failed, retrying without response_format: %s", exc)
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+        self._accumulate_usage(getattr(response, "usage", None))
+        content = response.choices[0].message.content or ""
+        self.last_raw_response = content
+        return _parse_json_object(content)
+
     async def judge_json(self, payload: dict[str, t.Any]) -> dict[str, t.Any]:
         user_prompt = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        system_prompt = JUDGE_SYSTEM_PROMPT_COT if settings.JUDGE_COT_MODE else JUDGE_SYSTEM_PROMPT
         messages = [
-            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
         self.last_messages = messages
@@ -302,6 +345,155 @@ class NativePromptMetric:
         return _MetricResult(1.0 if score >= 0.5 else 0.0, reason)
 
 
+class ClaimFaithfulnessMetric:
+    """断言级忠实度：把回答拆成原子断言，逐条核验上下文支持，按支持占比计分。
+
+    与整体判定的 faithfulness 互为补充：整体判定看"是否大体忠实"，
+    断言级判定暴露"哪一句是编的"，是平台原生实现（不依赖第三方评测框架）。
+    """
+
+    def __init__(
+        self,
+        metric_def,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        self.required_fields = ["response", "retrieved_contexts"]
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+        response = str(row_data.get("response") or "")
+        contexts = list(row_data.get("retrieved_contexts") or [])
+        if not contexts:
+            return _MetricResult(None, "缺少 retrieved_contexts，无法核验断言。")
+
+        try:
+            decomp = await judge.chat_json(
+                STRUCTURED_JSON_SYSTEM_PROMPT,
+                CLAIM_DECOMPOSITION_PROMPT.format(response=response),
+            )
+        except Exception as exc:
+            return _MetricResult(None, f"断言拆解失败: {str(exc)[:200]}")
+
+        claims = [str(item).strip() for item in (decomp.get("claims") or []) if str(item).strip()]
+        if not claims:
+            return _MetricResult(1.0, "回答无可验证断言（或为空），按无捏造处理。")
+
+        contexts_text = "\n".join(contexts)
+        supported = 0
+        details: list[dict[str, t.Any]] = []
+        for claim in claims:
+            try:
+                verdict = await judge.chat_json(
+                    STRUCTURED_JSON_SYSTEM_PROMPT,
+                    CLAIM_VERIFICATION_PROMPT.format(contexts=contexts_text, claim=claim),
+                )
+                is_supported = str(verdict.get("verdict") or "").strip().lower() == "supported"
+                if is_supported:
+                    supported += 1
+                details.append(
+                    {
+                        "claim": claim,
+                        "supported": is_supported,
+                        "reason": str(verdict.get("reason") or "")[:200],
+                    }
+                )
+            except Exception as exc:
+                details.append({"claim": claim, "supported": False, "reason": f"核验失败: {str(exc)[:100]}"})
+
+        score = round(supported / len(claims), 4)
+        preview = "；".join(
+            f"{'✓' if item['supported'] else '✗'} {item['claim'][:24]}" for item in details[:6]
+        )
+        reason = (
+            f"共拆解 {len(claims)} 条断言，被检索上下文支持 {supported} 条"
+            f"（{round(score * 100)}%）。{preview}"
+        )
+        return _MetricResult(score, reason)
+
+
+class GenerativeAnswerRelevancyMetric:
+    """生成式相关性：从回答反推它可能回答的问题，与用户问题做语义相似度。
+
+    与整体判定的 answer_relevancy 互为补充：整体判定看"是否回应了问题"，
+    生成式判定看"语义贴合度"，两通道分歧大的样本即需人工复核的信号。
+    平台原生实现（反推 prompt + OpenAI 兼容 embedding），不依赖第三方框架。
+    """
+
+    def __init__(
+        self,
+        metric_def,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        self.required_fields = ["user_input", "response"]
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+        user_input = str(row_data.get("user_input") or "")
+        response = str(row_data.get("response") or "")
+        strictness = max(1, int(settings.GENERATIVE_RELEVANCY_STRICTNESS))
+
+        try:
+            gen = await judge.chat_json(
+                STRUCTURED_JSON_SYSTEM_PROMPT,
+                GENERATIVE_QUESTION_PROMPT.format(n=strictness, response=response),
+            )
+        except Exception as exc:
+            return _MetricResult(None, f"问题反推失败: {str(exc)[:200]}")
+
+        questions = [str(item).strip() for item in (gen.get("questions") or []) if str(item).strip()]
+        if not questions:
+            return _MetricResult(0.0, "反推问题为空，按相关性为 0 处理。")
+        noncommittal = sum(
+            1 for q in questions if any(marker in q for marker in NONCOMMITTAL_QUESTION_MARKERS)
+        )
+        if noncommittal == len(questions):
+            return _MetricResult(0.0, "反推问题全部为回避式，回答未正面回应问题。")
+
+        try:
+            embedding_client = OpenAICompatibleEmbeddingClient(
+                judge.api_base_url,
+                judge.api_key,
+                settings.LLM_EMBEDDING_MODEL,
+            )
+            vectors = await embedding_client.embed_texts([user_input] + questions)
+        except Exception as exc:
+            return _MetricResult(None, f"语义相似度计算失败: {str(exc)[:200]}")
+
+        user_vector = vectors[0]
+        similarities = [
+            OpenAICompatibleEmbeddingClient.cosine_similarity(user_vector, vector)
+            for vector in vectors[1:]
+        ]
+        score = max(similarities) if similarities else 0.0
+        reason = (
+            f"反推 {len(questions)} 个问题（回避式 {noncommittal} 个），"
+            f"与用户问题最大语义相似度 {round(score, 4)}。"
+        )
+        return _MetricResult(round(score, 4), reason)
+
+
 class RetrievalHitRateAtK:
     """Deterministic retrieval metric: whether any expected document id is in top-k."""
 
@@ -485,6 +677,28 @@ def build_metric(
     if metric_type == "builtin_step_efficiency":
         return ("simple", StepEfficiencyMetric())
 
+    if metric_type == "builtin_faithfulness_claim":
+        return (
+            "llm",
+            ClaimFaithfulnessMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_answer_relevancy_generative":
+        return (
+            "llm",
+            GenerativeAnswerRelevancyMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
     if metric_type in {"numeric", "discrete", "aspect_critic"}:
         return (
             "llm",
@@ -651,6 +865,58 @@ async def _score_metric_with_sampling(
     return _MetricResult(majority_label, best.reason), stats
 
 
+def _aggregate_judge_results(
+    results: list[tuple[str, _MetricResult, dict[str, t.Any]]],
+) -> tuple[t.Any, str, dict[str, t.Any]]:
+    """聚合多裁判评分：数值取均值（记录裁判间平均绝对偏差 MAD），离散标签取多数票。"""
+    values = [result.value for _name, result, _stats in results]
+    names = [name for name, _result, _stats in results]
+
+    if all(value is None for value in values):
+        return None, "所有裁判均未返回有效分数。", {
+            "judge_count": len(results),
+            "judge_scores": {name: None for name in names},
+            "judge_mad": None,
+        }
+
+    numeric = [float(value) for value in values if isinstance(value, (int, float)) and value is not None]
+    if len(numeric) == len(values) and numeric:
+        mean = sum(numeric) / len(numeric)
+        mad = sum(abs(value - mean) for value in numeric) / len(numeric)
+        best = min(results, key=lambda item: abs(float(item[1].value) - mean))
+        stats = {
+            "judge_count": len(results),
+            "judge_scores": {name: round(float(value), 4) for name, value in zip(names, values)},
+            "judge_mad": round(mad, 4),
+        }
+        return mean, best[1].reason, stats
+
+    from collections import Counter
+
+    counter = Counter(str(value) for value in values)
+    majority_label, _count = counter.most_common(1)[0]
+    best = next(item for item in results if str(item[1].value) == majority_label)
+    stats = {
+        "judge_count": len(results),
+        "judge_scores": {name: str(value) for name, value in zip(names, values)},
+        "judge_mad": None,
+    }
+    return majority_label, best[1].reason, stats
+
+
+def _swap_row_data(row_data: dict[str, t.Any]) -> dict[str, t.Any]:
+    """换序互评输入：反转列表字段（如 retrieved_contexts）顺序。
+
+    对顺序不敏感的指标（如忠实性），换序后分数应基本不变；分数明显波动
+    即提示 Judge 存在位置偏置，样本应标记为低置信度。
+    """
+    swapped = dict(row_data)
+    for key, value in row_data.items():
+        if isinstance(value, list):
+            swapped[key] = list(reversed(value))
+    return swapped
+
+
 def _last_log_lines(logs: str, count: int = 8) -> str:
     lines = [line for line in (logs or "").split("\n") if line.strip()]
     return "\n".join(lines[-count:])
@@ -687,6 +953,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
     """
     from app.models.dataset import DatasetRow
     from app.models.evaluation import EvalTask
+    from app.models.llm_config import LLMConfig
     from app.models.metric_definition import MetricDefinition
     from app.models.scenario import ScenarioMetric
 
@@ -758,6 +1025,25 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         judge_client = OpenAIJudgeClient(llm_config)
         _log(task, "✓ 评判 LLM 客户端构建成功")
         db.commit()
+
+        # 多裁判面板：附加裁判与主裁判独立打分，LLM 指标取均值/多数票，
+        # 并用裁判间平均绝对偏差量化"换一个模型还认不认这个分"
+        panel_judges: list[OpenAIJudgeClient] = []
+        panel_judge_names: list[str] = []
+        for panel_config_id in list(task.judge_panel or []):
+            panel_config = db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first()
+            if panel_config is None:
+                _log(task, f"⚠ 裁判配置 #{panel_config_id} 不存在，已跳过")
+                continue
+            try:
+                panel_judges.append(OpenAIJudgeClient(panel_config))
+                panel_judge_names.append(panel_config.name or f"judge-{panel_config_id}")
+                _log(task, f"✓ 附加裁判 [{panel_config.name}] ({panel_config.model_name}) 构建成功")
+            except Exception as exc:
+                _log(task, f"⚠ 裁判 [{panel_config.name}] 构建失败: {str(exc)[:200]}")
+        if panel_judges:
+            _log(task, f"多裁判面板就绪: 主裁判 {llm_config.model_name} + {len(panel_judges)} 个附加裁判")
+            db.commit()
 
         metrics: list[tuple[str, t.Any, ScenarioMetric]] = []
         for sm in scenario_metrics:
@@ -866,23 +1152,61 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                 _log(task, f"  ▸ 评测指标 [{metric_name}]...")
                 db.commit()
                 task_heartbeats[task_id] = time.time()
-                judge_client.reset_row_usage()
+
+                is_llm_metric = _is_llm_metric(metric_instance)
+                judges = [judge_client] + (panel_judges if is_llm_metric else [])
+                judge_names = [llm_config.model_name] + (panel_judge_names if is_llm_metric else [])
+                for jc in judges:
+                    jc.reset_row_usage()
+
+                metric_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                 try:
-                    result, judge_stats = await _score_metric_with_sampling(
-                        metric_instance, row_data, judge_client
-                    )
-                    val = result.value
-                    if isinstance(val, (int, float)):
-                        val = round(float(val), 4)
-                    reason = str(result.reason or "")[:800]
-                    metric_scores[metric_name] = {"score": val, "reason": reason}
-                    if judge_stats:
-                        metric_scores[metric_name].update(judge_stats)
-                    usage = judge_client.take_row_usage()
-                    if usage.get("total_tokens", 0) > 0:
-                        metric_scores[metric_name]["judge_tokens"] = usage
+                    if len(judges) == 1:
+                        result, judge_stats = await _score_metric_with_sampling(
+                            metric_instance, row_data, judge_client
+                        )
+                        val = result.value
+                        if isinstance(val, (int, float)):
+                            val = round(float(val), 4)
+                        reason = str(result.reason or "")[:800]
+                        metric_scores[metric_name] = {"score": val, "reason": reason}
+                        if judge_stats:
+                            metric_scores[metric_name].update(judge_stats)
+                    else:
+                        panel_results: list[tuple[str, _MetricResult, dict[str, t.Any]]] = []
+                        for jc, judge_name in zip(judges, judge_names):
+                            judge_result, judge_stats = await _score_metric_with_sampling(
+                                metric_instance, row_data, jc
+                            )
+                            panel_results.append((judge_name, judge_result, judge_stats))
+                        value, reason, panel_stats = _aggregate_judge_results(panel_results)
+                        val = round(float(value), 4) if isinstance(value, (int, float)) else value
+                        metric_scores[metric_name] = {"score": val, "reason": str(reason)[:800]}
+                        metric_scores[metric_name].update(panel_stats)
+
+                    for jc in judges:
+                        usage = jc.take_row_usage()
+                        metric_usage["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+                        metric_usage["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+                        metric_usage["total_tokens"] += int(usage.get("total_tokens") or 0)
+                    if metric_usage.get("total_tokens", 0) > 0:
+                        metric_scores[metric_name]["judge_tokens"] = metric_usage
+
+                    # 换序互评：反转列表字段后由主裁判复评，检测位置偏置
+                    if settings.EVAL_SWAP_CHECK and is_llm_metric:
+                        swap_result, _swap_stats = await _score_metric_with_sampling(
+                            metric_instance, _swap_row_data(row_data), judge_client
+                        )
+                        swap_val = swap_result.value
+                        if isinstance(val, (int, float)) and isinstance(swap_val, (int, float)):
+                            consistency = 1.0 - abs(float(val) - float(swap_val))
+                            metric_scores[metric_name]["swap_score"] = round(float(swap_val), 4)
+                            metric_scores[metric_name]["swap_consistency"] = round(
+                                max(0.0, min(1.0, consistency)), 4
+                            )
+
                     if val is None:
-                        _log(task, f"  ✗ [{metric_name}] 无法评分: {reason[:200]}")
+                        _log(task, f"  ✗ [{metric_name}] 无法评分: {str(reason)[:200]}")
                     else:
                         _log(task, f"  ✓ [{metric_name}] = {val}")
                 except Exception as exc:
@@ -1116,6 +1440,21 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
                 if float(row_std) > settings.JUDGE_STD_THRESHOLD:
                     low_confidence_count += 1
 
+        swap_consistencies: list[float] = []
+        swap_inconsistent_count = 0
+        judge_mads: list[float] = []
+        for row_scores in all_row_scores:
+            raw = row_scores.get(metric_name)
+            if isinstance(raw, dict):
+                swap_consistency = raw.get("swap_consistency")
+                if isinstance(swap_consistency, (int, float)):
+                    swap_consistencies.append(float(swap_consistency))
+                    if float(swap_consistency) < 0.9:
+                        swap_inconsistent_count += 1
+                judge_mad = raw.get("judge_mad")
+                if isinstance(judge_mad, (int, float)):
+                    judge_mads.append(float(judge_mad))
+
         if numeric_values:
             mean_val = sum(numeric_values) / len(numeric_values)
             min_val = min(numeric_values)
@@ -1148,6 +1487,15 @@ def _compute_summary_scores(all_row_scores: list[dict[str, t.Any]], metrics: lis
                 round(sum(std_values) / len(std_values), 4) if std_values else None
             ),
             "low_confidence_count": low_confidence_count,
+            "swap_consistency_mean": (
+                round(sum(swap_consistencies) / len(swap_consistencies), 4)
+                if swap_consistencies
+                else None
+            ),
+            "swap_inconsistent_count": swap_inconsistent_count,
+            "judge_mad_mean": (
+                round(sum(judge_mads) / len(judge_mads), 4) if judge_mads else None
+            ),
         }
 
     # 总体加权总分：仅统计有数值均值的指标，权重来自任务创建时冻结的场景快照
@@ -1201,18 +1549,52 @@ def _attach_task_level_aggregates(summary_scores: dict, token_usage: dict[str, i
         for info in summary_scores.values()
         if isinstance(info, dict) and info.get("judge_std_mean") is not None
     ]
+    swap_means = [
+        info.get("swap_consistency_mean")
+        for info in summary_scores.values()
+        if isinstance(info, dict) and info.get("swap_consistency_mean") is not None
+    ]
+    judge_mad_means = [
+        info.get("judge_mad_mean")
+        for info in summary_scores.values()
+        if isinstance(info, dict) and info.get("judge_mad_mean") is not None
+    ]
+    reliability: dict[str, t.Any] = {}
     if std_means:
         low_confidence = sum(
             int(info.get("low_confidence_count") or 0)
             for info in summary_scores.values()
             if isinstance(info, dict)
         )
-        summary_scores["judge_reliability"] = {
-            "sampled_metric_count": len(std_means),
-            "mean_std": round(sum(std_means) / len(std_means), 4),
-            "low_confidence_row_count": low_confidence,
-            "std_threshold": settings.JUDGE_STD_THRESHOLD,
-        }
+        reliability.update(
+            {
+                "sampled_metric_count": len(std_means),
+                "mean_std": round(sum(std_means) / len(std_means), 4),
+                "low_confidence_row_count": low_confidence,
+                "std_threshold": settings.JUDGE_STD_THRESHOLD,
+            }
+        )
+    if swap_means:
+        reliability.update(
+            {
+                "swap_metric_count": len(swap_means),
+                "mean_swap_consistency": round(sum(swap_means) / len(swap_means), 4),
+                "swap_inconsistent_rows": sum(
+                    int(info.get("swap_inconsistent_count") or 0)
+                    for info in summary_scores.values()
+                    if isinstance(info, dict)
+                ),
+            }
+        )
+    if judge_mad_means:
+        reliability.update(
+            {
+                "panel_metric_count": len(judge_mad_means),
+                "mean_judge_mad": round(sum(judge_mad_means) / len(judge_mad_means), 4),
+            }
+        )
+    if reliability:
+        summary_scores["judge_reliability"] = reliability
 
 
 def _parse_json_object(content: str) -> dict[str, t.Any]:

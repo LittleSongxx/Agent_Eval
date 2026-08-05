@@ -74,6 +74,11 @@ def _validate_row_data(data: Dict[str, Any], field_schema: list) -> List[str]:
     return errors
 
 
+def _bump_dataset_version(dataset: Dataset) -> None:
+    """数据集内容变更（增删改/导入）后版本自增，供评测任务追溯口径。"""
+    dataset.version = (dataset.version or 1) + 1
+
+
 def _normalize_record(record: Dict[str, Any], field_schema: list) -> Dict[str, Any]:
     normalized = dict(record or {})
     if field_schema:
@@ -264,6 +269,7 @@ def add_dataset_row(
     dataset.row_count = (
         db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).count() + 1
     )
+    _bump_dataset_version(dataset)
 
     db.commit()
     db.refresh(row)
@@ -292,6 +298,7 @@ def delete_dataset_row(
             .count()
             - 1
         )
+        _bump_dataset_version(dataset)
 
     db.commit()
     return None
@@ -352,6 +359,8 @@ def import_dataset_rows(
         db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).count()
         + len(normalized_records)
     )
+    if normalized_records:
+        _bump_dataset_version(dataset)
 
     db.commit()
 

@@ -22,6 +22,13 @@ JUDGE_SYSTEM_PROMPT = (
     "reason 必须指出具体支撑点或扣分点，不要写空泛结论。"
 )
 
+# 强制推理模式（JUDGE_COT_MODE=true 时启用）：先推理后打分，提升判定一致性
+JUDGE_SYSTEM_PROMPT_COT = (
+    JUDGE_SYSTEM_PROMPT
+    + "在给出分数前，先在 reason 中写出逐步推理过程：1) 依据哪些样本字段；"
+    "2) 逐条对照判定标准；3) 得出分数结论。reason 中推理在前、结论在后。"
+)
+
 
 # Metric instructions are also system-owned: business prompts decide what to
 # judge, while these strings decide how the Judge must return the result.
@@ -76,6 +83,20 @@ BUILTIN_LLM_METRIC_SPECS: dict[str, dict[str, t.Any]] = {
         "required_fields": ["user_input", "response"],
         "criteria": (
             "判断 AI 回答是否直接回应用户问题。跑题、泛泛而谈、答非所问或只回答了问题的一小部分需要扣分。"
+        ),
+    },
+    "builtin_faithfulness_claim": {
+        "required_fields": ["response", "retrieved_contexts"],
+        "criteria": (
+            "将 AI 回答拆解为若干独立断言（claim），逐条判断每个断言是否被 retrieved_contexts 支持，"
+            "以被支持断言占比作为分数。未覆盖、与上下文冲突或无法验证的断言一律视为不支持。"
+        ),
+    },
+    "builtin_answer_relevancy_generative": {
+        "required_fields": ["user_input", "response"],
+        "criteria": (
+            "生成式相关性判定：从 AI 回答反推它可能回答的问题，再与用户问题做语义相似度比较，"
+            "相似度越高说明回答越贴合问题。回答空泛、答非所问时反推问题与用户问题相似度低。"
         ),
     },
     "builtin_agent_goal_accuracy": {
@@ -221,6 +242,66 @@ QUESTION_VALIDATION_PROMPT = """你是一个严格的数据集质检助手。请
   ]
 }}
 """
+
+
+# 结构化中间步骤（断言拆解/核验、问题反推）共用的中性系统提示词
+STRUCTURED_JSON_SYSTEM_PROMPT = "你是一个严谨的文本分析助手。必须只输出严格 JSON，不要输出任何其他内容。"
+
+
+# ---- 断言级忠实度（claim-level faithfulness）----
+CLAIM_DECOMPOSITION_PROMPT = """请把下面的 AI 回答拆解为若干条"原子断言"，每条断言必须是能独立验证真伪的一句话事实陈述。
+
+要求：
+1. 断言之间不能互相包含或重复；
+2. 去掉纯过渡语、语气词和无信息量的句子；
+3. 如果回答没有包含任何可验证的事实，返回空列表。
+
+## 回答
+{response}
+
+## 输出格式
+只输出 JSON：
+{{
+  "claims": ["断言1", "断言2", ...]
+}}"""
+
+CLAIM_VERIFICATION_PROMPT = """请判断下面的"断言"是否被给定的"检索上下文"直接或合理地支持。
+
+判定标准：
+- 支持（supported）：上下文中有明确信息支撑该断言；
+- 不支持（unsupported）：断言与上下文冲突、上下文没有提及、或需要外部知识才能成立。
+
+## 检索上下文
+{contexts}
+
+## 断言
+{claim}
+
+## 输出格式
+只输出 JSON：
+{{
+  "verdict": "supported" 或 "unsupported",
+  "reason": "1 句中文理由"
+}}"""
+
+# ---- 生成式相关性（generative answer relevancy）----
+GENERATIVE_QUESTION_PROMPT = """请从下面的 AI 回答出发，反推出 {n} 个"这个回答最可能在回答的问题"。
+
+要求：
+1. 问题要具体，贴近真实用户会问的措辞；
+2. 如果回答内容空泛、敷衍、或明显答非所问，请全部输出"回避式问题"（如"这个问题我不清楚"）。
+3. 输出数量严格等于 {n}。
+
+## 回答
+{response}
+
+## 输出格式
+只输出 JSON：
+{{
+  "questions": ["问题1", "问题2", ...]
+}}"""
+
+NONCOMMITTAL_QUESTION_MARKERS = ("不清楚", "不知道", "无法回答", "不太明白", "请提供更多信息", "我不确定")
 
 
 DEFAULT_TARGET_CONTEXT_PROMPT = """请使用你自己的正常 RAG / 知识库检索流程回答用户问题，并严格输出 JSON。

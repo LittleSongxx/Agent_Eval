@@ -25,6 +25,8 @@ class EvalTaskCreate(BaseModel):
     response_mapping: Optional[Dict[str, Any]] = None
     result_save_mode: Literal["task_only", "write_back"] = "task_only"
     metric_overrides: Optional[List[MetricOverridePayload]] = None
+    # 多裁判面板：附加裁判的 LLM 配置 ID 列表（LLM 指标取均值/多数票聚合）
+    judge_llm_config_ids: Optional[List[int]] = None
 
 
 class EvalDebugRequest(EvalTaskCreate):
@@ -66,6 +68,8 @@ class EvalTaskBrief(BaseModel):
     target_config: Optional[Dict[str, Any]] = None
     response_mapping: Optional[Dict[str, Any]] = None
     result_save_mode: Optional[str] = "task_only"
+    judge_panel: Optional[List[int]] = None
+    dataset_version: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -146,6 +150,10 @@ class ReportSummary(BaseModel):
     # 人工复核与自动评分的一致性（自动+人工双通道交叉验证）
     manual_auto_agreement_rate: Optional[float] = None
     manual_auto_disagreement_count: int = 0
+    # 人工 vs 自动二分类的 Cohen's kappa（修正偶然一致后的真实一致程度）
+    manual_auto_kappa: Optional[float] = None
+    # kappa 低于 0.7 时的校准提示（判分标准可能需要修订）
+    calibration_suggestion: Optional[str] = None
 
 
 class ReportRowsResponse(BaseModel):

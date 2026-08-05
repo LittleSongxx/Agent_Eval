@@ -527,11 +527,23 @@ const ReportDetailPage: React.FC = () => {
                   />
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     分歧 {summary.manual_auto_disagreement_count ?? 0} 条
+                    {summary.manual_auto_kappa != null && (
+                      <> · Kappa {summary.manual_auto_kappa}</>
+                    )}
                   </Text>
                 </Card>
               </Col>
             )}
           </Row>
+        )}
+        {summary.calibration_suggestion && (
+          <Alert
+            style={{ marginBottom: 24 }}
+            type="warning"
+            showIcon
+            message="人工与自动评分一致性偏低"
+            description={summary.calibration_suggestion}
+          />
         )}
 
         <Card title="各指标得分概览" extra={<Text type="secondary">指标维度统计，分数范围 0~1；通过率按单个指标阈值单独计算</Text>} style={{ marginBottom: 24 }}>

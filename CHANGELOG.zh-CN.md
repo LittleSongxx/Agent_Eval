@@ -17,6 +17,12 @@
 - 新增评测数据集构建指南（docs/eval-dataset-guide.md）。
 - 新增评测系统元评价指南（docs/meta-evaluation.md，含与 RAGAS 对照实验脚本 scripts/compare_with_ragas.py 与真实运行数据）。
 
+- 新增双通道指标：生成式相关性（反推问题 + 语义相似度）与断言级忠实度（原子断言拆解逐条核验），与整体判定指标并存交叉验证。
+- Judge 工程化：强制推理（JUDGE_COT_MODE）、换序互评防位置偏置（EVAL_SWAP_CHECK）、多裁判面板（judge_llm_config_ids，均值/多数票聚合 + 裁判间一致性）。
+- 人工校准闭环：报告自动计算 Cohen's kappa，低于 0.7 提示修订判分标准。
+- 数据集版本化：行级变更自增版本，任务创建时冻结。
+- 评测集治理工具：污染检测（n-gram + embedding）、检索噪声注入实验、零依赖中文 BM25 mock 检索（backend/scripts/）。
+
 ## [v0.1.0] - 2026-07-20
 
 ### 亮点

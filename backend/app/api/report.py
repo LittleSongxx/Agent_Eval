@@ -176,6 +176,28 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
     )
     manual_auto_disagreement_count = len(comparable_reviews) - agreed
 
+    # Cohen's kappa：人工 vs 自动二分类，修正偶然一致后的真实一致程度
+    manual_auto_kappa = None
+    calibration_suggestion = None
+    if comparable_reviews:
+        both_pass = sum(1 for r in comparable_reviews if r.manual_status == "pass" and r.is_pass is True)
+        manual_pass_auto_fail = sum(1 for r in comparable_reviews if r.manual_status == "pass" and r.is_pass is False)
+        manual_fail_auto_pass = sum(1 for r in comparable_reviews if r.manual_status == "fail" and r.is_pass is True)
+        both_fail = sum(1 for r in comparable_reviews if r.manual_status == "fail" and r.is_pass is False)
+        total = len(comparable_reviews)
+        observed = (both_pass + both_fail) / total
+        expected = (
+            (both_pass + manual_pass_auto_fail) * (both_pass + manual_fail_auto_pass)
+            + (manual_fail_auto_pass + both_fail) * (manual_pass_auto_fail + both_fail)
+        ) / (total * total)
+        if expected < 1.0:
+            manual_auto_kappa = round((observed - expected) / (1.0 - expected), 4)
+        if manual_auto_kappa is not None and manual_auto_kappa < 0.7 and total >= 10:
+            calibration_suggestion = (
+                f"人工与自动评分一致性的 Cohen's kappa 为 {manual_auto_kappa}（< 0.7），"
+                "建议复核判分标准（指标 prompt_override）与人工标注口径，修订后重新评测。"
+            )
+
     return ReportSummary(
         eval_task=EvalTaskResponse.model_validate(task),
         total_count=total_count,
@@ -190,6 +212,8 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
         judge_reliability=judge_reliability,
         manual_auto_agreement_rate=manual_auto_agreement_rate,
         manual_auto_disagreement_count=manual_auto_disagreement_count,
+        manual_auto_kappa=manual_auto_kappa,
+        calibration_suggestion=calibration_suggestion,
     )
 
 

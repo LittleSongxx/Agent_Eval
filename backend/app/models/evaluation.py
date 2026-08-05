@@ -29,6 +29,10 @@ class EvalTask(Base):
     response_mapping = Column(JSON, nullable=True)
     result_save_mode = Column(String(50), default="task_only")
     logs = Column(Text, default="")
+    # 多裁判面板：附加裁判的 LLM 配置 ID 列表（与主裁判独立打分后聚合）
+    judge_panel = Column(JSON, nullable=True)
+    # 创建任务时冻结的数据集版本（数据集变更后版本自增，用于追溯评测口径）
+    dataset_version = Column(Integer, nullable=True)
 
     dataset = relationship("Dataset")
     scenario = relationship("EvalScenario")
