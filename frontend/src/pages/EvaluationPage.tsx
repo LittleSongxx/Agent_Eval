@@ -163,6 +163,7 @@ const EvaluationPage: React.FC = () => {
   const [cloneSourceTask, setCloneSourceTask] = useState<EvalTask | null>(null);
   const selectedDatasetId = Form.useWatch('dataset_id', form);
   const selectedScenarioId = Form.useWatch('scenario_id', form);
+  const selectedLLMConfigId = Form.useWatch('llm_config_id', form);
   const selectedEvaluationMode = Form.useWatch('evaluation_mode', form) || 'offline';
   const selectedResponseMapping = Form.useWatch('response_mapping', form);
   const [testingEndpoint, setTestingEndpoint] = useState(false);
@@ -391,6 +392,7 @@ const EvaluationPage: React.FC = () => {
         target_config: task.target_config,
         response_mapping: task.response_mapping,
         result_save_mode: task.result_save_mode || 'task_only',
+        judge_llm_config_ids: task.judge_panel || undefined,
       });
     setCloneSourceTask(task);
     message.success('已复制任务配置，可修改后重新执行');
@@ -792,6 +794,25 @@ const EvaluationPage: React.FC = () => {
                     label: `${c.name} (${c.model_name})`,
                     value: c.id,
                   }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                name="judge_llm_config_ids"
+                label="附加裁判 LLM"
+                extra="多裁判独立打分后取均值/多数票，报告展示裁判间一致性（可选）"
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="选择后 LLM 指标由多裁判聚合评分"
+                  options={llmConfigs
+                    .filter((c) => c.id !== selectedLLMConfigId)
+                    .map((c) => ({
+                      label: `${c.name} (${c.model_name})`,
+                      value: c.id,
+                    }))}
                 />
               </Form.Item>
             </Col>

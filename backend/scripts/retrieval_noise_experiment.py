@@ -67,15 +67,6 @@ def _load_noise_chunks(noise_source: str) -> list[str]:
     return chunks
 
 
-def _string_similarity(text_a: str, text_b: str) -> float:
-    """规则版相似度：词项集合的 Jaccard（bigram 词项）。"""
-    tokens_a = set(bigram_tokens(text_a))
-    tokens_b = set(bigram_tokens(text_b))
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
-
-
 def _sentence_overlap(text: str, chunk: str) -> float:
     """文本在 chunk 中的查询覆盖度：文本词项被 chunk 任一句子覆盖的比例。
 

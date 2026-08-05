@@ -880,13 +880,15 @@ def _aggregate_judge_results(
         }
 
     numeric = [float(value) for value in values if isinstance(value, (int, float)) and value is not None]
-    if len(numeric) == len(values) and numeric:
+    if numeric and len(numeric) == sum(1 for value in values if value is not None):
+        # 数值型（允许个别裁判缺分）：对有效分值取均值，MAD 仅基于有效分值
         mean = sum(numeric) / len(numeric)
         mad = sum(abs(value - mean) for value in numeric) / len(numeric)
-        best = min(results, key=lambda item: abs(float(item[1].value) - mean))
+        numeric_results = [item for item in results if item[1].value is not None]
+        best = min(numeric_results, key=lambda item: abs(float(item[1].value) - mean))
         stats = {
             "judge_count": len(results),
-            "judge_scores": {name: round(float(value), 4) for name, value in zip(names, values)},
+            "judge_scores": {name: round(float(value), 4) if value is not None else None for name, value in zip(names, values)},
             "judge_mad": round(mad, 4),
         }
         return mean, best[1].reason, stats
@@ -1204,6 +1206,13 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                             metric_scores[metric_name]["swap_consistency"] = round(
                                 max(0.0, min(1.0, consistency)), 4
                             )
+                        # 换序复评的 token 也计入成本
+                        swap_usage = judge_client.take_row_usage()
+                        metric_usage["prompt_tokens"] += int(swap_usage.get("prompt_tokens") or 0)
+                        metric_usage["completion_tokens"] += int(swap_usage.get("completion_tokens") or 0)
+                        metric_usage["total_tokens"] += int(swap_usage.get("total_tokens") or 0)
+                        if metric_usage.get("total_tokens", 0) > 0:
+                            metric_scores[metric_name]["judge_tokens"] = metric_usage
 
                     if val is None:
                         _log(task, f"  ✗ [{metric_name}] 无法评分: {str(reason)[:200]}")

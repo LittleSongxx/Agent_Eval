@@ -148,11 +148,12 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
     error_count = sum(1 for r in row_results if r.error is not None)
     pass_rate = (pass_count / total_count) if total_count > 0 else 0.0
 
-    metric_summary = _normalize_metric_summary(task.summary_scores or {}, row_results)
-    # 平台级聚合结果（加权总分/成本/Judge 稳定性）从指标维度统计中剥离
-    weighted_total_score = metric_summary.pop("weighted_total_score", None)
-    cost = metric_summary.pop("cost", None)
-    judge_reliability = metric_summary.pop("judge_reliability", None)
+    raw_summary = task.summary_scores or {}
+    # 平台级聚合结果（加权总分/成本/Judge 稳定性）先取出，再归一化指标维度统计
+    weighted_total_score = raw_summary.get("weighted_total_score")
+    cost = raw_summary.get("cost")
+    judge_reliability = raw_summary.get("judge_reliability")
+    metric_summary = _normalize_metric_summary(raw_summary, row_results)
 
     manual_review_summary = {
         "reviewed_count": sum(1 for r in row_results if r.manual_status is not None),
@@ -220,9 +221,12 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
 def _normalize_metric_summary(metric_summary: dict, row_results: list[EvalRowResult]) -> dict:
     """Fill display pass rates for old reports whose metrics had no threshold."""
 
+    from app.core.evaluation_engine import RESERVED_SUMMARY_KEYS
+
     normalized = {
         name: dict(info or {})
         for name, info in (metric_summary or {}).items()
+        if name not in RESERVED_SUMMARY_KEYS
     }
     if not normalized:
         return normalized

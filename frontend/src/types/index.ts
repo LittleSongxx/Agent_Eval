@@ -120,6 +120,8 @@ export interface EvalTask {
   target_config?: Record<string, any> | null;
   response_mapping?: Record<string, any> | null;
   result_save_mode?: 'task_only' | 'write_back';
+  judge_panel?: number[] | null;
+  dataset_version?: number | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
