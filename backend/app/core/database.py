@@ -46,6 +46,7 @@ def ensure_runtime_schema() -> None:
         "result_save_mode": "ALTER TABLE eval_tasks ADD COLUMN result_save_mode VARCHAR(50) DEFAULT 'task_only'",
         "judge_panel": "ALTER TABLE eval_tasks ADD COLUMN judge_panel JSON",
         "dataset_version": "ALTER TABLE eval_tasks ADD COLUMN dataset_version INTEGER",
+        "worker_pid": "ALTER TABLE eval_tasks ADD COLUMN worker_pid INTEGER",
     }
     missing_eval_task_sql = [
         sql for name, sql in eval_task_additions.items() if name not in eval_task_columns

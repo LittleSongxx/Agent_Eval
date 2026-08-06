@@ -33,6 +33,9 @@ class EvalTask(Base):
     judge_panel = Column(JSON, nullable=True)
     # 创建任务时冻结的数据集版本（数据集变更后版本自增，用于追溯评测口径）
     dataset_version = Column(Integer, nullable=True)
+    # 执行评测的后端进程 PID：启动 recovery 时据此跳过仍在存活进程里运行的任务，
+    # 避免 TestClient / 误启动的 lifespan 把运行中的任务误标失败
+    worker_pid = Column(Integer, nullable=True)
 
     dataset = relationship("Dataset")
     scenario = relationship("EvalScenario")

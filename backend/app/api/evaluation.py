@@ -1,4 +1,5 @@
 import asyncio
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -61,6 +62,17 @@ def recover_stale_eval_tasks(db: Session, older_than_minutes: int = EVAL_TASK_ST
 def _launch_evaluation(task_id: int) -> None:
     """Run evaluation outside the FastAPI event loop so progress APIs stay responsive."""
     from app.core.evaluation_engine import run_evaluation
+
+    # 记录评测所在的后端进程 PID：启动 recovery 时（lifespan startup）只回收
+    # "worker 进程已死"的任务，TestClient 等误启动的 lifespan 不会误杀运行中的任务
+    db = SessionLocal()
+    try:
+        task = db.query(EvalTask).filter(EvalTask.id == task_id).first()
+        if task is not None:
+            task.worker_pid = os.getpid()
+            db.commit()
+    finally:
+        db.close()
 
     def runner() -> None:
         asyncio.run(run_evaluation(task_id, SessionLocal))

@@ -112,11 +112,30 @@ def _backfill_eval_task_scenario_snapshots() -> None:
         db.close()
 
 
+def _pid_alive(pid: int) -> bool:
+    """Check whether a worker process is still alive (PID 0 is always treated as alive)."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but we lack permission — treat as alive to avoid false recovery
+        return True
+    except Exception:
+        return False
+
+
 def _recover_interrupted_eval_tasks() -> int:
     """Mark tasks left in pending/running by a previous process as failed.
 
     评测任务由 daemon 线程执行，服务重启后这些线程随之消失；启动时统一
     回收，避免任务永久悬挂在运行中状态。
+
+    只回收 worker_pid 已不存活的运行中任务：TestClient / 其他进程误启动的
+    lifespan 同样会进入本函数，但任务仍在存活的后端进程里评测，不能回收。
     """
     from datetime import datetime, timezone
 
@@ -130,12 +149,16 @@ def _recover_interrupted_eval_tasks() -> int:
             .filter(EvalTask.status.in_(["pending", "running"]))
             .all()
         )
+        recovered = 0
         for task in tasks:
+            if task.worker_pid and _pid_alive(task.worker_pid):
+                continue
             task.status = "failed"
             task.error_message = "服务重启导致评测任务中断，请重新创建评测任务"
             task.finished_at = datetime.now(timezone.utc)
+            recovered += 1
         db.commit()
-        return len(tasks)
+        return recovered
     finally:
         db.close()
 
