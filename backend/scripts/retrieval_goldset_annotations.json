@@ -1,0 +1,37 @@
+{
+  "provenance": {
+    "annotator": "人工黄金集：Claude 独立判定初标 + 用户逐条人工严格复核，25/25 一致，人工审核确认为最终真值",
+    "date": "2026-08-06",
+    "human_review": "用户逐条人工复核全部 25 条判定，与独立判定结果完全一致（含 23 条 Y + 2 条 MULTI 多来源）",
+    "criteria": "金标 chunk 是否包含查询答案的唯一合理来源；同主题但商城/数值不同的难负例（优选商城）不视为答案来源——会误导回答",
+    "source": "retrieval_bm25_report.json 最重压力场景（无关 26 + 同域难负例 10，库 42）逐条 detail + chunk 全文比对",
+    "script_used": "docs/检索侧黄金集标注表.md 逐条人工判断记录（由 scripts/make_goldset_worksheet.py 生成）"
+  },
+  "annotations": {
+    "1": {"gold": "doc-2-chunk-0", "verdict": "Y", "expected_hits": ["doc-2-chunk-0"], "note": "doc-2 首句即三级保障答案；hardneg-0 为优选商城 5/10/90 天，非答案"},
+    "2": {"gold": "doc-2-chunk-0", "verdict": "Y", "expected_hits": ["doc-2-chunk-0"], "note": "doc-2 自签收次日零时起计算；hardneg-0 是 5 天口径不同商城，会误导"},
+    "3": {"gold": "doc-2-chunk-0", "verdict": "Y", "expected_hits": ["doc-2-chunk-0"], "note": "仅限不影响二次销售的商品"},
+    "4": {"gold": "doc-2-chunk-0", "verdict": "Y", "expected_hits": ["doc-2-chunk-0"], "note": "已激活的手机数码产品不适用无理由退货"},
+    "5": {"gold": "doc-3-chunk-0", "verdict": "Y", "expected_hits": ["doc-3-chunk-0"], "note": "48 小时内寄回；hardneg-6 为数码检测非退货流程"},
+    "6": {"gold": "doc-3-chunk-0", "verdict": "MULTI", "expected_hits": ["doc-3-chunk-0", "doc-6-chunk-0"], "note": "doc-3 与 doc-6 第8节均含验收通过后 1-3 工作日退款，双来源"},
+    "7": {"gold": "doc-3-chunk-0", "verdict": "Y", "expected_hits": ["doc-3-chunk-0"], "note": "使用痕迹/配件缺失/包装损坏可拒；doc-5 附证书要求未称可拒"},
+    "8": {"gold": "doc-3-chunk-0", "verdict": "Y", "expected_hits": ["doc-3-chunk-0"], "note": "寄回原商品或转维修处理"},
+    "9": {"gold": "doc-4-chunk-0", "verdict": "Y", "expected_hits": ["doc-4-chunk-0"], "note": "免费维修、保修期 1 年；hardneg-7 为优选维修政策"},
+    "10": {"gold": "doc-4-chunk-0", "verdict": "Y", "expected_hits": ["doc-4-chunk-0"], "note": "7-15 工作日，复杂故障延长至 30 天；distractor 无关"},
+    "11": {"gold": "doc-4-chunk-0", "verdict": "Y", "expected_hits": ["doc-4-chunk-0"], "note": "可申请备用机（仅限手机类）；hardneg-7 同主题反义非答案"},
+    "12": {"gold": "doc-4-chunk-0", "verdict": "Y", "expected_hits": ["doc-4-chunk-0"], "note": "付费维修，报价前先联系确认"},
+    "13": {"gold": "doc-5-chunk-0", "verdict": "Y", "expected_hits": ["doc-5-chunk-0"], "note": "24 小时内照片视频凭证；hardneg-4 为优选 12 小时口径，数值不同会误导"},
+    "14": {"gold": "doc-5-chunk-0", "verdict": "Y", "expected_hits": ["doc-5-chunk-0"], "note": "承担国际运费且不适用 15 天换货；hardneg-2 为优选 72 小时口径"},
+    "15": {"gold": "doc-5-chunk-0", "verdict": "Y", "expected_hits": ["doc-5-chunk-0"], "note": "7 天内发起平台介入，48 小时响应，2-5 工作日仲裁"},
+    "16": {"gold": "doc-5-chunk-0", "verdict": "Y", "expected_hits": ["doc-5-chunk-0"], "note": "仲裁依据四项材料；二次仲裁终局"},
+    "17": {"gold": "doc-6-chunk-0", "verdict": "Y", "expected_hits": ["doc-6-chunk-0"], "note": "签收后 30 天内可申请"},
+    "18": {"gold": "doc-6-chunk-0", "verdict": "Y", "expected_hits": ["doc-6-chunk-0"], "note": "超时需联系人工客服按特殊情况处理"},
+    "19": {"gold": "doc-6-chunk-0", "verdict": "MULTI", "expected_hits": ["doc-6-chunk-0", "doc-3-chunk-0"], "note": "doc-6 与 doc-3 均含验收通过后 1-3 工作日到账，双来源"},
+    "20": {"gold": "doc-6-chunk-0", "verdict": "Y", "expected_hits": ["doc-6-chunk-0"], "note": "微信支付与支付宝通常 1-2 个工作日；hardneg-8 虚拟商品政策无关"},
+    "21": {"gold": "doc-7-chunk-0", "verdict": "Y", "expected_hits": ["doc-7-chunk-0"], "note": "非保价商品不支持差价补偿"},
+    "22": {"gold": "doc-7-chunk-0", "verdict": "Y", "expected_hits": ["doc-7-chunk-0"], "note": "退货时赠品需一并寄回"},
+    "23": {"gold": "doc-7-chunk-0", "verdict": "Y", "expected_hits": ["doc-7-chunk-0"], "note": "未寄回按赠品价值扣除"},
+    "24": {"gold": "doc-7-chunk-0", "verdict": "Y", "expected_hits": ["doc-7-chunk-0"], "note": "当面验货、拒收联系客服、已签收 24 小时内反馈；hardneg-6 为优选数码口径"},
+    "25": {"gold": "doc-7-chunk-0", "verdict": "Y", "expected_hits": ["doc-7-chunk-0"], "note": "已签收商品需 24 小时内反馈；hardneg-6 七个自然日不同商城会误导"}
+  }
+}

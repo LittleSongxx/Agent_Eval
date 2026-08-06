@@ -1,0 +1,362 @@
+{
+  "provenance": {
+    "script": "scripts/compute_goldset_agreement.py",
+    "scenario": "无关全部 + 难负例全部",
+    "annotations": {
+      "annotator": "人工黄金集：Claude 独立判定初标 + 用户逐条人工严格复核，25/25 一致，人工审核确认为最终真值",
+      "date": "2026-08-06",
+      "human_review": "用户逐条人工复核全部 25 条判定，与独立判定结果完全一致（含 23 条 Y + 2 条 MULTI 多来源）",
+      "criteria": "金标 chunk 是否包含查询答案的唯一合理来源；同主题但商城/数值不同的难负例（优选商城）不视为答案来源——会误导回答",
+      "source": "retrieval_bm25_report.json 最重压力场景（无关 26 + 同域难负例 10，库 42）逐条 detail + chunk 全文比对",
+      "script_used": "docs/检索侧黄金集标注表.md 逐条人工判断记录（由 scripts/make_goldset_worksheet.py 生成）"
+    },
+    "k": 5
+  },
+  "verdict_distribution": {
+    "Y": 23,
+    "MULTI": 2,
+    "N": 0
+  },
+  "gold_criterion": {
+    "h1": 0.84,
+    "mrr": 0.9133
+  },
+  "annotation_criterion": {
+    "h1": 0.84,
+    "mrr": 0.9133
+  },
+  "gold_in_expected_rate": 1.0,
+  "multi_source_rows": [
+    6,
+    19
+  ],
+  "rows": [
+    {
+      "row": 1,
+      "query": "云购商城的三级售后保障分别是什么？",
+      "kind": "correct",
+      "gold": "doc-2-chunk-0",
+      "expected_hits": [
+        "doc-2-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 2,
+      "query": "7天无理由退货的起算时间是什么时候？",
+      "kind": "correct",
+      "gold": "doc-2-chunk-0",
+      "expected_hits": [
+        "doc-2-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 2,
+      "ann_rank": 2
+    },
+    {
+      "row": 3,
+      "query": "申请7天无理由退货对商品状态有什么要求？",
+      "kind": "correct",
+      "gold": "doc-2-chunk-0",
+      "expected_hits": [
+        "doc-2-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 4,
+      "query": "已激活的手机数码产品是否支持7天无理由退货？",
+      "kind": "correct",
+      "gold": "doc-2-chunk-0",
+      "expected_hits": [
+        "doc-2-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 5,
+      "query": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+      "kind": "correct",
+      "gold": "doc-3-chunk-0",
+      "expected_hits": [
+        "doc-3-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 6,
+      "query": "商家完成退货验收后，退款会在多久内退回？",
+      "kind": "correct",
+      "gold": "doc-3-chunk-0",
+      "expected_hits": [
+        "doc-3-chunk-0",
+        "doc-6-chunk-0"
+      ],
+      "verdict": "MULTI",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 7,
+      "query": "商家在什么情况下可以拒绝退货？",
+      "kind": "correct",
+      "gold": "doc-3-chunk-0",
+      "expected_hits": [
+        "doc-3-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 8,
+      "query": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+      "kind": "correct",
+      "gold": "doc-3-chunk-0",
+      "expected_hits": [
+        "doc-3-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 9,
+      "query": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+      "kind": "correct",
+      "gold": "doc-4-chunk-0",
+      "expected_hits": [
+        "doc-4-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 10,
+      "query": "维修周期一般是多久？复杂故障最长需要多长时间？",
+      "kind": "hallucinated",
+      "gold": "doc-4-chunk-0",
+      "expected_hits": [
+        "doc-4-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 11,
+      "query": "维修期间可以申请备用机吗？有什么限制条件？",
+      "kind": "hallucinated",
+      "gold": "doc-4-chunk-0",
+      "expected_hits": [
+        "doc-4-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 2,
+      "ann_rank": 2
+    },
+    {
+      "row": 12,
+      "query": "超过保修期的商品如何维修？维修前会如何处理报价？",
+      "kind": "hallucinated",
+      "gold": "doc-4-chunk-0",
+      "expected_hits": [
+        "doc-4-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 13,
+      "query": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+      "kind": "hallucinated",
+      "gold": "doc-5-chunk-0",
+      "expected_hits": [
+        "doc-5-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 2,
+      "ann_rank": 2
+    },
+    {
+      "row": 14,
+      "query": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+      "kind": "hallucinated",
+      "gold": "doc-5-chunk-0",
+      "expected_hits": [
+        "doc-5-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 3,
+      "ann_rank": 3
+    },
+    {
+      "row": 15,
+      "query": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+      "kind": "hallucinated",
+      "gold": "doc-5-chunk-0",
+      "expected_hits": [
+        "doc-5-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 16,
+      "query": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+      "kind": "hallucinated",
+      "gold": "doc-5-chunk-0",
+      "expected_hits": [
+        "doc-5-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 17,
+      "query": "签收后多少天内可以申请售后？",
+      "kind": "hallucinated",
+      "gold": "doc-6-chunk-0",
+      "expected_hits": [
+        "doc-6-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 18,
+      "query": "超过30天售后申请时效后还能申请售后吗？",
+      "kind": "truncated",
+      "gold": "doc-6-chunk-0",
+      "expected_hits": [
+        "doc-6-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 19,
+      "query": "商家验收通过后，退款一般多久到账？",
+      "kind": "truncated",
+      "gold": "doc-6-chunk-0",
+      "expected_hits": [
+        "doc-6-chunk-0",
+        "doc-3-chunk-0"
+      ],
+      "verdict": "MULTI",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 20,
+      "query": "使用微信支付退款，通常多久到账？",
+      "kind": "truncated",
+      "gold": "doc-6-chunk-0",
+      "expected_hits": [
+        "doc-6-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 21,
+      "query": "非保价商品可以申请差价补偿吗？",
+      "kind": "truncated",
+      "gold": "doc-7-chunk-0",
+      "expected_hits": [
+        "doc-7-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 22,
+      "query": "退货时赠品需要一起退回吗？",
+      "kind": "truncated",
+      "gold": "doc-7-chunk-0",
+      "expected_hits": [
+        "doc-7-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 23,
+      "query": "退货时如果没有将赠品一并寄回会怎样？",
+      "kind": "truncated",
+      "gold": "doc-7-chunk-0",
+      "expected_hits": [
+        "doc-7-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 24,
+      "query": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+      "kind": "truncated",
+      "gold": "doc-7-chunk-0",
+      "expected_hits": [
+        "doc-7-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    },
+    {
+      "row": 25,
+      "query": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+      "kind": "truncated",
+      "gold": "doc-7-chunk-0",
+      "expected_hits": [
+        "doc-7-chunk-0"
+      ],
+      "verdict": "Y",
+      "gold_in_expected": true,
+      "gold_rank": 1,
+      "ann_rank": 1
+    }
+  ]
+}

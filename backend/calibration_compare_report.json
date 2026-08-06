@@ -1,0 +1,329 @@
+{
+  "provenance": {
+    "script": "scripts/calibration_compare.py",
+    "generated_at": "2026-08-06T19:44:01.196524+00:00",
+    "db": "/home/song/code/Agent/eval/Agent_Eval/backend/eval_platform.db",
+    "before_task": {
+      "id": 10,
+      "name": "信度实验_EVAL_JUDGE_SAMPLES=5（25行×4LLM指标×5采样）",
+      "dataset_id": 6,
+      "scenario_id": 4,
+      "created_at": "2026-08-06 10:30:25",
+      "status": "completed"
+    },
+    "after_task": {
+      "id": 13,
+      "name": "校准重跑3_阈值0.7_AR判分标准修订（25行×5采样）",
+      "dataset_id": 6,
+      "scenario_id": 4,
+      "created_at": "2026-08-06 16:40:12",
+      "status": "completed"
+    },
+    "thresholds_after": {
+      "faithfulness": 0.7,
+      "faithfulness_claim": 0.7,
+      "answer_relevancy": 0.7,
+      "answer_relevancy_generative": 0.7,
+      "context_recall": 0.7,
+      "context_precision": 0.7
+    },
+    "annotation_source": "task 10 manual_status（25 条 pass/fail）"
+  },
+  "before_calibration": {
+    "total": 25,
+    "both_pass": 8,
+    "manual_pass_auto_fail": 1,
+    "manual_fail_auto_pass": 6,
+    "both_fail": 10,
+    "agreement_rate": 0.72,
+    "kappa": 0.4582
+  },
+  "after_calibration": {
+    "total": 25,
+    "both_pass": 7,
+    "manual_pass_auto_fail": 2,
+    "manual_fail_auto_pass": 0,
+    "both_fail": 16,
+    "agreement_rate": 0.92,
+    "kappa": 0.8175
+  },
+  "stratified_agreement_before": {
+    "correct": {
+      "agree": 8,
+      "disagree": 1,
+      "rate": 0.8889,
+      "disagree_rows": [
+        7
+      ]
+    },
+    "hallucinated": {
+      "agree": 6,
+      "disagree": 2,
+      "rate": 0.75,
+      "disagree_rows": [
+        11,
+        14
+      ]
+    },
+    "truncated": {
+      "agree": 4,
+      "disagree": 4,
+      "rate": 0.5,
+      "disagree_rows": [
+        17,
+        18,
+        20,
+        21
+      ]
+    }
+  },
+  "stratified_agreement_after": {
+    "correct": {
+      "agree": 7,
+      "disagree": 2,
+      "rate": 0.7778,
+      "disagree_rows": [
+        6,
+        7
+      ]
+    },
+    "hallucinated": {
+      "agree": 8,
+      "disagree": 0,
+      "rate": 1.0,
+      "disagree_rows": []
+    },
+    "truncated": {
+      "agree": 8,
+      "disagree": 0,
+      "rate": 1.0,
+      "disagree_rows": []
+    }
+  },
+  "verdict_flips": [
+    {
+      "row": 6,
+      "kind": "correct",
+      "before": "pass",
+      "after": "fail",
+      "manual": "pass",
+      "after_consistent_with_human": false,
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 1.0,
+        "answer_relevancy": 0.52,
+        "answer_relevancy_generative": 0.8809,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 11,
+      "kind": "hallucinated",
+      "before": "pass",
+      "after": "fail",
+      "manual": "fail",
+      "after_consistent_with_human": true,
+      "scores": {
+        "faithfulness": 0.5,
+        "faithfulness_claim": 0.6667,
+        "answer_relevancy": 0.44,
+        "answer_relevancy_generative": 0.8802,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 14,
+      "kind": "hallucinated",
+      "before": "pass",
+      "after": "fail",
+      "manual": "fail",
+      "after_consistent_with_human": true,
+      "scores": {
+        "faithfulness": 0.5,
+        "faithfulness_claim": 0.6667,
+        "answer_relevancy": 1.0,
+        "answer_relevancy_generative": 0.7836,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 17,
+      "kind": "truncated",
+      "before": "pass",
+      "after": "fail",
+      "manual": "fail",
+      "after_consistent_with_human": true,
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 1.0,
+        "answer_relevancy": 0.3,
+        "answer_relevancy_generative": 0.6698,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 18,
+      "kind": "truncated",
+      "before": "pass",
+      "after": "fail",
+      "manual": "fail",
+      "after_consistent_with_human": true,
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 1.0,
+        "answer_relevancy": 0.3,
+        "answer_relevancy_generative": 0.9945,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 20,
+      "kind": "truncated",
+      "before": "pass",
+      "after": "fail",
+      "manual": "fail",
+      "after_consistent_with_human": true,
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 1.0,
+        "answer_relevancy": 0.3,
+        "answer_relevancy_generative": 0.9055,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 21,
+      "kind": "truncated",
+      "before": "pass",
+      "after": "fail",
+      "manual": "fail",
+      "after_consistent_with_human": true,
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 0.6,
+        "answer_relevancy": 0.3,
+        "answer_relevancy_generative": 0.9937,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    }
+  ],
+  "after_disagreements": [
+    {
+      "row": 6,
+      "kind": "correct",
+      "manual": "pass",
+      "auto": "fail",
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 1.0,
+        "answer_relevancy": 0.52,
+        "answer_relevancy_generative": 0.8809,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "row": 7,
+      "kind": "correct",
+      "manual": "pass",
+      "auto": "fail",
+      "scores": {
+        "faithfulness": 1.0,
+        "faithfulness_claim": 1.0,
+        "answer_relevancy": 0.3,
+        "answer_relevancy_generative": 0.9528,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      }
+    }
+  ],
+  "threshold_sweep_after_scores": [
+    {
+      "threshold": 0.5,
+      "total": 25,
+      "both_pass": 8,
+      "manual_pass_auto_fail": 1,
+      "manual_fail_auto_pass": 3,
+      "both_fail": 13,
+      "agreement_rate": 0.84,
+      "kappa": 0.6689
+    },
+    {
+      "threshold": 0.6,
+      "total": 25,
+      "both_pass": 7,
+      "manual_pass_auto_fail": 2,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.92,
+      "kappa": 0.8175
+    },
+    {
+      "threshold": 0.65,
+      "total": 25,
+      "both_pass": 7,
+      "manual_pass_auto_fail": 2,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.92,
+      "kappa": 0.8175
+    },
+    {
+      "threshold": 0.7,
+      "total": 25,
+      "both_pass": 7,
+      "manual_pass_auto_fail": 2,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.92,
+      "kappa": 0.8175
+    },
+    {
+      "threshold": 0.75,
+      "total": 25,
+      "both_pass": 7,
+      "manual_pass_auto_fail": 2,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.92,
+      "kappa": 0.8175
+    },
+    {
+      "threshold": 0.8,
+      "total": 25,
+      "both_pass": 7,
+      "manual_pass_auto_fail": 2,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.92,
+      "kappa": 0.8175
+    },
+    {
+      "threshold": 0.85,
+      "total": 25,
+      "both_pass": 6,
+      "manual_pass_auto_fail": 3,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.88,
+      "kappa": 0.7191
+    },
+    {
+      "threshold": 0.9,
+      "total": 25,
+      "both_pass": 6,
+      "manual_pass_auto_fail": 3,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.88,
+      "kappa": 0.7191
+    }
+  ]
+}

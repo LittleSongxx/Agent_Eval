@@ -1,0 +1,114 @@
+"""检索侧准则效度：人工黄金集 vs 合成数据集金标 vs BM25 检索结果。
+
+输入：
+- retrieval_bm25_report.json（最重压力场景逐条 detail：retrieved 顺序）
+- retrieval_goldset_annotations.json（人工黄金集：expected_hits + verdict，
+  2026-08-06 人工逐条审核确认）
+
+输出（打印 + retrieval_goldset_agreement.json）：
+- 金标口径 H@1 / MRR（= retrieval_bm25_report.json 已报数字的复算）
+- 人工黄金集口径 H@1 / MRR（expected_hits 任一命中的最靠前位次）
+- 两口径一致率、逐行 rank 对比
+- 判定分布（Y / MULTI / N）——N 表示人工审核发现金标构造错误
+
+用法：cd backend && python -m scripts.compute_goldset_agreement
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+
+BACKEND = pathlib.Path(__file__).resolve().parent.parent
+REPORT = BACKEND / "retrieval_bm25_report.json"
+ANNOTATIONS = pathlib.Path(__file__).resolve().parent / "retrieval_goldset_annotations.json"
+OUT = BACKEND / "retrieval_goldset_agreement.json"
+
+
+def main() -> int:
+    rep = json.loads(REPORT.read_text(encoding="utf-8"))
+    ann = json.loads(ANNOTATIONS.read_text(encoding="utf-8"))
+    scenario = rep["results"][-1]  # 最重压力场景（与标注表一致）
+    detail = scenario["detail"]
+    if len(detail) != 25:
+        raise SystemExit(f"detail 行数 {len(detail)} ≠ 25，与标注不一致")
+
+    rows = []
+    gold_h1_ok = gold_mrr = ann_h1_ok = ann_mrr = 0
+    n = len(detail)
+    for i, row in enumerate(detail, 1):
+        a = ann["annotations"][str(i)]
+        retrieved = row["retrieved"]
+        gold_rank = retrieved.index(row["gold"][0]) + 1 if row["gold"][0] in retrieved else None
+        ann_rank = min(
+            (retrieved.index(hit) + 1 for hit in a["expected_hits"] if hit in retrieved),
+            default=None,
+        )
+        # 金标是否在独立判定期望集中
+        gold_in_expected = row["gold"][0] in a["expected_hits"]
+        if gold_rank is not None:
+            gold_mrr += 1.0 / gold_rank
+            gold_h1_ok += gold_rank == 1
+        if ann_rank is not None:
+            ann_mrr += 1.0 / ann_rank
+            ann_h1_ok += ann_rank == 1
+        rows.append(
+            {
+                "row": i,
+                "query": row["user_input"],
+                "kind": row["kind"],
+                "gold": row["gold"][0],
+                "expected_hits": a["expected_hits"],
+                "verdict": a["verdict"],
+                "gold_in_expected": gold_in_expected,
+                "gold_rank": gold_rank,
+                "ann_rank": ann_rank,
+            }
+        )
+
+    def h1_ok(total: int, hits: int) -> float:
+        return round(hits / total, 4)
+
+    gold_h1 = h1_ok(n, gold_h1_ok)
+    gold_mrr_v = round(gold_mrr / n, 4)
+    ann_h1 = h1_ok(n, ann_h1_ok)
+    ann_mrr_v = round(ann_mrr / n, 4)
+
+    report = {
+        "provenance": {
+            "script": "scripts/compute_goldset_agreement.py",
+            "scenario": scenario["label"],
+            "annotations": ann["provenance"],
+            "k": rep["k"],
+        },
+        "verdict_distribution": {
+            "Y": sum(1 for r in rows if r["verdict"] == "Y"),
+            "MULTI": sum(1 for r in rows if r["verdict"] == "MULTI"),
+            "N": sum(1 for r in rows if r["verdict"] == "N"),
+        },
+        "gold_criterion": {"h1": gold_h1, "mrr": gold_mrr_v},
+        "annotation_criterion": {"h1": ann_h1, "mrr": ann_mrr_v},
+        "gold_in_expected_rate": round(
+            sum(1 for r in rows if r["gold_in_expected"]) / n, 4
+        ),
+        "multi_source_rows": [
+            r["row"] for r in rows if r["verdict"] == "MULTI"
+        ],
+        "rows": rows,
+    }
+    OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"人工黄金集判定分布: Y {report['verdict_distribution']['Y']} / "
+          f"MULTI {report['verdict_distribution']['MULTI']} / N {report['verdict_distribution']['N']}")
+    print(f"金标口径:      H@1 {gold_h1} / MRR {gold_mrr_v}")
+    print(f"人工黄金集口径: H@1 {ann_h1} / MRR {ann_mrr_v}")
+    print(f"金标 ∈ 人工期望集: {report['gold_in_expected_rate']}"
+          f"（25/25 → 合成单金标构造经人工审核未发现错误）")
+    print(f"多来源行: {report['multi_source_rows']}"
+          f"（同一答案信息跨 chunk 重复，金标仍均在 top-1）")
+    print(f"报告已写入: {OUT.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

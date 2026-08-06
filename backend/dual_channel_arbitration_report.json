@@ -1,0 +1,269 @@
+{
+  "provenance": {
+    "script": "scripts/dual_channel_arbitration.py",
+    "task_id": 13,
+    "thresholds_evaluated": [
+      0.5,
+      0.7
+    ],
+    "dispute_definition": "|ar - ar_gen| > 0.2",
+    "note": "零 LLM 成本：用已有双通道分数 + 人工标签做仲裁分析"
+  },
+  "threshold_0.5": {
+    "ar_channel_vs_human": {
+      "agree": 19,
+      "total": 25,
+      "rate": 0.76,
+      "kappa": 0.5253,
+      "human_pass_auto_fail": 1,
+      "human_fail_auto_pass": 5
+    },
+    "generative_channel_vs_human": {
+      "agree": 9,
+      "total": 25,
+      "rate": 0.36,
+      "kappa": 0.0,
+      "human_pass_auto_fail": 0,
+      "human_fail_auto_pass": 16
+    },
+    "min_channel_vs_human": {
+      "agree": 19,
+      "total": 25,
+      "rate": 0.76,
+      "kappa": 0.5253,
+      "human_pass_auto_fail": 1,
+      "human_fail_auto_pass": 5
+    },
+    "max_channel_vs_human": {
+      "agree": 9,
+      "total": 25,
+      "rate": 0.36,
+      "kappa": 0.0,
+      "human_pass_auto_fail": 0,
+      "human_fail_auto_pass": 16
+    },
+    "mean_channel_vs_human": {
+      "agree": 11,
+      "total": 25,
+      "rate": 0.44,
+      "kappa": 0.0933,
+      "human_pass_auto_fail": 0,
+      "human_fail_auto_pass": 14
+    }
+  },
+  "threshold_0.7": {
+    "ar_channel_vs_human": {
+      "agree": 18,
+      "total": 25,
+      "rate": 0.72,
+      "kappa": 0.4337,
+      "human_pass_auto_fail": 2,
+      "human_fail_auto_pass": 5
+    },
+    "generative_channel_vs_human": {
+      "agree": 11,
+      "total": 25,
+      "rate": 0.44,
+      "kappa": 0.0933,
+      "human_pass_auto_fail": 0,
+      "human_fail_auto_pass": 14
+    },
+    "min_channel_vs_human": {
+      "agree": 19,
+      "total": 25,
+      "rate": 0.76,
+      "kappa": 0.5033,
+      "human_pass_auto_fail": 2,
+      "human_fail_auto_pass": 4
+    },
+    "max_channel_vs_human": {
+      "agree": 10,
+      "total": 25,
+      "rate": 0.4,
+      "kappa": 0.0458,
+      "human_pass_auto_fail": 0,
+      "human_fail_auto_pass": 15
+    },
+    "mean_channel_vs_human": {
+      "agree": 19,
+      "total": 25,
+      "rate": 0.76,
+      "kappa": 0.5253,
+      "human_pass_auto_fail": 1,
+      "human_fail_auto_pass": 5
+    }
+  },
+  "dispute_rows": [
+    {
+      "row": 6,
+      "kind": "correct",
+      "manual": "pass",
+      "ar": 0.52,
+      "ar_gen": 0.8809,
+      "diff": 0.361,
+      "low_channel": "ar"
+    },
+    {
+      "row": 7,
+      "kind": "correct",
+      "manual": "pass",
+      "ar": 0.3,
+      "ar_gen": 0.9528,
+      "diff": 0.653,
+      "low_channel": "ar"
+    },
+    {
+      "row": 9,
+      "kind": "hallucinated",
+      "manual": "fail",
+      "ar": 0.4,
+      "ar_gen": 0.865,
+      "diff": 0.465,
+      "low_channel": "ar"
+    },
+    {
+      "row": 10,
+      "kind": "hallucinated",
+      "manual": "fail",
+      "ar": 1.0,
+      "ar_gen": 0.6355,
+      "diff": 0.365,
+      "low_channel": "ar_gen"
+    },
+    {
+      "row": 11,
+      "kind": "hallucinated",
+      "manual": "fail",
+      "ar": 0.44,
+      "ar_gen": 0.8802,
+      "diff": 0.44,
+      "low_channel": "ar"
+    },
+    {
+      "row": 13,
+      "kind": "hallucinated",
+      "manual": "fail",
+      "ar": 0.34,
+      "ar_gen": 0.9555,
+      "diff": 0.615,
+      "low_channel": "ar"
+    },
+    {
+      "row": 14,
+      "kind": "hallucinated",
+      "manual": "fail",
+      "ar": 1.0,
+      "ar_gen": 0.7836,
+      "diff": 0.216,
+      "low_channel": "ar_gen"
+    },
+    {
+      "row": 17,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.3,
+      "ar_gen": 0.6698,
+      "diff": 0.37,
+      "low_channel": "ar"
+    },
+    {
+      "row": 18,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.3,
+      "ar_gen": 0.9945,
+      "diff": 0.695,
+      "low_channel": "ar"
+    },
+    {
+      "row": 19,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.1,
+      "ar_gen": 0.7904,
+      "diff": 0.69,
+      "low_channel": "ar"
+    },
+    {
+      "row": 20,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.3,
+      "ar_gen": 0.9055,
+      "diff": 0.605,
+      "low_channel": "ar"
+    },
+    {
+      "row": 21,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.3,
+      "ar_gen": 0.9937,
+      "diff": 0.694,
+      "low_channel": "ar"
+    },
+    {
+      "row": 22,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.1,
+      "ar_gen": 0.9833,
+      "diff": 0.883,
+      "low_channel": "ar"
+    },
+    {
+      "row": 23,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.16,
+      "ar_gen": 0.8952,
+      "diff": 0.735,
+      "low_channel": "ar"
+    },
+    {
+      "row": 24,
+      "kind": "truncated",
+      "manual": "fail",
+      "ar": 0.1,
+      "ar_gen": 0.9104,
+      "diff": 0.81,
+      "low_channel": "ar"
+    }
+  ],
+  "dispute_resolution_@0.7": {
+    "n_disputes": 15,
+    "use_low_channel": {
+      "agree": 12,
+      "total": 15,
+      "rate": 0.8,
+      "kappa": -0.0976,
+      "human_pass_auto_fail": 2,
+      "human_fail_auto_pass": 1
+    },
+    "use_high_channel": {
+      "agree": 3,
+      "total": 15,
+      "rate": 0.2,
+      "kappa": 0.0217,
+      "human_pass_auto_fail": 0,
+      "human_fail_auto_pass": 12
+    },
+    "human_labels": {
+      "6": "pass",
+      "7": "pass",
+      "9": "fail",
+      "10": "fail",
+      "11": "fail",
+      "13": "fail",
+      "14": "fail",
+      "17": "fail",
+      "18": "fail",
+      "19": "fail",
+      "20": "fail",
+      "21": "fail",
+      "22": "fail",
+      "23": "fail",
+      "24": "fail"
+    }
+  }
+}
