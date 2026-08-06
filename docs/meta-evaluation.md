@@ -109,7 +109,7 @@ EVAL_JUDGE_SAMPLES=5 python run.py   # 开启 5 次采样
 | 人工黄金集 | 数据集管理 + 报告人工复核 |
 | 自动 vs 人工一致性 | 报告 `manual_auto_agreement_rate` |
 | 与 RAGAS 对照 | `scripts/compare_with_ragas.py` |
-| 重测信度 | `EVAL_JUDGE_SAMPLES` 多采样 + `judge_std_mean` |
+| 重测信度 | `EVAL_JUDGE_SAMPLES` 多采样 + `judge_std_mean` | **已实测**（2026-08-06：mean_std 0.0193，见 5.4） |
 | 成本/延迟/失败率 | 报告 `cost` / `execution_time_ms` / `error_count` |
 | 回归稳定性 | 报告对比（baseline vs current） |
 | 盲测去偏 | 盲测 md5 随机化左右展示 |
@@ -368,3 +368,33 @@ EVAL_JUDGE_SAMPLES=5 python run.py   # 开启 5 次采样
 顺带一个提醒：这些相关性变化幅度不大（0.02~0.10）且 n=25，裁判采样波动本身就能
 解释一部分，不宜过度解读。真正大而明确的是结构性结论：检索侧偏离归零、幻觉样本
 偏离从 0.284 崩到 0.028。
+
+### 5.4 信度实测（重测信度，2026-08-06 真实运行）
+
+实验 D 落地：`EVAL_JUDGE_SAMPLES=5` 真实评测（25 行混合集：9 正确 / 8 幻觉 /
+8 截断；双通道验收场景 4 个 LLM 指标 + 2 个检索侧指标；每行每指标 5 次采样，
+共 500+ 次 Qwen Plus 调用，零失败）。任务级结果：
+
+| 指标 | 采样平均分 | judge_std_mean | 低置信对 |
+|------|-----------|---------------|---------|
+| faithfulness | 0.705 | **0.029** | 2 |
+| faithfulness_claim | 0.661 | **0.016** | 1 |
+| answer_relevancy | 0.739 | **0.039** | 1 |
+| answer_relevancy_generative | 0.910 | **0.022** | 1 |
+| context_recall | 0.972 | **0.010** | 1 |
+| context_precision | 1.000 | **0.000** | 0 |
+
+任务级聚合：**mean_std = 0.0193**（低置信阈值 0.1；稳定判据 < 0.05 → **评分稳定**）；
+低置信对 6/150（4%），其中 5 个落在截断类样本——**裁判的不确定性集中在边界样本
+上**，低置信度标记因此有实际筛选价值（"哪些行该人工复核"）。分层方差（采样 std
+均值，correct → hallucinated → truncated 单调上升）：
+
+| 分层 | faithfulness | faithfulness_claim | answer_relevancy | generative |
+|------|-------------|-------------------|------------------|-----------|
+| correct (9) | 0.000 | 0.000 | 0.027 | 0.009 |
+| hallucinated (8) | 0.011 | 0.000 | 0.033 | 0.015 |
+| truncated (8) | **0.080** | **0.050** | **0.058** | **0.045** |
+
+方差随样本难度单调上升、集中在截断类——信度数字本身可解释，不是笼统的"稳定"。
+成本与实用性：901k tokens ≈ **¥1.41**（25 行 × 6 指标 × 5 采样），error_count = 0。
+至此元评价四维（区分度 / 结构效度 / 信度 / 实用性）全部有实测数据。
