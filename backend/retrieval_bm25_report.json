@@ -1,0 +1,3553 @@
+{
+  "dataset": "售后政策对照集（含坏样本）",
+  "rows": 25,
+  "k": 5,
+  "kb_chunk_keys": [
+    "doc-2-chunk-0",
+    "doc-3-chunk-0",
+    "doc-4-chunk-0",
+    "doc-5-chunk-0",
+    "doc-6-chunk-0",
+    "doc-7-chunk-0"
+  ],
+  "distractor_pool": 26,
+  "hard_negative_pool": 10,
+  "retrieval": "BM25 (bigram, k1=1.5, b=0.75)",
+  "note": "retrieved_ids 全部来自 BM25 排序，未混入 reference_context_ids；上一版脚本用 noise_ids + reference_ids 构造检索结果，指标是闭式解而非测量，已废弃。规则版 precision（查询覆盖度阈值法）因对问句-段落匹配不可校准而移除，见脚本内注释。",
+  "results": [
+    {
+      "label": "纯知识库（无干扰）",
+      "corpus_size": 6,
+      "distractors": 0,
+      "hard_negatives": 0,
+      "scored_rows": 25,
+      "hit_rate_at_1": 1.0,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 1.0,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "无关干扰 ×5",
+      "corpus_size": 11,
+      "distractors": 5,
+      "hard_negatives": 0,
+      "scored_rows": 25,
+      "hit_rate_at_1": 1.0,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 1.0,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "distractor-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "distractor-2",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "distractor-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "distractor-2",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "无关干扰 ×10",
+      "corpus_size": 16,
+      "distractors": 10,
+      "hard_negatives": 0,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.96,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.98,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "distractor-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0",
+            "distractor-2",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "distractor-0",
+            "distractor-7",
+            "distractor-6",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "distractor-2",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-7",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "distractor-6",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "无关干扰 ×20",
+      "corpus_size": 26,
+      "distractors": 20,
+      "hard_negatives": 0,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.96,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.98,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "distractor-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "distractor-0",
+            "distractor-6",
+            "distractor-7",
+            "distractor-15"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "distractor-18",
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-7",
+            "distractor-15"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "distractor-6",
+            "doc-3-chunk-0",
+            "distractor-12",
+            "distractor-19"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "无关干扰 ×全部",
+      "corpus_size": 32,
+      "distractors": 26,
+      "hard_negatives": 0,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.96,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.98,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "distractor-20"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "distractor-22"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "distractor-20"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "distractor-0",
+            "distractor-20",
+            "distractor-6",
+            "distractor-7"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "distractor-20"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-20"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "distractor-18",
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-7",
+            "distractor-15"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "distractor-22",
+            "distractor-6",
+            "doc-3-chunk-0",
+            "distractor-12"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-20"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "同域难负例 ×3",
+      "corpus_size": 9,
+      "distractors": 0,
+      "hard_negatives": 3,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.96,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.98,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "hardneg-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "hardneg-0",
+            "doc-3-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-2-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-1",
+            "doc-4-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "同域难负例 ×5",
+      "corpus_size": 11,
+      "distractors": 0,
+      "hard_negatives": 5,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.96,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.98,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "hardneg-3",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-4",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "hardneg-3",
+            "doc-7-chunk-0",
+            "hardneg-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "hardneg-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-4",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-4",
+            "hardneg-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "hardneg-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-2-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-1",
+            "doc-4-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "同域难负例 ×全部",
+      "corpus_size": 16,
+      "distractors": 0,
+      "hard_negatives": 10,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.88,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.94,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "hardneg-3",
+            "hardneg-5"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-6",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "hardneg-9",
+            "hardneg-8",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-9",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "hardneg-7",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "hardneg-3",
+            "doc-7-chunk-0",
+            "hardneg-7",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-7",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "hardneg-7",
+            "doc-3-chunk-0",
+            "doc-5-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "hardneg-6",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-4"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-8"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-8",
+            "hardneg-5"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "hardneg-8",
+            "doc-3-chunk-0",
+            "hardneg-0",
+            "hardneg-5"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "hardneg-8",
+            "hardneg-5",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-9",
+            "hardneg-2",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-2",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "hardneg-6",
+            "doc-3-chunk-0",
+            "hardneg-1",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-6",
+            "doc-4-chunk-0",
+            "doc-2-chunk-0"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    },
+    {
+      "label": "无关全部 + 难负例全部",
+      "corpus_size": 42,
+      "distractors": 26,
+      "hard_negatives": 10,
+      "scored_rows": 25,
+      "hit_rate_at_1": 0.84,
+      "hit_rate_at_3": 1.0,
+      "hit_rate_at_5": 1.0,
+      "mrr": 0.9133,
+      "rule_recall": 1.0,
+      "hit_rate_by_kind": {
+        "correct": 1.0,
+        "hallucinated": 1.0,
+        "truncated": 1.0
+      },
+      "detail": [
+        {
+          "user_input": "云购商城的三级售后保障分别是什么？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "hardneg-3",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "7天无理由退货的起算时间是什么时候？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "申请7天无理由退货对商品状态有什么要求？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已激活的手机数码产品是否支持7天无理由退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-2-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "用户提交退货申请后，需要在多长时间内将商品寄回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-7-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-6"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家完成退货验收后，退款会在多久内退回？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "hardneg-9",
+            "doc-6-chunk-0",
+            "hardneg-8",
+            "hardneg-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家在什么情况下可以拒绝退货？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家拒绝退货后，用户有哪些处理方式可以选择？",
+          "kind": "correct",
+          "gold": [
+            "doc-3-chunk-0"
+          ],
+          "retrieved": [
+            "doc-3-chunk-0",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-9",
+            "doc-6-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
+          "kind": "correct",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "hardneg-7",
+            "doc-7-chunk-0",
+            "doc-2-chunk-0",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修周期一般是多久？复杂故障最长需要多长时间？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "distractor-20",
+            "distractor-0",
+            "distractor-6",
+            "hardneg-3"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "维修期间可以申请备用机吗？有什么限制条件？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-7",
+            "doc-4-chunk-0",
+            "doc-7-chunk-0",
+            "doc-6-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "超过保修期的商品如何维修？维修前会如何处理报价？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-4-chunk-0"
+          ],
+          "retrieved": [
+            "doc-4-chunk-0",
+            "doc-2-chunk-0",
+            "hardneg-7",
+            "doc-3-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "hardneg-6",
+            "doc-5-chunk-0",
+            "doc-4-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-4"
+          ],
+          "rank_of_gold": 2
+        },
+        {
+          "user_input": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-2-chunk-0",
+            "hardneg-0",
+            "doc-5-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 3
+        },
+        {
+          "user_input": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "distractor-20",
+            "distractor-2"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-5-chunk-0"
+          ],
+          "retrieved": [
+            "doc-5-chunk-0",
+            "distractor-18",
+            "doc-3-chunk-0",
+            "doc-6-chunk-0",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收后多少天内可以申请售后？",
+          "kind": "hallucinated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-7-chunk-0",
+            "doc-5-chunk-0",
+            "hardneg-2",
+            "doc-3-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "超过30天售后申请时效后还能申请售后吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-2-chunk-0",
+            "doc-4-chunk-0",
+            "doc-5-chunk-0",
+            "distractor-14"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "商家验收通过后，退款一般多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "distractor-7",
+            "distractor-15"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "使用微信支付退款，通常多久到账？",
+          "kind": "truncated",
+          "gold": [
+            "doc-6-chunk-0"
+          ],
+          "retrieved": [
+            "doc-6-chunk-0",
+            "distractor-22",
+            "hardneg-8",
+            "distractor-6",
+            "hardneg-5"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "非保价商品可以申请差价补偿吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "hardneg-8",
+            "hardneg-5",
+            "doc-5-chunk-0",
+            "hardneg-6"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时赠品需要一起退回吗？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "hardneg-9",
+            "hardneg-2",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "退货时如果没有将赠品一并寄回会怎样？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-4-chunk-0",
+            "hardneg-2",
+            "hardneg-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "hardneg-6",
+            "doc-3-chunk-0",
+            "hardneg-0",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        },
+        {
+          "user_input": "已经签收的商品发现损坏，需要在多长时间内反馈？",
+          "kind": "truncated",
+          "gold": [
+            "doc-7-chunk-0"
+          ],
+          "retrieved": [
+            "doc-7-chunk-0",
+            "doc-3-chunk-0",
+            "doc-2-chunk-0",
+            "hardneg-6",
+            "doc-4-chunk-0"
+          ],
+          "rank_of_gold": 1
+        }
+      ]
+    }
+  ]
+}

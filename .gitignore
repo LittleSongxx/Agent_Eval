@@ -37,3 +37,6 @@ frontend/tsconfig.tsbuildinfo
 .vscode/
 *.swp
 *.swo
+
+# Transient experiment artifacts
+backend/ragas_comparison_checkpoint.json

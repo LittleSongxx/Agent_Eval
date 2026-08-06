@@ -2151,3 +2151,241 @@ def test_claim_faithfulness_empty_claims_scores_zero():
     )
     assert result.value == 0.0
     assert "未包含可核验断言" in result.reason
+
+
+def test_sample_payload_hides_generation_meta_from_judge():
+    """数据集生成元数据不得进入 Judge 可见的 sample。
+
+    generation_meta 里带有样本的构造标签（如 kind=hallucinated），
+    等于把答案泄露给裁判，会虚高指标的区分度，使评测结果失去效力。
+    """
+    import json
+
+    from app.core.evaluation_engine import _sample_payload
+
+    payload = _sample_payload(
+        {
+            "user_input": "保修期多长？",
+            "response": "保修期为 1 年。",
+            "reference": "保修期一般为 1 年。",
+            "retrieved_contexts": ["保修期一般为 1 年，自签收日计算。"],
+            "generation_meta": {"kind": "hallucinated", "sample_id": 7},
+        }
+    )
+
+    assert "generation_meta" not in payload
+    # 键不在还不够：标签字符串不能出现在 payload 任何角落
+    assert "hallucinated" not in json.dumps(payload, ensure_ascii=False)
+    # 正常字段不受影响
+    assert payload["user_input"] == "保修期多长？"
+    assert payload["response"] == "保修期为 1 年。"
+    assert payload["retrieved_contexts"] == ["保修期一般为 1 年，自签收日计算。"]
+
+
+def test_builtin_llm_metric_judge_prompt_excludes_generation_meta():
+    """端到端：内置 LLM 指标下发给裁判的 payload 不含构造标签。"""
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import build_metric
+
+    captured = {}
+
+    class CapturingJudge:
+        api_base_url = "http://x"
+        api_key = "k"
+        model = "m"
+
+        async def judge_json(self, payload):
+            captured["payload"] = payload
+            return {"score": 1.0, "reason": "上下文覆盖了参考答案要点。"}
+
+    _kind, metric = build_metric(
+        SimpleNamespace(
+            id=0,
+            name="context_recall",
+            display_name="context_recall",
+            metric_type="builtin_context_recall",
+            config={},
+            required_fields=[],
+            category="rag",
+            is_builtin=True,
+        ),
+        llm=None,
+    )
+    asyncio.run(
+        metric.ascore(
+            {
+                "user_input": "保修期多长？",
+                "response": "保修期为 10 年。",
+                "reference": "保修期一般为 1 年。",
+                "retrieved_contexts": ["保修期一般为 1 年，自签收日计算。"],
+                "generation_meta": {"kind": "hallucinated"},
+            },
+            CapturingJudge(),
+        )
+    )
+
+    serialized = json.dumps(captured["payload"], ensure_ascii=False)
+    assert "generation_meta" not in serialized
+    assert "hallucinated" not in serialized
+
+
+def _capture_judge_sample(metric_type: str, row_data: dict, metric_name: str | None = None) -> dict:
+    """构建内置指标、跑一次打分，返回它实际下发给裁判的 sample 块。
+
+    缺陷 B 的回归测试都依赖"实际下发了什么"，而不是"声明了什么"——
+    口径越界的本质就是两者不一致，所以只能抓真实 payload。
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.evaluation_engine import build_metric
+
+    captured: dict = {}
+
+    class CapturingJudge:
+        api_base_url = "http://x"
+        api_key = "k"
+        model = "m"
+
+        async def judge_json(self, payload):
+            captured["payload"] = payload
+            return {"score": 1.0, "reason": "占位理由。"}
+
+    name = metric_name or metric_type.replace("builtin_", "")
+    _kind, metric = build_metric(
+        SimpleNamespace(
+            id=0,
+            name=name,
+            display_name=name,
+            metric_type=metric_type,
+            config={},
+            required_fields=[],
+            category="rag",
+            is_builtin=True,
+        ),
+        llm=None,
+    )
+    asyncio.run(metric.ascore(dict(row_data), CapturingJudge()))
+    return captured["payload"]["sample"]
+
+
+_FULL_ROW = {
+    "user_input": "保修期多长？",
+    "response": "保修期为 10 年。",
+    "reference": "保修期一般为 1 年。",
+    "retrieved_contexts": ["保修期一般为 1 年，自签收日计算。"],
+    "reference_topics": ["保修政策"],
+    "reference_role": "售后客服",
+    "reference_tool_calls": [{"name": "query_policy"}],
+    "tool_calls": [{"name": "query_policy"}],
+    "generation_meta": {"kind": "hallucinated"},
+}
+
+
+def test_sample_payload_allow_fields_is_strict_whitelist():
+    """allow_fields 给定时必须严格白名单，兜底循环整段不生效。"""
+    from app.core.evaluation_engine import _sample_payload
+
+    payload = _sample_payload(
+        {
+            "user_input": "问题",
+            "response": "回答",
+            "reference": "参考",
+            "retrieved_contexts": ["上下文"],
+            "source_document_names": ["policy.md"],
+        },
+        allow_fields=["reference", "retrieved_contexts"],
+    )
+
+    assert set(payload) == {"reference", "retrieved_contexts"}
+    # 白名单不给的字段一律不下发，哪怕它在 important_fields 里
+    assert "response" not in payload
+    assert "user_input" not in payload
+    # 兜底循环失效：口径外的普通字段也不会被补进来
+    assert "source_document_names" not in payload
+
+
+def test_retrieval_side_metrics_do_not_see_response():
+    """缺陷 B 核心：检索侧指标不得看到 response。
+
+    检索侧指标衡量的是"检索到的上下文够不够好"，与回答写得对不对无关。
+    裁判一旦看到错误回答，会把生成质量算进检索分——A/B 实验已证实：
+    屏蔽 response 后 context_recall / context_precision 在幻觉样本上
+    从 0.79/0.81 回到 1.0，与 RAGAS 完全一致。
+    """
+    import json
+
+    for metric_type in (
+        "builtin_context_recall",
+        "builtin_context_precision",
+        "builtin_contextual_relevancy",
+    ):
+        sample = _capture_judge_sample(metric_type, _FULL_ROW)
+        assert "response" not in sample, f"{metric_type} 仍能看到 response"
+        # 键不在还不够：回答内容不能以任何形式出现在 sample 里
+        assert "10 年" not in json.dumps(sample, ensure_ascii=False), (
+            f"{metric_type} 的 sample 里出现了回答内容"
+        )
+
+
+def test_answer_relevancy_does_not_see_reference():
+    """缺陷 B 生成侧那一半：只判"是否回应问题"的指标不得看到参考答案。
+
+    看到 reference 会让裁判把事实错误也算进扣分，指标口径从"相关性"
+    悄悄漂移成"正确性"——这是它与 RAGAS answer_relevancy 只有 0.44
+    相关的根因（RAGAS 侧不惩罚事实错误）。
+    """
+    sample = _capture_judge_sample("builtin_answer_relevancy", _FULL_ROW)
+
+    assert "reference" not in sample
+    assert "retrieved_contexts" not in sample
+    # 它该看的两个字段必须在
+    assert sample["user_input"] == "保修期多长？"
+    assert sample["response"] == "保修期为 10 年。"
+
+
+def test_agent_and_multi_turn_metrics_still_see_response():
+    """防过度修正：判断"AI 回复好不好"的指标必须看得到 response。
+
+    这些指标不把 response 列入 required_fields，是因为 Agent/多轮评测跑真实
+    接口、回复在运行时才注入。如果有人把可见范围直接等同于 required_fields
+    来"修"缺陷 B，这 8 个指标会瞎判——本测试就是拦这个的。
+    """
+    for metric_type in (
+        "builtin_agent_goal_accuracy",
+        "builtin_task_completion",
+        "builtin_topic_adherence",
+        "builtin_turn_relevancy",
+        "builtin_conversation_completeness",
+        "builtin_knowledge_retention",
+        "builtin_role_adherence",
+        "builtin_turn_faithfulness",
+    ):
+        sample = _capture_judge_sample(metric_type, _FULL_ROW)
+        assert "response" in sample, f"{metric_type} 看不到 response，无法判断回复质量"
+        assert sample["response"] == "保修期为 10 年。"
+
+
+def test_every_builtin_spec_declares_judge_fields_covering_required():
+    """结构不变量：每个内置指标都必须显式声明可见范围，且不能校验后瞎判。
+
+    新增指标若忘记声明 judge_fields，会退回 required_fields——对检索侧是安全的，
+    但对"要看 response 却不把它列为必需"的指标就是静默瞎判。因此这里强制显式声明。
+    """
+    from app.core.prompt_manager import (
+        BUILTIN_LLM_METRIC_SPECS,
+        NAMED_LLM_METRIC_SPECS,
+    )
+
+    all_specs = {**BUILTIN_LLM_METRIC_SPECS, **NAMED_LLM_METRIC_SPECS}
+    assert all_specs, "指标 spec 注册表为空，测试失去意义"
+
+    for key, spec in all_specs.items():
+        judge_fields = spec.get("judge_fields")
+        assert judge_fields, f"{key} 未声明 judge_fields"
+        # 校验门槛内的字段必须对裁判可见，否则等于"要求存在却不给看"
+        missing = set(spec.get("required_fields") or []) - set(judge_fields)
+        assert not missing, f"{key} 的必需字段对裁判不可见: {sorted(missing)}"

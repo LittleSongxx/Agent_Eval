@@ -1,5 +1,5 @@
 {
-  "_note": "n=25 平台 vs RAGAS 对照（9 正确 / 8 幻觉注入 / 8 截断）。各指标数据来源见 _provenance：基础指标为两个缺陷修复后重跑；双通道指标因机制上不受两个缺陷影响而沿用。",
+  "rows": 25,
   "kinds": [
     "correct",
     "correct",
@@ -27,13 +27,12 @@
     "truncated",
     "truncated"
   ],
-  "rows": 25,
   "metrics": {
     "faithfulness": {
-      "platform_mean": 0.728,
+      "platform_mean": 0.7080000000000001,
       "ragas_mean": 0.6885714285714286,
-      "pearson": 0.7347,
-      "spearman": 0.7567,
+      "pearson": 0.6379,
+      "spearman": 0.6946,
       "n": 25,
       "by_kind": {
         "correct": {
@@ -43,7 +42,7 @@
         },
         "hallucinated": {
           "n": 8,
-          "platform_mean": 0.3625,
+          "platform_mean": 0.3,
           "ragas_mean": 0.4643
         },
         "truncated": {
@@ -62,21 +61,21 @@
         1.0,
         1.0,
         1.0,
-        0.2,
+        0.1,
         0.0,
-        0.5,
-        0.5,
-        0.5,
-        0.5,
-        0.5,
+        0.3,
+        0.3,
         0.2,
+        0.5,
+        0.5,
+        0.5,
         0.8,
         1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
         0.5,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
         0.0
       ],
       "ragas_scores": [
@@ -105,14 +104,7 @@
         0.0,
         0.5,
         0.0
-      ],
-      "_provenance": {
-        "source": "ragas_comparison_report_n25_scoped.json",
-        "run_at": "2026-08-06 15:28:49",
-        "defect_a_fixed": true,
-        "defect_b_fixed": true,
-        "note": "标签泄露 + 口径越界两个缺陷均已修复后重跑"
-      }
+      ]
     },
     "faithfulness_claim": {
       "platform_mean": 0.648572,
@@ -190,35 +182,28 @@
         0.0,
         0.5,
         0.0
-      ],
-      "_provenance": {
-        "source": "ragas_comparison_report_n25.json",
-        "run_at": "2026-08-06 13:05:38",
-        "defect_a_fixed": false,
-        "defect_b_fixed": false,
-        "note": "该指标不经过 _sample_payload，只读取自身声明的字段：既未收到 generation_meta（缺陷 A），也不受 judge_fields 白名单约束（缺陷 B）。两个修复的 diff 均不落在该类，故沿用修复前数值。"
-      }
+      ]
     },
     "answer_relevancy": {
-      "platform_mean": 0.7440000000000001,
-      "ragas_mean": 0.8087926740111009,
-      "pearson": 0.3728,
-      "spearman": 0.2391,
+      "platform_mean": 0.752,
+      "ragas_mean": 0.808792674011101,
+      "pearson": 0.0292,
+      "spearman": 0.198,
       "n": 25,
       "by_kind": {
         "correct": {
           "n": 9,
-          "platform_mean": 0.9333,
+          "platform_mean": 1.0,
           "ragas_mean": 0.8999
         },
         "hallucinated": {
           "n": 8,
-          "platform_mean": 0.85,
+          "platform_mean": 0.4875,
           "ragas_mean": 0.8216
         },
         "truncated": {
           "n": 8,
-          "platform_mean": 0.425,
+          "platform_mean": 0.7375,
           "ragas_mean": 0.6934
         }
       },
@@ -230,23 +215,23 @@
         1.0,
         1.0,
         1.0,
-        0.4,
-        1.0,
-        0.8,
-        1.0,
-        0.8,
-        1.0,
-        0.5,
-        1.0,
-        0.7,
         1.0,
         1.0,
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
         0.3,
+        0.2,
+        0.5,
+        0.7,
+        0.2,
+        0.8,
+        0.6,
+        0.6,
+        1.0,
+        1.0,
+        0.9,
+        1.0,
+        1.0,
+        0.1,
+        0.8,
         0.1
       ],
       "ragas_scores": [
@@ -275,14 +260,7 @@
         0.9211030181354962,
         0.6039493018736731,
         0.7625319667410211
-      ],
-      "_provenance": {
-        "source": "ragas_comparison_report_n25_scoped.json",
-        "run_at": "2026-08-06 15:28:49",
-        "defect_a_fixed": true,
-        "defect_b_fixed": true,
-        "note": "标签泄露 + 口径越界两个缺陷均已修复后重跑"
-      }
+      ]
     },
     "answer_relevancy_generative": {
       "platform_mean": 0.913116,
@@ -360,19 +338,12 @@
         0.9211030181354962,
         0.639337767349998,
         0.7625319667410211
-      ],
-      "_provenance": {
-        "source": "ragas_comparison_report_n25.json",
-        "run_at": "2026-08-06 13:05:38",
-        "defect_a_fixed": false,
-        "defect_b_fixed": false,
-        "note": "该指标不经过 _sample_payload，只读取自身声明的字段：既未收到 generation_meta（缺陷 A），也不受 judge_fields 白名单约束（缺陷 B）。两个修复的 diff 均不落在该类，故沿用修复前数值。"
-      }
+      ]
     },
     "context_precision": {
-      "platform_mean": 1.0,
-      "ragas_mean": 0.9999999998999999,
-      "pearson": NaN,
+      "platform_mean": 0.96,
+      "ragas_mean": 0.9999999998999993,
+      "pearson": 0.0,
       "spearman": NaN,
       "n": 25,
       "by_kind": {
@@ -383,7 +354,7 @@
         },
         "hallucinated": {
           "n": 8,
-          "platform_mean": 1.0,
+          "platform_mean": 0.875,
           "ragas_mean": 1.0
         },
         "truncated": {
@@ -403,7 +374,7 @@
         1.0,
         1.0,
         1.0,
-        1.0,
+        0.0,
         1.0,
         1.0,
         1.0,
@@ -445,17 +416,10 @@
         0.9999999999,
         0.9999999999,
         0.9999999999
-      ],
-      "_provenance": {
-        "source": "ragas_comparison_report_n25_scoped.json",
-        "run_at": "2026-08-06 15:28:49",
-        "defect_a_fixed": true,
-        "defect_b_fixed": true,
-        "note": "标签泄露 + 口径越界两个缺陷均已修复后重跑"
-      }
+      ]
     },
     "context_recall": {
-      "platform_mean": 1.0,
+      "platform_mean": 0.932,
       "ragas_mean": 1.0,
       "pearson": NaN,
       "spearman": NaN,
@@ -468,7 +432,7 @@
         },
         "hallucinated": {
           "n": 8,
-          "platform_mean": 1.0,
+          "platform_mean": 0.7875,
           "ragas_mean": 1.0
         },
         "truncated": {
@@ -488,11 +452,11 @@
         1.0,
         1.0,
         1.0,
+        0.0,
         1.0,
+        0.5,
         1.0,
-        1.0,
-        1.0,
-        1.0,
+        0.8,
         1.0,
         1.0,
         1.0,
@@ -530,14 +494,7 @@
         1.0,
         1.0,
         1.0
-      ],
-      "_provenance": {
-        "source": "ragas_comparison_report_n25_scoped.json",
-        "run_at": "2026-08-06 15:28:49",
-        "defect_a_fixed": true,
-        "defect_b_fixed": true,
-        "note": "标签泄露 + 口径越界两个缺陷均已修复后重跑"
-      }
+      ]
     }
   }
 }

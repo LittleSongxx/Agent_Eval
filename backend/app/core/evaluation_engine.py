@@ -195,6 +195,16 @@ class NativeBuiltinLLMMetric:
         self.required_fields = list(
             self.config.get("required_fields") or spec.get("required_fields") or []
         )
+        # 下发给裁判的可见范围。与 required_fields 是两件事：后者是"必须存在
+        # 才打分"的校验门槛，前者是"裁判能看到什么"。两个集合本就不相等——
+        # 检索侧指标不能看 response，Agent/多轮指标要看 response 但不能把它
+        # 列为必需（回复由接口在运行时注入）。详见 prompt_manager 的说明。
+        # 没有声明时退回 required_fields，保证新增指标默认是收紧的而非放开的。
+        self.judge_fields = list(
+            self.config.get("judge_fields")
+            or spec.get("judge_fields")
+            or self.required_fields
+        )
         self.criteria = (prompt_override or "").strip() or spec["criteria"]
         self.description = self.config.get("description")
 
@@ -214,7 +224,7 @@ class NativeBuiltinLLMMetric:
                 "description": self.description,
                 "required_fields": self.required_fields,
             },
-            "sample": _sample_payload(row_data),
+            "sample": _sample_payload(row_data, allow_fields=self.judge_fields),
             "instruction": BUILTIN_LLM_SCORE_INSTRUCTION,
         }
         result = await judge.judge_json(payload)
@@ -1725,10 +1735,30 @@ def _render_custom_prompt_and_sample(
     return prompt, _sample_payload(row_data, exclude_fields=_excluded_sample_fields(referenced_fields))
 
 
+# 永不下发给 Judge 的字段：数据集生产过程留下的元信息。
+# generation_meta 里可能带有样本的真值标记（如 {"kind": "hallucinated"}）或
+# 内部编号，一旦进入 Judge Prompt 就等于把答案泄露给裁判，评分不再是对回答
+# 质量的独立判断，指标区分度会被虚高。裁判只应看到被评测系统的输入与输出。
+_JUDGE_HIDDEN_FIELDS = {"generation_meta"}
+
+
 def _sample_payload(
-    row_data: dict[str, t.Any], exclude_fields: set[str] | None = None
+    row_data: dict[str, t.Any],
+    exclude_fields: set[str] | None = None,
+    allow_fields: t.Sequence[str] | None = None,
 ) -> dict[str, t.Any]:
-    exclude_fields = exclude_fields or set()
+    """Build the ``sample`` block of a Judge Prompt.
+
+    ``allow_fields`` 是白名单口径：给定时，**只有**名单内的字段会下发给裁判，
+    兜底循环整段跳过。内置指标走这条路径（名单来自 spec 的 ``judge_fields``），
+    以保证"指标只看它声明要看的东西"。
+
+    不给 ``allow_fields`` 时退回黑名单口径：重要字段优先、其余字段兜底补齐。
+    自定义 prompt 指标走这条路径——它的可见范围由用户自己写的模板决定，
+    平台不替用户裁剪。
+    """
+
+    exclude_fields = set(exclude_fields or set()) | _JUDGE_HIDDEN_FIELDS
     important_fields = [
         "user_input",
         "response",
@@ -1742,6 +1772,20 @@ def _sample_payload(
         "reference_role",
         "rubrics",
     ]
+
+    if allow_fields is not None:
+        # 白名单模式：严格按声明口径下发，顺序沿用 important_fields 以保持
+        # Judge Prompt 稳定（同一指标的 prompt 不因 dict 顺序变化而抖动），
+        # 名单里的非常规字段追加在后面。
+        allowed = [key for key in allow_fields if key not in exclude_fields]
+        ordered = [key for key in important_fields if key in allowed]
+        ordered += [key for key in allowed if key not in ordered]
+        return {
+            key: _json_safe(row_data[key])
+            for key in ordered
+            if key in row_data and row_data[key] is not None
+        }
+
     payload = {
         key: _json_safe(row_data[key])
         for key in important_fields

@@ -1,32 +1,52 @@
-"""检索噪声注入实验：验证检索侧指标对噪声的敏感性与区分度。
+"""检索侧实验：用真实 BM25 检索产出 retrieved_ids，度量检索指标对干扰项的敏感性。
 
-背景：合成数据集的 retrieved_contexts 直接取自源 chunk（= 完美检索），
-检索侧指标天然满分、无方差（天花板效应）。本实验向检索结果头部注入
-无关 chunk（模拟"无关文档排前面"的检索退化），验证：
-1. 确定性指标 HitRate@K / MRR 随噪声数量单调下降（区分度证据）；
-2. 自研"规则版"上下文相关性（查询覆盖度阈值 0.4，与 RAGAS NonLLM
-   规则版同思路）随噪声数量下降，且与确定性指标方向一致。
+背景与本脚本的一次自我纠错
+--------------------------
+合成数据集的 `retrieved_contexts` 直接取自源 chunk（= 完美检索），检索侧指标
+天然满分、无方差（天花板效应）。本脚本的**上一版**试图这样制造方差：
+
+    retrieved_ids = noise_ids + list(base_reference_ids)   # 噪声恒定插在金标前面
+
+这个构造是**同义反复**，不是测量：金标恒定排在第 noise_count+1 位，于是
+MRR ≡ 1/(noise_count+1)、HitRate@5 ≡ (noise_count < 5)，与数据集内容、
+与检索器质量、与 chunk 文本全都无关——换一份完全不相干的数据也是同一串数字。
+把它当作"检索指标随噪声单调下降 ⇒ 有区分度"的证据是循环论证。
+
+本版改为**真的检索**：把金标 chunk 和干扰 chunk 一起灌进 BM25 索引，让排序
+由 BM25 打分函数决定。`retrieved_ids` 只能来自 `index.search_with_ids()`，
+脚本任何位置都不得把 `reference_context_ids` 拼进检索结果——这一点由
+`tests/test_retrieval_experiment.py::test_experiment_ranking_is_data_dependent`
+把守（打乱金标文本后 HitRate 必须掉下来；同义反复的实现过不了这条）。
+
+两类干扰项，难度不同：
+1. **无关语料**（`_fixtures/distractor_corpus.md`）：手机/咖啡/编程/旅行等，
+   与售后政策零词汇重叠 —— 检索器应当几乎不受影响（易）；
+2. **同域难负例**（`_fixtures/hard_negatives.md`）：虚构"优选商城"的售后政策，
+   与金标同主题、同术语、不同数字 —— 压力测试 BM25 的区分能力（难）。
+
+知识库口径：索引 = 数据集 `reference_context_ids` 引用到的那些 chunk（本数据集
+为 job 2 的 6 个 chunk）+ 干扰项。刻意不含 job 1 的 `doc-1-chunk-*`：那两个 chunk
+是同一份政策文档的粗粒度切分，内容**包含** `doc-2-chunk-0` 的全文，一旦入索引
+就会出现"检索到的 chunk 确实含答案、但 ID 不等于金标 ID"的假阴性，污染 ID 级
+命中率的口径。需要复现该重复内容场景时用 `--include-chunk-keys` 显式加入。
 
 用法：
     cd backend
-    python -m scripts.retrieval_noise_experiment \
-        --dataset "售后政策对照集（含坏样本）" \
-        --noise-corpus /tmp/unrelated.md \
-        --noise-counts 0,2,5,10
+    python -m scripts.retrieval_noise_experiment --dataset "售后政策对照集（含坏样本）"
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import random
 import re
 import typing as t
 from pathlib import Path
 
-from scripts.bm25_mock_retriever import bigram_tokens
+from scripts.bm25_mock_retriever import BM25Index, bigram_tokens
 
 _K = 5
+_FIXTURES = Path(__file__).resolve().parent / "_fixtures"
 
 
 def _load_rows(dataset_name: str) -> list[dict[str, t.Any]]:
@@ -51,11 +71,37 @@ def _load_rows(dataset_name: str) -> list[dict[str, t.Any]]:
         db.close()
 
 
-def _load_noise_chunks(noise_source: str) -> list[str]:
-    """从文件/目录加载噪声 chunk（与知识库主题不同的内容）。"""
-    source = Path(noise_source)
+def _load_kb_chunks(chunk_keys: t.Iterable[str]) -> dict[str, str]:
+    """按 chunk_key 从 rag_dataset_chunks 取知识库正文，返回 {chunk_key: content}。"""
+    from app.core.database import SessionLocal
+    from app.models.rag_dataset_job import RagDatasetChunk
+
+    wanted = list(dict.fromkeys(chunk_keys))
+    db = SessionLocal()
+    try:
+        found = (
+            db.query(RagDatasetChunk)
+            .filter(RagDatasetChunk.chunk_key.in_(wanted))
+            .all()
+        )
+        mapping = {chunk.chunk_key: (chunk.content or "") for chunk in found}
+    finally:
+        db.close()
+
+    missing = [key for key in wanted if not mapping.get(key)]
+    if missing:
+        raise SystemExit(f"知识库缺少 chunk（无法建索引）: {missing}")
+    return {key: mapping[key] for key in wanted}
+
+
+def _load_corpus_chunks(source: str | Path) -> list[str]:
+    """从文件/目录加载干扰 chunk（按空行切分，最短 20 字符）。"""
+    source_path = Path(source)
     chunks: list[str] = []
-    files = [source] if source.is_file() else sorted(source.glob("*.md")) + sorted(source.glob("*.txt"))
+    if source_path.is_file():
+        files = [source_path]
+    else:
+        files = sorted(source_path.glob("*.md")) + sorted(source_path.glob("*.txt"))
     for file_path in files:
         content = file_path.read_text(encoding="utf-8", errors="ignore")
         for block in re.split(r"\n{2,}", content):
@@ -63,8 +109,26 @@ def _load_noise_chunks(noise_source: str) -> list[str]:
             if len(block) >= 20:
                 chunks.append(block)
     if not chunks:
-        raise SystemExit(f"噪声语料为空: {noise_source}")
+        raise SystemExit(f"干扰语料为空: {source}")
     return chunks
+
+
+def _strip_fixture_preamble(chunks: list[str]) -> list[str]:
+    """丢掉 fixture 顶部的说明段落，只留真正的干扰内容。
+
+    说明段带 markdown 标题或"本文件/用法/选材原则"等字样，不该进索引。
+    """
+    dropped_markers = ("#", "---")
+    prose_markers = ("本文件", "用法", "选材原则", "每段", "每个段落")
+    kept: list[str] = []
+    for chunk in chunks:
+        stripped = chunk.strip()
+        if stripped.startswith(dropped_markers):
+            continue
+        if any(marker in stripped for marker in prose_markers):
+            continue
+        kept.append(chunk)
+    return kept
 
 
 def _sentence_overlap(text: str, chunk: str) -> float:
@@ -86,15 +150,12 @@ def _sentence_overlap(text: str, chunk: str) -> float:
 
 RULE_RELEVANCE_THRESHOLD = 0.4
 
-
-def _rule_context_precision(user_input: str, contexts: list[str]) -> float:
-    """规则版上下文相关性（NonLLM 风格）：查询覆盖度 ≥ 阈值的 chunk 占比。"""
-    if not contexts:
-        return 0.0
-    relevant = sum(
-        1 for ctx in contexts if _sentence_overlap(user_input, ctx) >= RULE_RELEVANCE_THRESHOLD
-    )
-    return relevant / len(contexts)
+# 注意：规则版 precision（查询覆盖度阈值法）已从本实验移除。实测对问句-段落匹配
+# 不可校准：纯知识库下按句覆盖度仅 0.13、整 chunk 覆盖度 0.21，且随同域难负例注入
+# 反向微升（硬负例与金标共享词汇，覆盖度无法区分）——该启发式对短中文问句
+# 无判别力，不构成有效信号。规则版 recall 保留：参考要点按句覆盖，作为
+# "top-K 是否真的覆盖了答案"的内容级召回 sanity（实测各场景恒为 1.0）。
+# 规则版对标路径保留给 RAGAS NonLLMContextPrecision（见路线图第四章）。
 
 
 def _rule_context_recall(reference: str, contexts: list[str]) -> float:
@@ -112,13 +173,17 @@ def _rule_context_recall(reference: str, contexts: list[str]) -> float:
     return hit / len(ref_sentences)
 
 
-def _hit_rate_at_k(retrieved_ids: list[str], reference_ids: list[str], k: int = _K) -> float:
+def _hit_rate_at_k(
+    retrieved_ids: list[str], reference_ids: list[str], k: int = _K
+) -> float | None:
+    """Top-K 里命中任一金标即 1.0。无金标时返回 None（不参与均值）。"""
     if not reference_ids:
         return None
     return 1.0 if set(retrieved_ids[:k]) & set(reference_ids) else 0.0
 
 
-def _mrr(retrieved_ids: list[str], reference_ids: list[str]) -> float:
+def _mrr(retrieved_ids: list[str], reference_ids: list[str]) -> float | None:
+    """首个金标命中的倒数排名。无金标时返回 None（不参与均值）。"""
     if not reference_ids:
         return None
     expected = set(reference_ids)
@@ -128,90 +193,200 @@ def _mrr(retrieved_ids: list[str], reference_ids: list[str]) -> float:
     return 0.0
 
 
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+class RetrievalScenario(t.NamedTuple):
+    label: str
+    distractors: int
+    hard_negatives: int
+
+
+def run_scenario(
+    rows: list[dict[str, t.Any]],
+    kb_chunks: dict[str, str],
+    distractors: list[str],
+    hard_negatives: list[str],
+    scenario: RetrievalScenario,
+    k: int = _K,
+) -> dict[str, t.Any]:
+    """在 (金标 chunk + 干扰项) 索引上真实检索 25 条查询，返回聚合指标。
+
+    干扰项按固定顺序取前 N 个（不随机抽样），保证同一 scenario 可复现。
+    """
+    corpus_ids = list(kb_chunks.keys())
+    corpus_texts = [kb_chunks[key] for key in corpus_ids]
+    for idx, text in enumerate(distractors[: scenario.distractors]):
+        corpus_ids.append(f"distractor-{idx}")
+        corpus_texts.append(text)
+    for idx, text in enumerate(hard_negatives[: scenario.hard_negatives]):
+        corpus_ids.append(f"hardneg-{idx}")
+        corpus_texts.append(text)
+
+    index = BM25Index(corpus_texts)
+    gold_id_set = set(kb_chunks.keys())
+    text_by_id = dict(zip(corpus_ids, corpus_texts))
+
+    hits_at_1: list[float] = []
+    hits_at_3: list[float] = []
+    hits_at_k: list[float] = []
+    mrr_values: list[float] = []
+    recall_values: list[float] = []
+    per_kind: dict[str, list[float]] = {}
+    detail: list[dict[str, t.Any]] = []
+
+    for row in rows:
+        user_input = str(row.get("user_input") or "")
+        reference_ids = [
+            rid for rid in (row.get("reference_context_ids") or []) if rid in gold_id_set
+        ]
+        if not reference_ids:
+            continue
+
+        # 唯一的检索来源：BM25 打分排序。绝不把 reference_ids 拼进来。
+        ranked = index.search_with_ids(user_input, corpus_ids, top_k=k)
+        retrieved_ids = [doc_id for doc_id, _score in ranked]
+        retrieved_texts = [text_by_id[doc_id] for doc_id in retrieved_ids]
+
+        hit_1 = _hit_rate_at_k(retrieved_ids, reference_ids, k=1)
+        hit_3 = _hit_rate_at_k(retrieved_ids, reference_ids, k=3)
+        hit_k = _hit_rate_at_k(retrieved_ids, reference_ids, k=k)
+        rr = _mrr(retrieved_ids, reference_ids)
+        recall = _rule_context_recall(str(row.get("reference") or ""), retrieved_texts)
+
+        for bucket, value in ((hits_at_1, hit_1), (hits_at_3, hit_3), (hits_at_k, hit_k), (mrr_values, rr)):
+            if value is not None:
+                bucket.append(value)
+        recall_values.append(recall)
+
+        kind = str((row.get("generation_meta") or {}).get("kind") or "unknown")
+        if hit_k is not None:
+            per_kind.setdefault(kind, []).append(hit_k)
+
+        reference_id_set = set(reference_ids)
+        detail.append(
+            {
+                "user_input": user_input,
+                "kind": kind,
+                "gold": reference_ids,
+                "retrieved": retrieved_ids,
+                "rank_of_gold": next(
+                    (i + 1 for i, rid in enumerate(retrieved_ids) if rid in reference_id_set),
+                    None,
+                ),
+            }
+        )
+
+    return {
+        "label": scenario.label,
+        "corpus_size": len(corpus_ids),
+        "distractors": scenario.distractors,
+        "hard_negatives": scenario.hard_negatives,
+        "scored_rows": len(recall_values),
+        "hit_rate_at_1": round(_mean(hits_at_1), 4),
+        "hit_rate_at_3": round(_mean(hits_at_3), 4),
+        f"hit_rate_at_{k}": round(_mean(hits_at_k), 4),
+        "mrr": round(_mean(mrr_values), 4),
+        "rule_recall": round(_mean(recall_values), 4),
+        "hit_rate_by_kind": {
+            kind: round(_mean(values), 4) for kind, values in sorted(per_kind.items())
+        },
+        "detail": detail,
+    }
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="检索噪声注入实验")
+    parser = argparse.ArgumentParser(description="BM25 端到端检索实验")
     parser.add_argument("--dataset", required=True, help="数据集名称")
-    parser.add_argument("--noise-corpus", required=True, help="无关噪声 chunk 来源（文件或目录）")
-    parser.add_argument("--noise-counts", default="0,2,5,10", help="注入的噪声 chunk 数量（逗号分隔）")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--distractor-corpus",
+        default=str(_FIXTURES / "distractor_corpus.md"),
+        help="无关干扰语料（易）",
+    )
+    parser.add_argument(
+        "--hard-negative-corpus",
+        default=str(_FIXTURES / "hard_negatives.md"),
+        help="同域难负例语料（难）",
+    )
+    parser.add_argument("--k", type=int, default=_K, help="Top-K")
+    parser.add_argument(
+        "--include-chunk-keys",
+        default="",
+        help="额外加入索引的 chunk_key（逗号分隔），用于复现重复内容场景",
+    )
+    parser.add_argument("--output", default="retrieval_bm25_report.json")
     args = parser.parse_args()
-    noise_counts = [int(v) for v in args.noise_counts.split(",")]
 
     rows = _load_rows(args.dataset)
-    noise_chunks = _load_noise_chunks(args.noise_corpus)
-    rng = random.Random(args.seed)
-    print(f"样本 {len(rows)} 条，噪声 chunk {len(noise_chunks)} 个，注入数量 {noise_counts}")
+    gold_keys = [
+        rid
+        for row in rows
+        for rid in (row.get("reference_context_ids") or [])
+    ]
+    extra_keys = [key.strip() for key in args.include_chunk_keys.split(",") if key.strip()]
+    kb_chunks = _load_kb_chunks(gold_keys + extra_keys)
 
-    # 基线：每行正确检索上下文 = 原始 retrieved_contexts，正确 ID 优先取
-    # reference_context_ids[0]（生成数据集格式），缺失时按内容匹配
-    base_rows = []
-    for row in rows:
-        base_contexts = list(row.get("retrieved_contexts") or [])
-        if not base_contexts:
-            continue
-        base_reference_ids = list(row.get("reference_context_ids") or [])
-        if not base_reference_ids:
-            print("  ⚠ 跳过无 reference_context_ids 的行（无法计算 HitRate@K/MRR）")
-            continue
-        base_rows.append((row, base_contexts, base_reference_ids))
-    if not base_rows:
-        raise SystemExit("没有可参与检索指标计算的样本（需要 retrieved_contexts + reference_context_ids）")
+    distractors = _strip_fixture_preamble(_load_corpus_chunks(args.distractor_corpus))
+    hard_negatives = _strip_fixture_preamble(_load_corpus_chunks(args.hard_negative_corpus))
 
-    print("\n" + "=" * 70)
-    header = f"{'噪声数':<8}{'HitRate@5':<12}{'MRR':<10}{'规则版Precision':<16}{'规则版Recall':<12}"
-    print(header)
-    print("-" * 70)
-    report: dict[str, t.Any] = {"dataset": args.dataset, "rows": len(base_rows), "results": {}}
+    print(f"数据集 {args.dataset}: {len(rows)} 行")
+    print(f"知识库 chunk: {len(kb_chunks)} 个 -> {list(kb_chunks)}")
+    print(f"无关干扰 chunk: {len(distractors)} 个；同域难负例: {len(hard_negatives)} 个")
 
-    for noise_count in noise_counts:
-        hit_values: list[float] = []
-        mrr_values: list[float] = []
-        precision_values: list[float] = []
-        recall_values: list[float] = []
-        for row, base_contexts, base_reference_ids in base_rows:
-            noise_count_clamped = max(0, min(noise_count, len(noise_chunks)))
-            noise_ids = [f"noise-{rng.randint(0, 10 ** 6)}" for _ in range(noise_count_clamped)]
-            noise_texts = [
-                noise_chunks[rng.randrange(len(noise_chunks))] for _ in range(noise_count_clamped)
-            ]
+    scenarios = [
+        RetrievalScenario("纯知识库（无干扰）", 0, 0),
+        RetrievalScenario("无关干扰 ×5", 5, 0),
+        RetrievalScenario("无关干扰 ×10", 10, 0),
+        RetrievalScenario("无关干扰 ×20", 20, 0),
+        RetrievalScenario("无关干扰 ×全部", len(distractors), 0),
+        RetrievalScenario("同域难负例 ×3", 0, 3),
+        RetrievalScenario("同域难负例 ×5", 0, 5),
+        RetrievalScenario("同域难负例 ×全部", 0, len(hard_negatives)),
+        RetrievalScenario("无关全部 + 难负例全部", len(distractors), len(hard_negatives)),
+    ]
 
-            # 噪声插入到检索结果头部（模拟"无关文档排前面"的检索退化）
-            retrieved_ids = noise_ids + list(base_reference_ids)
-            retrieved_contexts = noise_texts + base_contexts
+    results = [
+        run_scenario(rows, kb_chunks, distractors, hard_negatives, scenario, k=args.k)
+        for scenario in scenarios
+    ]
 
-            hit = _hit_rate_at_k(retrieved_ids, base_reference_ids)
-            mrr = _mrr(retrieved_ids, base_reference_ids)
-            precision = _rule_context_precision(str(row.get("user_input") or ""), retrieved_contexts)
-            recall = _rule_context_recall(str(row.get("reference") or ""), retrieved_contexts)
-            if hit is not None:
-                hit_values.append(hit)
-            if mrr is not None:
-                mrr_values.append(mrr)
-            precision_values.append(precision)
-            recall_values.append(recall)
-
-        hit_mean = sum(hit_values) / len(hit_values) if hit_values else 0.0
-        mrr_mean = sum(mrr_values) / len(mrr_values) if mrr_values else 0.0
-        precision_mean = sum(precision_values) / len(precision_values)
-        recall_mean = sum(recall_values) / len(recall_values)
+    print("\n" + "=" * 92)
+    print(
+        f"{'场景':<24}{'库':<6}{'H@1':<8}{'H@3':<8}{f'H@{args.k}':<8}"
+        f"{'MRR':<8}{'规则R':<8}"
+    )
+    print("-" * 76)
+    for result in results:
         print(
-            f"{noise_count:<8d}{hit_mean:<12.4f}{mrr_mean:<10.4f}"
-            f"{precision_mean:<16.4f}{recall_mean:<12.4f}"
+            f"{result['label']:<24}{result['corpus_size']:<6}"
+            f"{result['hit_rate_at_1']:<8.4f}{result['hit_rate_at_3']:<8.4f}"
+            f"{result[f'hit_rate_at_{args.k}']:<8.4f}{result['mrr']:<8.4f}"
+            f"{result['rule_recall']:<8.4f}"
         )
-        report["results"][str(noise_count)] = {
-            "hit_rate_at_5": round(hit_mean, 4),
-            "mrr": round(mrr_mean, 4),
-            "rule_precision": round(precision_mean, 4),
-            "rule_recall": round(recall_mean, 4),
-        }
+    print("-" * 76)
 
-    output = "retrieval_noise_report.json"
-    with open(output, "w", encoding="utf-8") as f:
+    report = {
+        "dataset": args.dataset,
+        "rows": len(rows),
+        "k": args.k,
+        "kb_chunk_keys": list(kb_chunks),
+        "distractor_pool": len(distractors),
+        "hard_negative_pool": len(hard_negatives),
+        "retrieval": "BM25 (bigram, k1=1.5, b=0.75)",
+        "note": (
+            "retrieved_ids 全部来自 BM25 排序，未混入 reference_context_ids；"
+            "上一版脚本用 noise_ids + reference_ids 构造检索结果，指标是闭式解而非测量，已废弃。"
+            "规则版 precision（查询覆盖度阈值法）因对问句-段落匹配不可校准而移除，见脚本内注释。"
+        ),
+        "results": results,
+    }
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    print("-" * 70)
-    print(f"报告已写入: {output}")
-    print("解读: 确定性检索指标与规则版指标应随噪声比例单调下降；")
-    print("      若某个指标对噪声不敏感，说明它无法区分检索质量的好坏。")
+    print(f"报告已写入: {args.output}")
+    print("解读: 无关干扰下指标应基本不动（检索器能区分主题）；")
+    print("      同域难负例下若指标明显下降，说明 BM25 词面匹配在近义政策文本上力不从心——")
+    print("      这是真实的检索质量信号，不是构造出来的。")
 
 
 if __name__ == "__main__":

@@ -121,11 +121,17 @@ async def _run_platform_scores(
     for idx, row in enumerate(rows, start=1):
         for name in metrics:
             metric = _build_platform_metric(name)
-            result = await metric.ascore(row, judge)
+            try:
+                result = await metric.ascore(row, judge)
+            except Exception as exc:  # 单条失败不中断整体对照（与 RAGAS 侧对齐）
+                print(f"  ⚠ 平台 [{name}] 行 {idx} 失败: {str(exc)[:200]}")
+                platform_scores[name].append(None)
+                continue
             if isinstance(result.value, (int, float)) and result.value is not None:
                 platform_scores[name].append(float(result.value))
             else:
                 platform_scores[name].append(None)
+        _write_checkpoint("platform", platform_scores)
         print(f"  平台指标 进度 {idx}/{len(rows)}")
     return platform_scores
 
@@ -222,8 +228,61 @@ async def _run_ragas_scores(
             except Exception as exc:  # 单条失败不中断整体对照
                 print(f"  ⚠ RAGAS [{name}] 行 {idx} 失败: {str(exc)[:200]}")
                 ragas_scores[name].append(None)
+        _write_checkpoint("ragas", ragas_scores)
         print(f"  RAGAS 进度 {idx}/{len(rows)}")
     return ragas_scores
+
+
+CHECKPOINT_PATH = "ragas_comparison_checkpoint.json"
+
+
+def _write_checkpoint(side: str, scores: dict[str, list[t.Optional[float]]]) -> None:
+    """每完成一行就落盘一次。
+
+    长跑（25 行 × 6 指标，两侧合计数百次 LLM 调用）中途若因网关限流或配额
+    耗尽中断，已完成的分数不会丢失，可直接从检查点算相关性。
+    """
+    try:
+        existing: dict[str, t.Any] = {}
+        if Path(CHECKPOINT_PATH).exists():
+            with open(CHECKPOINT_PATH, encoding="utf-8") as f:
+                existing = json.load(f)
+        existing[side] = scores
+        with open(CHECKPOINT_PATH, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+    except Exception as exc:  # 检查点本身失败不能影响主流程
+        logger.warning("写检查点失败: %s", exc)
+
+
+def _load_reused_ragas_scores(
+    report_path: str, metrics: list[str], expected_rows: int
+) -> dict[str, list[t.Optional[float]]]:
+    """从既有报告读取 RAGAS 逐行分数，避免重复消耗配额。
+
+    使用前提：RAGAS 侧的输入未发生变化。RAGAS 只从 user_input / response /
+    retrieved_contexts / reference 构造 SingleTurnSample，因此平台侧 payload
+    的改动不影响 RAGAS 分数，可以安全复用；但若数据集本身变了就必须重跑，
+    因此这里强校验行数一致。
+    """
+    path = Path(report_path)
+    if not path.exists():
+        raise SystemExit(f"复用的报告不存在: {report_path}")
+    with open(path, encoding="utf-8") as f:
+        prior = json.load(f)
+
+    prior_metrics = prior.get("metrics") or {}
+    reused: dict[str, list[t.Optional[float]]] = {}
+    for name in metrics:
+        scores = (prior_metrics.get(name) or {}).get("ragas_scores")
+        if scores is None:
+            raise SystemExit(f"报告 {report_path} 中缺少指标 {name} 的 ragas_scores，无法复用")
+        if len(scores) != expected_rows:
+            raise SystemExit(
+                f"报告 {report_path} 中 {name} 的行数为 {len(scores)}，"
+                f"与当前样本数 {expected_rows} 不一致，必须重跑 RAGAS"
+            )
+        reused[name] = scores
+    return reused
 
 
 def _correlation(pairs: list[tuple[float, float]]) -> dict[str, float]:
@@ -246,11 +305,31 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="平台原生指标 vs RAGAS 对照实验")
     parser.add_argument("--dataset", default=None, help="数据集名称（默认全部）")
     parser.add_argument("--limit", type=int, default=10, help="最多评测样本数")
-    parser.add_argument("--metric", choices=COMPARABLE_METRICS, default=None)
+    parser.add_argument(
+        "--metric",
+        choices=COMPARABLE_METRICS,
+        action="append",
+        default=None,
+        help="只对比指定指标，可重复传入（默认全部）",
+    )
     parser.add_argument("--dry-run", action="store_true", help="用固定分数验证链路，不调用 LLM")
+    parser.add_argument(
+        "--reuse-ragas",
+        default=None,
+        metavar="REPORT_JSON",
+        help=(
+            "复用既有报告里的 RAGAS 逐行分数，跳过 RAGAS 侧重跑。"
+            "仅在平台侧改动、RAGAS 侧输入未变时可用："
+            "RAGAS 只读 user_input/response/retrieved_contexts/reference，"
+            "不受平台 payload 改动影响。"
+        ),
+    )
+    parser.add_argument(
+        "--out", default="ragas_comparison_report.json", metavar="PATH", help="报告输出路径"
+    )
     args = parser.parse_args()
 
-    metrics = [args.metric] if args.metric else COMPARABLE_METRICS
+    metrics = args.metric if args.metric else COMPARABLE_METRICS
 
     print(f"加载样本: dataset={args.dataset or '全部'} limit={args.limit}")
     rows = _load_rows(args.dataset, args.limit)
@@ -270,34 +349,70 @@ async def main() -> None:
     if llm_config is None:
         raise SystemExit("数据库中没有 LLM 配置，请先在前端配置 Judge LLM")
 
+    # 复用 RAGAS 分数时先校验再跑平台侧：行数/指标不匹配必须立即失败，
+    # 而不是白跑一轮平台指标（25 行 × 4 指标约 100 次 LLM 调用）后才发现。
+    reused_ragas: dict[str, list[t.Optional[float]]] | None = None
+    if args.reuse_ragas:
+        reused_ragas = _load_reused_ragas_scores(args.reuse_ragas, metrics, len(rows))
+        print(f"复用 RAGAS 逐行分数: {args.reuse_ragas}（跳过 RAGAS 重跑）")
+
     print("=" * 60)
     print("运行平台原生指标...")
     platform_scores = await _run_platform_scores(rows, metrics, llm_config, args.dry_run)
 
-    print("运行 RAGAS 指标...")
-    ragas_scores = await _run_ragas_scores(rows, metrics, llm_config, args.dry_run)
+    if reused_ragas is not None:
+        ragas_scores = reused_ragas
+    else:
+        print("运行 RAGAS 指标...")
+        ragas_scores = await _run_ragas_scores(rows, metrics, llm_config, args.dry_run)
 
     print("=" * 60)
     print("对照结果（分值范围 0~1）")
-    report: dict[str, t.Any] = {"rows": len(rows), "metrics": {}}
+    # 样本类型标签（correct / hallucinated / truncated 等），用于分层分析：
+    # 整体相关性偏低时，可定位是哪一类样本造成的分歧
+    kinds = [(row.get("generation_meta") or {}).get("kind") for row in rows]
+    report: dict[str, t.Any] = {"rows": len(rows), "kinds": kinds, "metrics": {}}
     for name in metrics:
-        platform_values = [v for v in platform_scores.get(name, []) if v is not None]
-        ragas_values = [v for v in ragas_scores.get(name, []) if v is not None]
+        platform_row_scores = platform_scores.get(name, [])
+        ragas_row_scores = ragas_scores.get(name, [])
+        platform_values = [v for v in platform_row_scores if v is not None]
+        ragas_values = [v for v in ragas_row_scores if v is not None]
         platform_mean = sum(platform_values) / len(platform_values) if platform_values else None
         ragas_mean = sum(ragas_values) / len(ragas_values) if ragas_values else None
-        pairs = list(zip(platform_scores.get(name, []), ragas_scores.get(name, [])))
+        pairs = list(zip(platform_row_scores, ragas_row_scores))
         corr = _correlation(pairs)
         print(f"\n[{name}]")
         print(f"  平台原生指标均值: {platform_mean}")
         print(f"  RAGAS 均值:       {ragas_mean}")
         print(f"  相关性:           Pearson={corr['pearson']} Spearman={corr['spearman']} (n={corr['n']})")
+
+        # 按样本类型分组的均值对照
+        by_kind: dict[str, t.Any] = {}
+        for kind in sorted({k for k in kinds if k}):
+            idxs = [i for i, k in enumerate(kinds) if k == kind]
+            p_vals = [platform_row_scores[i] for i in idxs if i < len(platform_row_scores) and platform_row_scores[i] is not None]
+            r_vals = [ragas_row_scores[i] for i in idxs if i < len(ragas_row_scores) and ragas_row_scores[i] is not None]
+            by_kind[kind] = {
+                "n": len(idxs),
+                "platform_mean": round(sum(p_vals) / len(p_vals), 4) if p_vals else None,
+                "ragas_mean": round(sum(r_vals) / len(r_vals), 4) if r_vals else None,
+            }
+            print(
+                f"    ├ {kind:<14} n={len(idxs):<3} 平台={by_kind[kind]['platform_mean']} "
+                f"RAGAS={by_kind[kind]['ragas_mean']}"
+            )
+
         report["metrics"][name] = {
             "platform_mean": platform_mean,
             "ragas_mean": ragas_mean,
             **corr,
+            "by_kind": by_kind,
+            # 保留逐行原始分，便于复核与二次分析（无需重跑 LLM）
+            "platform_scores": platform_row_scores,
+            "ragas_scores": ragas_row_scores,
         }
 
-    output = "ragas_comparison_report.json"
+    output = args.out
     with open(output, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"\n报告已写入: {output}")
