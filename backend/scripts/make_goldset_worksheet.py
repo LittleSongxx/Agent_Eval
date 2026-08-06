@@ -12,16 +12,27 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 REPORT = BACKEND / "retrieval_bm25_report.json"
+ANNOTATIONS = pathlib.Path(__file__).resolve().parent / "retrieval_goldset_annotations.json"
 OUT = BACKEND.parent / "docs" / "检索侧黄金集标注表.md"
 
 
 def main() -> int:
-    rep = json.loads(REPORT.read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--report", type=pathlib.Path, default=REPORT,
+                        help="BM25 检索报告 JSON（默认 backend/retrieval_bm25_report.json）")
+    parser.add_argument("--annotations", type=pathlib.Path, default=ANNOTATIONS,
+                        help="人工黄金集标注 JSON（默认 scripts/retrieval_goldset_annotations.json）")
+    parser.add_argument("--out", type=pathlib.Path, default=OUT,
+                        help="输出标注表（默认 docs/检索侧黄金集标注表.md）")
+    args = parser.parse_args()
+
+    rep = json.loads(args.report.read_text(encoding="utf-8"))
     # 最重压力场景 = 无关全部 + 难负例全部（库 42）
     scenario = rep["results"][-1]
 
@@ -57,10 +68,7 @@ def main() -> int:
     def short(text: str, n: int = 60) -> str:
         return (text or "").replace("\n", " ")[:n]
 
-    annotations = json.loads(
-        (pathlib.Path(__file__).resolve().parent / "retrieval_goldset_annotations.json")
-        .read_text(encoding="utf-8")
-    )["annotations"]
+    annotations = json.loads(args.annotations.read_text(encoding="utf-8"))["annotations"]
 
     lines = [
         "# 检索侧黄金集标注表",
@@ -95,8 +103,8 @@ def main() -> int:
             f"| {retrieved} | {verdict_display} |"
         )
 
-    OUT.write_text("\n".join(lines), encoding="utf-8")
-    print(f"标注表已写入: {OUT}（{len(scenario['detail'])} 行）")
+    args.out.write_text("\n".join(lines), encoding="utf-8")
+    print(f"标注表已写入: {args.out}（{len(scenario['detail'])} 行）")
     return 0
 
 

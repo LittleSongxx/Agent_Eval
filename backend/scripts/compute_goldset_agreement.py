@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 
@@ -26,7 +27,17 @@ OUT = BACKEND / "retrieval_goldset_agreement.json"
 
 
 def main() -> int:
-    rep = json.loads(REPORT.read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--report", type=pathlib.Path, default=REPORT,
+                        help="BM25 检索报告 JSON（默认 backend/retrieval_bm25_report.json）")
+    parser.add_argument("--annotations", type=pathlib.Path, default=ANNOTATIONS,
+                        help="人工黄金集标注 JSON（默认 scripts/retrieval_goldset_annotations.json）")
+    parser.add_argument("--out", type=pathlib.Path, default=OUT,
+                        help="输出 JSON（默认 backend/retrieval_goldset_agreement.json）")
+    args = parser.parse_args()
+
+    rep = json.loads(args.report.read_text(encoding="utf-8"))
+    ann = json.loads(args.annotations.read_text(encoding="utf-8"))
     ann = json.loads(ANNOTATIONS.read_text(encoding="utf-8"))
     scenario = rep["results"][-1]  # 最重压力场景（与标注表一致）
     detail = scenario["detail"]
@@ -96,7 +107,7 @@ def main() -> int:
         ],
         "rows": rows,
     }
-    OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"人工黄金集判定分布: Y {report['verdict_distribution']['Y']} / "
           f"MULTI {report['verdict_distribution']['MULTI']} / N {report['verdict_distribution']['N']}")
@@ -106,7 +117,7 @@ def main() -> int:
           f"（25/25 → 合成单金标构造经人工审核未发现错误）")
     print(f"多来源行: {report['multi_source_rows']}"
           f"（同一答案信息跨 chunk 重复，金标仍均在 top-1）")
-    print(f"报告已写入: {OUT.name}")
+    print(f"报告已写入: {args.out.name}")
     return 0
 
 

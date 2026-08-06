@@ -278,9 +278,13 @@ kappa 点估计 CI 宽（50 条 ±0.20），只能当方向信号，扩样后做
   --before 10 --after 11` 对比校准前后 kappa / 一致率 / 分歧分布；
 - 扩样 50-100 条人工标注（kappa CI 变窄）+ 校准集入库 + 复评脚本为后续。
 
-### P2 功能（等 P1 数据闭环后再做）
-- 归因评测（CitationAccuracy）、轨迹评测（反模式检测）、CI 门禁（pytest 风格
-  评测脚本 + PR 回归）。
+### P2 功能（P1 已闭环）
+- ✅ **CI 门禁（2026-08-07）**：`.github/workflows/ci.yml`——push/PR 触发后端
+  pytest 全量（114 用例，含评测脚本冒烟 `tests/test_scripts_smoke.py`：所有
+  scripts/*.py 必须 --help 正常）+ 前端 `tsc -b && vite build` 类型门禁；
+  期间给 compute_goldset_agreement / make_goldset_worksheet 补了 argparse
+  （此前无参数解析，--help 会被忽略并直接执行真实计算）。
+- 待做：归因评测（CitationAccuracy）、轨迹评测（反模式检测）。
 
 ### 主线：面试材料化（与上述并行）
 - 一页纸项目简介（技术亮点 + 数字）、三分钟 demo 脚本、把踩坑记录改写成
