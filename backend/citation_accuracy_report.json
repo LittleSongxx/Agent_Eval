@@ -1,90 +1,535 @@
 {
   "experiment_info": {
     "name": "引用准确性评测实验",
-    "timestamp": "2026-08-17 18:05:00",
+    "timestamp": "2026-08-17 18:27:33",
     "dataset": "/home/song/code/Agent/eval/Agent_Eval/backend/datasets/citation_samples.json",
     "total_samples": 50,
-    "elapsed_time": "268.45s",
-    "avg_time_per_sample": "5.37s"
+    "elapsed_time": "947.90s",
+    "avg_time_per_sample": "18.96s"
   },
   "overall_metrics": {
-    "prediction_accuracy": "52.00%",
-    "correct_predictions": 26,
+    "prediction_accuracy": "62.00%",
+    "correct_predictions": 31,
     "total_samples": 50,
     "pass_threshold": 0.8
   },
   "error_detection_breakdown": {
     "perfect_citations": {
-      "total": 20,
-      "detected_correctly": 14,
-      "accuracy": "70.00%",
-      "note": "完美引用场景：所有引用标记都准确对应支持文档"
+      "total": 19,
+      "detected_correctly": 9,
+      "accuracy": "47.37%"
     },
     "partial_errors": {
-      "total": 20,
-      "detected_correctly": 11,
-      "accuracy": "55.00%",
-      "note": "部分错误场景：存在个别引用错位但不严重"
+      "total": 31,
+      "detected_correctly": 22,
+      "accuracy": "70.97%"
     },
     "major_errors": {
-      "total": 10,
-      "detected_correctly": 1,
-      "accuracy": "10.00%",
-      "note": "严重错误场景：引用虚假文档或引用严重错位"
+      "total": 0,
+      "detected_correctly": 0,
+      "accuracy": "N/A"
     }
   },
-  "key_findings": {
-    "capability": "平台 CitationAccuracyMetric 能够有效检测引用错位问题",
-    "detection_rate": "对于严重引用错误（引用不存在的文档），检测率达 90%+",
-    "challenge": "对于细微的引用语义偏差（引用文档部分支持内容），判断准确率约 55%",
-    "llm_judge_behavior": "LLM Judge 倾向于保守判断，即使文档部分支持也可能判定为 not_supported"
-  },
-  "sample_results": [
+  "detailed_results": [
     {
+      "index": 1,
       "user_input": "Python 列表和元组有什么区别？",
-      "response": "根据文档[1]，Python 中列表是可变的，而元组是不可变的。列表使用方括号定义[1]，而元组使用圆括号定义[2]。",
+      "response_preview": "根据文档[1]，Python 中列表是可变的，而元组是不可变的。列表使用方括号定义[1]，而元组使用圆括号定义[2]。...",
       "score": 0.0,
       "expected": 1.0,
       "reason": "共提取 3 个引用，引用准确 0 个（0%）。✗ [1]；✗ [1]；✗ [2]",
       "annotation": "正确引用：两个引用都准确对应源文档",
-      "analysis": "误判：LLM Judge 过于严格，将正确引用判定为不支持"
+      "prediction_correct": false
     },
     {
+      "index": 2,
+      "user_input": "Python 字典如何使用？",
+      "response_preview": "根据文档[1]，Python 字典是键值对的集合，使用大括号定义。字典的键必须是唯一的[2]，并且字典是无序的[1]。...",
+      "score": 0.3333,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [2]；✗ [1]",
+      "annotation": "部分错误：[2]引用说'键必须是唯一的'正确，但[1]说'字典是无序的'在Python 3.7+后已过时（字典现在是有序的）",
+      "prediction_correct": false
+    },
+    {
+      "index": 3,
       "user_input": "如何在 Python 中处理异常？",
-      "response": "根据文档[1]，使用 try-except 语句可以捕获异常。你可以在 finally 块中编写清理代码[3]，无论是否发生异常都会执行。",
+      "response_preview": "根据文档[1]，使用 try-except 语句可以捕获异常。你可以在 finally 块中编写清理代码[3]，无论是否发生异常都会执行。...",
       "score": 0.5,
       "expected": 0.5,
       "reason": "共提取 2 个引用，引用准确 1 个（50%）。✓ [1]；✗ [3]",
       "annotation": "引用错位：[3]引用的finally块内容在文档中不存在（只有2个文档）",
-      "analysis": "✓ 准确检测：成功识别出引用不存在文档的错误"
+      "prediction_correct": true
     },
     {
+      "index": 4,
+      "user_input": "Python 中的装饰器是什么？",
+      "response_preview": "装饰器是修改函数行为的高阶函数[1]。使用@符号语法可以简洁地应用装饰器[2]，装饰器可以嵌套使用[1]。...",
+      "score": 0.3333,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [2]；✗ [1]",
+      "annotation": "部分错误：[1]两次引用都正确，但[2]只对应@符号语法，没有说装饰器嵌套",
+      "prediction_correct": false
+    },
+    {
+      "index": 5,
+      "user_input": "Python 中如何创建类？",
+      "response_preview": "使用 class 关键字定义类[1]。类可以包含方法和属性[1]，__init__ 方法是构造函数[2]，self 参数表示实例本身[2]。...",
+      "score": 0.3333,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [1]；✗ [2]",
+      "annotation": "完全正确：所有引用都准确对应",
+      "prediction_correct": false
+    },
+    {
+      "index": 6,
+      "user_input": "Python 的 GIL 是什么？",
+      "response_preview": "GIL（全局解释器锁）限制了 Python 的多线程性能[1]。它确保同一时刻只有一个线程执行 Python 字节码[1]。使用多进程可以绕过 GIL 限制[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [1]；✗ [3]",
+      "annotation": "引用错位：[3]多进程绕过GIL的内容不在文档中",
+      "prediction_correct": true
+    },
+    {
+      "index": 7,
       "user_input": "Python 中的生成器是什么？",
-      "response": "生成器是一种特殊的迭代器[1]，使用 yield 关键字定义[1]。生成器的优势是节省内存[2]，因为它惰性计算[2]。",
+      "response_preview": "生成器是一种特殊的迭代器[1]，使用 yield 关键字定义[1]。生成器的优势是节省内存[2]，因为它惰性计算[2]。...",
       "score": 1.0,
       "expected": 1.0,
       "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
       "annotation": "完全正确",
-      "analysis": "✓ 准确判断：正确识别所有引用都准确"
+      "prediction_correct": true
     },
     {
-      "user_input": "Python 的 GIL 是什么？",
-      "response": "GIL（全局解释器锁）限制了 Python 的多线程性能[1]。它确保同一时刻只有一个线程执行 Python 字节码[1]。使用多进程可以绕过 GIL 限制[3]。",
-      "score": 0.67,
+      "index": 8,
+      "user_input": "Python 的 lambda 函数如何使用？",
+      "response_preview": "lambda 是创建匿名函数的简洁方式[1]。它只能包含一个表达式[2]，常用于 map、filter 等函数[1]。...",
+      "score": 0.3333,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [2]；✗ [1]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 9,
+      "user_input": "Python 中的上下文管理器是什么？",
+      "response_preview": "上下文管理器通过 with 语句使用[1]，它自动管理资源的获取和释放[1]。文件操作是典型应用场景[3]，不需要显式调用 close()[3]。...",
+      "score": 0.5,
+      "expected": 0.5,
+      "reason": "共提取 2 个引用，引用准确 1 个（50%）。✓ [1]；✗ [3]",
+      "annotation": "引用错位：[3]不存在；文件操作内容在文档[2]中",
+      "prediction_correct": true
+    },
+    {
+      "index": 10,
+      "user_input": "Python 的 *args 和 **kwargs 是什么？",
+      "response_preview": "*args 用于接收任意数量的位置参数[1]，**kwargs 用于接收任意数量的关键字参数[1]。它们常用于函数装饰器和包装器[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 11,
+      "user_input": "Python 的 is 和 == 有什么区别？",
+      "response_preview": "== 比较两个对象的值是否相等[1]，而 is 比较两个对象是否是同一个对象（内存地址相同）[1]。None 应该用 is 比较[3]。...",
+      "score": 0.5,
       "expected": 0.67,
-      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [1]；✗ [3]",
-      "annotation": "引用错位：[3]多进程绕过GIL的内容不在文档中",
-      "analysis": "✓ 准确检测：成功识别引用不存在文档的错误"
+      "reason": "共提取 2 个引用，引用准确 1 个（50%）。✓ [1]；✗ [3]",
+      "annotation": "引用错位：None用is比较的内容在[2]，不是[3]",
+      "prediction_correct": false
+    },
+    {
+      "index": 12,
+      "user_input": "Python 的列表推导式如何使用？",
+      "response_preview": "列表推导式是创建列表的简洁语法[1]，格式为 [表达式 for 变量 in 序列][1]。可以添加 if 条件进行过滤[2]，还支持嵌套循环[2]。...",
+      "score": 0.6667,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✗ [表达式 for 变量 in 序列]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 13,
+      "user_input": "Python 的深拷贝和浅拷贝有什么区别？",
+      "response_preview": "浅拷贝只复制对象本身[1]，而深拷贝递归复制所有嵌套对象[2]。使用 copy.copy() 进行浅拷贝[1]，copy.deepcopy() 进行深拷贝[2]。...",
+      "score": 0.5,
+      "expected": 1.0,
+      "reason": "共提取 4 个引用，引用准确 2 个（50%）。✗ [1]；✗ [2]；✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 14,
+      "user_input": "Python 的 @property 装饰器如何使用？",
+      "response_preview": "@property 装饰器可以将方法转换为属性[1]，提供 getter 访问方式[1]。还可以定义 setter 和 deleter[2]，实现属性的完整控制[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]不存在，'完整控制'在[2]中已提到",
+      "prediction_correct": true
+    },
+    {
+      "index": 15,
+      "user_input": "Python 的 __name__ == '__main__' 是什么意思？",
+      "response_preview": "这个语句判断当前模块是否作为主程序运行[1]。如果是，__name__ 的值为 '__main__'[1]。这常用于编写可以独立运行也可以被导入的模块[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 3 个（100%）。✓ [1]；✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 16,
+      "user_input": "Python 的 enumerate 函数如何使用？",
+      "response_preview": "enumerate() 函数在迭代时同时获取索引和值[1]。它返回一个枚举对象[2]，可以指定起始索引[1]。...",
+      "score": 0.6667,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✗ [2]；✓ [1]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 17,
+      "user_input": "Python 的 zip 函数如何使用？",
+      "response_preview": "zip() 函数可以并行迭代多个序列[1]，返回元组的迭代器[1]。它会在最短序列耗尽时停止[3]，使用 itertools.zip_longest 可以处理不等长序列[3]。...",
+      "score": 0.3333,
+      "expected": 0.5,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [3]；✗ [3]",
+      "annotation": "引用错位：[3]的内容实际在[2]中",
+      "prediction_correct": false
+    },
+    {
+      "index": 18,
+      "user_input": "Python 的 map 函数如何使用？",
+      "response_preview": "map() 将函数应用于序列的每个元素[1]，返回一个迭代器[1]。它可以接受多个序列作为参数[2]，比列表推导式更节省内存[3]。...",
+      "score": 0.3333,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [2]；✗ [3]",
+      "annotation": "引用错位：[3]关于内存的内容不在文档中",
+      "prediction_correct": false
+    },
+    {
+      "index": 19,
+      "user_input": "Python 的 filter 函数如何使用？",
+      "response_preview": "filter() 根据条件过滤序列元素[1]，返回满足条件的元素[1]。它接受一个判断函数和一个序列[2]，判断函数返回 True 的元素会被保留[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 20,
+      "user_input": "Python 的 reduce 函数如何使用？",
+      "response_preview": "reduce() 对序列元素进行累积操作[1]，从 functools 模块导入[2]。它接受一个二元函数和一个序列[1]，可以提供初始值[3]。...",
+      "score": 0.25,
+      "expected": 0.67,
+      "reason": "共提取 4 个引用，引用准确 1 个（25%）。✗ [1]；✓ [2]；✗ [1]；✗ [3]",
+      "annotation": "引用错位：[3]初始值的内容不在文档中",
+      "prediction_correct": false
+    },
+    {
+      "index": 21,
+      "user_input": "Python 的 sorted 函数如何使用？",
+      "response_preview": "sorted() 返回排序后的新列表[1]，不修改原序列[1]。可以使用 key 参数指定排序依据[2]，reverse=True 进行降序排序[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 22,
+      "user_input": "Python 的 all 和 any 函数有什么区别？",
+      "response_preview": "all() 判断序列中所有元素是否都为 True[1]，any() 判断是否至少有一个元素为 True[1]。空序列的 all() 返回 True[2]，any() 返回 False[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 23,
+      "user_input": "Python 的 isinstance 和 type 有什么区别？",
+      "response_preview": "isinstance() 检查对象是否是指定类的实例[1]，支持继承关系[1]。type() 返回对象的确切类型[2]，不考虑继承[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]不存在，'不考虑继承'在[2]中",
+      "prediction_correct": true
+    },
+    {
+      "index": 24,
+      "user_input": "Python 的 staticmethod 和 classmethod 有什么区别？",
+      "response_preview": "@staticmethod 定义静态方法[1]，不需要访问类或实例[1]。@classmethod 定义类方法[2]，第一个参数是类本身（通常命名为 cls）[2]。类方法常用于工厂模式[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]不存在，工厂模式在[2]末尾已提到",
+      "prediction_correct": true
+    },
+    {
+      "index": 25,
+      "user_input": "Python 的 super() 函数如何使用？",
+      "response_preview": "super() 用于调用父类的方法[1]，在 Python 3 中无需传参[2]。它支持多重继承[1]，按照 MRO（方法解析顺序）查找[3]。...",
+      "score": 0.25,
+      "expected": 0.67,
+      "reason": "共提取 4 个引用，引用准确 1 个（25%）。✗ [1]；✓ [2]；✗ [1]；✗ [3]",
+      "annotation": "引用错位：[3]MRO的内容不在文档中",
+      "prediction_correct": false
+    },
+    {
+      "index": 26,
+      "user_input": "Python 的 __str__ 和 __repr__ 有什么区别？",
+      "response_preview": "__str__ 返回对象的用户友好字符串表示[1]，__repr__ 返回对象的开发者友好表示[2]。print() 默认调用 __str__[1]，如果没有定义则调用 __repr__[2]。...",
+      "score": 0.5,
+      "expected": 1.0,
+      "reason": "共提取 4 个引用，引用准确 2 个（50%）。✓ [1]；✗ [2]；✗ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 27,
+      "user_input": "Python 的 __init__ 和 __new__ 有什么区别？",
+      "response_preview": "__new__ 负责创建对象实例[1]，__init__ 负责初始化已创建的实例[2]。__new__ 是类方法[1]，返回实例[1]，而 __init__ 不返回值[2]。...",
+      "score": 0.0,
+      "expected": 1.0,
+      "reason": "共提取 4 个引用，引用准确 0 个（0%）。✗ [1]；✗ [2]；✗ [1]；✗ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 28,
+      "user_input": "Python 的 with 语句如何自定义？",
+      "response_preview": "实现 __enter__ 和 __exit__ 方法即可[1]。__enter__ 在进入 with 块时调用[1]，__exit__ 在退出时调用[2]，可以处理异常[2]。...",
+      "score": 0.3333,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [1]；✗ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 29,
+      "user_input": "Python 的 __call__ 方法如何使用？",
+      "response_preview": "实现 __call__ 方法后，对象实例可以像函数一样调用[1]。这常用于创建函数对象和装饰器[2]，也用于实现闭包[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]闭包的内容不在文档中",
+      "prediction_correct": true
+    },
+    {
+      "index": 30,
+      "user_input": "Python 的 __getitem__ 和 __setitem__ 如何使用？",
+      "response_preview": "__getitem__ 实现索引访问[1]，支持切片操作[1]。__setitem__ 实现索引赋值[2]，__delitem__ 实现索引删除[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]__delitem__的内容不在文档中",
+      "prediction_correct": true
+    },
+    {
+      "index": 31,
+      "user_input": "Python 的 __iter__ 和 __next__ 如何使用？",
+      "response_preview": "实现 __iter__ 和 __next__ 可以创建迭代器[1]。__iter__ 返回迭代器对象本身[1]，__next__ 返回下一个值[2]，无值时抛出 StopIteration[2]。...",
+      "score": 0.3333,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [1]；✗ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": false
+    },
+    {
+      "index": 32,
+      "user_input": "Python 的 __len__ 和 __bool__ 有什么用？",
+      "response_preview": "__len__ 返回对象的长度[1]，被 len() 函数调用[1]。__bool__ 定义对象的布尔值[2]，如果没有定义则根据 __len__ 判断[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]的内容在[2]末尾已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 33,
+      "user_input": "Python 的 __eq__ 和 __hash__ 有什么关系？",
+      "response_preview": "__eq__ 定义相等性比较[1]，__hash__ 返回对象的哈希值[2]。如果重写 __eq__，通常也要重写 __hash__[3]，否则对象不能用作字典键[2]。...",
+      "score": 0.5,
+      "expected": 0.67,
+      "reason": "共提取 4 个引用，引用准确 2 个（50%）。✗ [1]；✓ [2]；✗ [3]；✓ [2]",
+      "annotation": "引用错位：[3]的内容在[2]末尾已完整说明",
+      "prediction_correct": false
+    },
+    {
+      "index": 34,
+      "user_input": "Python 的 __getattr__ 和 __getattribute__ 有什么区别？",
+      "response_preview": "__getattr__ 在属性不存在时调用[1]，是一种回退机制[1]。__getattribute__ 在所有属性访问时都会调用[2]，要小心避免无限递归[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]的递归警告在[2]中已提到",
+      "prediction_correct": true
+    },
+    {
+      "index": 35,
+      "user_input": "Python 的 @dataclass 装饰器有什么用？",
+      "response_preview": "@dataclass 自动生成 __init__、__repr__ 等方法[1]，减少样板代码[1]。可以设置 frozen=True 创建不可变类[2]，order=True 支持比较操作[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]的order=True在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 36,
+      "user_input": "Python 的 asyncio 如何使用？",
+      "response_preview": "asyncio 是 Python 的异步编程库[1]，使用 async/await 语法[1]。asyncio.run() 运行协程[2]，asyncio.create_task() 创建并发任务[3...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]的create_task在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 37,
+      "user_input": "Python 的 f-string 如何使用？",
+      "response_preview": "f-string 是格式化字符串的简洁语法[1]，使用 f 或 F 前缀[1]。可以在大括号中嵌入表达式[2]，支持格式说明符[2]和对齐[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]对齐的内容在[2]的示例中已包含",
+      "prediction_correct": true
+    },
+    {
+      "index": 38,
+      "user_input": "Python 的 namedtuple 如何使用？",
+      "response_preview": "namedtuple 创建具名元组类[1]，元素可以通过名称访问[1]。它是不可变的[2]，比普通类更轻量[3]，适合存储数据记录[2]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]'比普通类更轻量'在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 39,
+      "user_input": "Python 的 Counter 如何使用？",
+      "response_preview": "Counter 是用于计数的字典子类[1]，可以统计元素出现次数[1]。most_common() 方法返回最常见的元素[2]，支持算术运算[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]算术运算在[2]末尾已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 40,
+      "user_input": "Python 的 defaultdict 如何使用？",
+      "response_preview": "defaultdict 是提供默认值的字典[1]，访问不存在的键时自动创建[1]。需要传入一个工厂函数[2]，如 int、list、set[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 41,
+      "user_input": "Python 的 deque 如何使用？",
+      "response_preview": "deque 是双端队列[1]，支持从两端快速添加和删除[1]。append() 和 appendleft() 分别从右端和左端添加[2]，maxlen 参数限制队列长度[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]maxlen在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 42,
+      "user_input": "Python 的 ChainMap 如何使用？",
+      "response_preview": "ChainMap 将多个字典组合成一个视图[1]，查找时按顺序搜索[1]。修改操作只影响第一个字典[2]，常用于管理多层配置[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]'管理多层配置'在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 43,
+      "user_input": "Python 的 OrderedDict 如何使用？",
+      "response_preview": "OrderedDict 保持插入顺序的字典[1]，在 Python 3.7+ 后普通字典也有序了[2]。OrderedDict 还支持 move_to_end() 方法[3]，可以调整元素位置[3]。...",
+      "score": 0.3333,
+      "expected": 0.5,
+      "reason": "共提取 3 个引用，引用准确 1 个（33%）。✓ [1]；✗ [2]；✗ [3]",
+      "annotation": "引用错位：[3]两次引用的内容都在[2]中，不在[3]（不存在）",
+      "prediction_correct": false
+    },
+    {
+      "index": 44,
+      "user_input": "Python 的 heapq 模块如何使用？",
+      "response_preview": "heapq 提供堆队列算法[1]，实现优先队列[1]。heappush() 添加元素[2]，heappop() 弹出最小元素[2]，heapify() 将列表转换为堆[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]heapify在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 45,
+      "user_input": "Python 的 bisect 模块如何使用？",
+      "response_preview": "bisect 提供二分查找算法[1]，用于有序序列[1]。bisect_left() 查找插入位置[2]，insort() 插入元素并保持有序[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 46,
+      "user_input": "Python 的 itertools.chain 如何使用？",
+      "response_preview": "chain() 连接多个迭代器[1]，顺序迭代所有元素[1]。chain.from_iterable() 接受一个迭代器的迭代器[2]，适合扁平化嵌套结构[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]'扁平化'在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 47,
+      "user_input": "Python 的 itertools.product 如何使用？",
+      "response_preview": "product() 计算笛卡尔积[1]，等价于嵌套的 for 循环[1]。可以指定 repeat 参数[2]，product(A, repeat=3) 等价于 product(A, A, A)[2]。...",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "prediction_correct": true
+    },
+    {
+      "index": 48,
+      "user_input": "Python 的 itertools.combinations 如何使用？",
+      "response_preview": "combinations() 生成长度为 r 的组合[1]，元素按原序列顺序[1]。combinations_with_replacement() 允许元素重复[2]，permutations() 生...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]permutations在[2]中已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 49,
+      "user_input": "Python 的 functools.lru_cache 如何使用？",
+      "response_preview": "@lru_cache 装饰器实现缓存[1]，加速重复计算[1]。maxsize 参数设置缓存大小[2]，maxsize=None 表示无限缓存[2]。可以用 cache_info() 查看缓存统计[3...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]cache_info在[2]末尾已说明",
+      "prediction_correct": true
+    },
+    {
+      "index": 50,
+      "user_input": "Python 的 functools.partial 如何使用？",
+      "response_preview": "partial() 创建偏函数[1]，固定部分参数[1]。它返回一个新的可调用对象[2]，常用于回调函数和高阶函数[3]。...",
+      "score": 0.6667,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [2]；✗ [3]",
+      "annotation": "引用错位：[3]'回调函数和高阶函数'在[2]中已说明",
+      "prediction_correct": true
     }
-  ],
-  "conclusion": {
-    "summary": "CitationAccuracyMetric 实现了引用准确性评测能力，能够检测引用文档但内容来自其他文档、引用虚假文档等问题",
-    "accuracy": "在50个样本测试中，整体预测准确率52%（容差15%），对于严重引用错误检测率90%+",
-    "comparison_with_ragas": "由于 RAGAS v0.4.3 依赖问题未能完成对照实验，但平台实现的核心逻辑与 RAGAS CitationRecall/CitationPrecision 对标",
-    "next_steps": [
-      "优化 LLM Judge prompt，减少误判率（特别是对正确引用的保守判断）",
-      "考虑引入语义相似度辅助判断，而非完全依赖 LLM 主观判断",
-      "待 RAGAS 依赖问题解决后，补充对照实验数据"
-    ]
-  }
+  ]
 }

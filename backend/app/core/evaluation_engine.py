@@ -650,6 +650,333 @@ class CitationAccuracyMetric:
         return None
 
 
+class TrajectoryFaithfulnessMetric:
+    """轨迹忠实度：Agent 推理步骤与工具返回结果是否一致。
+
+    评测目标：检测 Agent 在推理时是否忠实地基于工具返回结果，而非凭空编造。
+    这在 Agent 调试和 badcase 分析中是核心问题。
+
+    实现方式：
+    1. 解析 agent_trajectory：[{step, thought, tool, tool_input, tool_output, action}]
+    2. 对每个步骤，用 LLM Judge 判断：thought 是否与 tool_output 一致
+    3. 计算忠实度 = 一致步骤数 / 总步骤数
+
+    与 TRAJECT-Bench、VAKRA 等业界前沿对标。
+    """
+
+    def __init__(
+        self,
+        metric_def,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        self.required_fields = ["agent_trajectory"]
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+
+        trajectory = list(row_data.get("agent_trajectory") or [])
+
+        if not trajectory:
+            return _MetricResult(None, "agent_trajectory 为空，无法评测轨迹忠实度。")
+
+        faithful_count = 0
+        details: list[dict[str, t.Any]] = []
+
+        for step_data in trajectory:
+            step_num = step_data.get("step", 0)
+            thought = str(step_data.get("thought") or "")
+            tool_output = str(step_data.get("tool_output") or "")
+
+            # 如果该步骤没有工具调用，跳过（纯思考步骤无需验证）
+            if not step_data.get("tool") or not tool_output:
+                continue
+
+            # 用 LLM Judge 判断：thought 是否忠实反映 tool_output
+            try:
+                verification_prompt = f"""判断 Agent 的推理是否忠实于工具返回结果。
+
+工具返回结果：
+{tool_output}
+
+Agent 推理内容：
+{thought}
+
+如果 Agent 推理内容与工具返回结果一致（没有编造信息、没有曲解结果），返回 {{"verdict": "faithful", "reason": "具体理由"}}；
+否则返回 {{"verdict": "not_faithful", "reason": "具体理由"}}。"""
+
+                verdict = await judge.chat_json(
+                    STRUCTURED_JSON_SYSTEM_PROMPT,
+                    verification_prompt,
+                )
+
+                is_faithful = str(verdict.get("verdict") or "").strip().lower() == "faithful"
+                if is_faithful:
+                    faithful_count += 1
+
+                details.append({
+                    "step": step_num,
+                    "tool": step_data.get("tool"),
+                    "faithful": is_faithful,
+                    "reason": str(verdict.get("reason") or "")[:150],
+                })
+            except Exception as exc:
+                details.append({
+                    "step": step_num,
+                    "tool": step_data.get("tool"),
+                    "faithful": False,
+                    "reason": f"验证失败: {str(exc)[:100]}"
+                })
+
+        # 计算忠实度
+        evaluated_steps = len([d for d in details if d])
+        if evaluated_steps == 0:
+            return _MetricResult(None, "没有需要验证的工具调用步骤。")
+
+        score = round(faithful_count / evaluated_steps, 4)
+        preview = "；".join(
+            f"Step {item['step']} {'✓' if item['faithful'] else '✗'}" for item in details[:5]
+        )
+        reason = (
+            f"共评测 {evaluated_steps} 个工具调用步骤，忠实度 {faithful_count} 个"
+            f"（{round(score * 100)}%）。{preview}"
+        )
+        return _MetricResult(score, reason)
+
+
+class ErrorRecoveryMetric:
+    """错误恢复能力：工具调用失败后是否有合理的降级或重试。
+
+    评测目标：检测 Agent 遇到错误时的恢复能力。
+    优秀的 Agent 应该能够：
+    1. 识别错误（工具返回错误信息）
+    2. 采取恢复措施（重试、降级、换工具）
+    3. 最终完成任务或给出合理解释
+
+    实现方式：
+    1. 识别轨迹中的错误步骤（tool_output 包含 "error", "failed" 等关键词）
+    2. 检查后续步骤是否有恢复动作（重试、换工具、解释原因）
+    3. 计算恢复率 = 成功恢复的错误数 / 总错误数
+    """
+
+    def __init__(
+        self,
+        metric_def,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        self.required_fields = ["agent_trajectory"]
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+
+        trajectory = list(row_data.get("agent_trajectory") or [])
+
+        if not trajectory:
+            return _MetricResult(None, "agent_trajectory 为空，无法评测错误恢复能力。")
+
+        # 识别错误步骤
+        error_steps = []
+        for i, step_data in enumerate(trajectory):
+            tool_output = str(step_data.get("tool_output") or "").lower()
+            # 检测错误关键词
+            if any(keyword in tool_output for keyword in ["error", "failed", "exception", "错误", "失败"]):
+                error_steps.append((i, step_data))
+
+        if not error_steps:
+            return _MetricResult(None, "轨迹中未检测到错误步骤，无需评测错误恢复能力。")
+
+        recovered_count = 0
+        details: list[dict[str, t.Any]] = []
+
+        for error_idx, error_step in error_steps:
+            step_num = error_step.get("step", error_idx + 1)
+            tool_name = error_step.get("tool", "")
+
+            # 检查后续步骤是否有恢复动作
+            has_recovery = False
+            recovery_action = ""
+
+            # 查看后续最多 3 个步骤
+            for next_step_data in trajectory[error_idx + 1:error_idx + 4]:
+                next_thought = str(next_step_data.get("thought") or "").lower()
+                next_tool = next_step_data.get("tool", "")
+
+                # 检测恢复行为
+                if "重试" in next_thought or "retry" in next_thought:
+                    has_recovery = True
+                    recovery_action = "重试相同操作"
+                    break
+                elif next_tool and next_tool != tool_name:
+                    has_recovery = True
+                    recovery_action = f"切换到工具 {next_tool}"
+                    break
+                elif any(keyword in next_thought for keyword in ["换", "改用", "尝试", "alternative"]):
+                    has_recovery = True
+                    recovery_action = "寻找替代方案"
+                    break
+
+            if has_recovery:
+                recovered_count += 1
+
+            details.append({
+                "step": step_num,
+                "tool": tool_name,
+                "recovered": has_recovery,
+                "recovery_action": recovery_action or "无恢复动作",
+            })
+
+        score = round(recovered_count / len(error_steps), 4)
+        preview = "；".join(
+            f"Step {item['step']} {'✓ ' + item['recovery_action'] if item['recovered'] else '✗ 直接终止'}"
+            for item in details[:3]
+        )
+        reason = (
+            f"检测到 {len(error_steps)} 个错误步骤，成功恢复 {recovered_count} 个"
+            f"（{round(score * 100)}%）。{preview}"
+        )
+        return _MetricResult(score, reason)
+
+
+class ToolSelectionRationalityMetric:
+    """工具选择合理性：当前步骤是否选择了最优工具。
+
+    评测目标：检测 Agent 是否选择了完成当前任务的最优工具。
+    次优工具选择会导致：
+    1. 效率低下（能一步完成的任务用了多步）
+    2. 结果不准确（工具能力不足）
+    3. 成本浪费（调用了不必要的工具）
+
+    实现方式：
+    1. 提取每个步骤的：任务目标、可用工具列表、实际选择的工具
+    2. 用 LLM Judge 判断：是否存在更优的工具选择
+    3. 计算合理性 = 选择最优工具的步骤数 / 总步骤数
+    """
+
+    def __init__(
+        self,
+        metric_def,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        self.required_fields = ["agent_trajectory", "available_tools"]
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+
+        trajectory = list(row_data.get("agent_trajectory") or [])
+        available_tools = dict(row_data.get("available_tools") or {})
+
+        if not trajectory:
+            return _MetricResult(None, "agent_trajectory 为空，无法评测工具选择合理性。")
+
+        if not available_tools:
+            return _MetricResult(None, "available_tools 为空，无法判断工具选择是否最优。")
+
+        rational_count = 0
+        details: list[dict[str, t.Any]] = []
+
+        for step_data in trajectory:
+            step_num = step_data.get("step", 0)
+            thought = str(step_data.get("thought") or "")
+            selected_tool = step_data.get("tool", "")
+
+            # 如果该步骤没有工具调用，跳过
+            if not selected_tool:
+                continue
+
+            # 构建工具列表描述
+            tools_desc = "\n".join(
+                f"- {name}: {desc}" for name, desc in available_tools.items()
+            )
+
+            # 用 LLM Judge 判断工具选择是否最优
+            try:
+                verification_prompt = f"""判断 Agent 的工具选择是否最优。
+
+任务目标：
+{thought}
+
+实际选择的工具：
+{selected_tool}
+
+可用工具列表：
+{tools_desc}
+
+如果 Agent 选择了最优工具（没有更好的替代工具能更高效/准确地完成任务），返回 {{"verdict": "optimal", "reason": "具体理由"}}；
+如果存在更优的工具选择，返回 {{"verdict": "suboptimal", "better_tool": "工具名", "reason": "为什么更优"}}。"""
+
+                verdict = await judge.chat_json(
+                    STRUCTURED_JSON_SYSTEM_PROMPT,
+                    verification_prompt,
+                )
+
+                is_optimal = str(verdict.get("verdict") or "").strip().lower() == "optimal"
+                if is_optimal:
+                    rational_count += 1
+
+                details.append({
+                    "step": step_num,
+                    "selected_tool": selected_tool,
+                    "optimal": is_optimal,
+                    "better_tool": verdict.get("better_tool", "") if not is_optimal else "",
+                    "reason": str(verdict.get("reason") or "")[:150],
+                })
+            except Exception as exc:
+                details.append({
+                    "step": step_num,
+                    "selected_tool": selected_tool,
+                    "optimal": True,  # 默认认为合理（验证失败不应惩罚）
+                    "reason": f"验证失败: {str(exc)[:100]}"
+                })
+                rational_count += 1
+
+        evaluated_steps = len([d for d in details if d])
+        if evaluated_steps == 0:
+            return _MetricResult(None, "没有需要评测的工具调用步骤。")
+
+        score = round(rational_count / evaluated_steps, 4)
+        preview = "；".join(
+            f"Step {item['step']} {item['selected_tool']} {'✓' if item['optimal'] else '✗→' + item['better_tool']}"
+            for item in details[:5]
+        )
+        reason = (
+            f"共评测 {evaluated_steps} 个工具选择，最优选择 {rational_count} 个"
+            f"（{round(score * 100)}%）。{preview}"
+        )
+        return _MetricResult(score, reason)
+
+
 class GenerativeAnswerRelevancyMetric:
     """生成式相关性：从回答反推它可能回答的问题，与用户问题做语义相似度。
 
