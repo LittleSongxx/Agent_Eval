@@ -1813,7 +1813,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         logger.info(msg)
 
     try:
-        task = db.query(EvalTask).get(task_id)
+        task = db.get(EvalTask, task_id)
         if task is None:
             logger.error("EvalTask %d not found -- aborting", task_id)
             return
@@ -2190,7 +2190,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         logger.exception("Evaluation failed for task %d", task_id)
         try:
             db.rollback()
-            task = db.query(EvalTask).get(task_id)
+            task = db.get(EvalTask, task_id)
             if task is not None:
                 task.status = "failed"
                 task.error_message = str(exc)[:2000]

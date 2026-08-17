@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""成本优化实验：对比串行、并发、批量推理的成本-耗时-质量权衡"""
+"""并发优化实验：对比串行、指标并发、行级并发的时间-质量权衡
+
+注意：本实验聚焦**时间优化**（通过并发降低延迟），不涉及成本优化。
+并发执行不会降低 token 消耗，真正的成本优化需要批量推理或模型分层。
+"""
 
 import asyncio
 import json
@@ -272,9 +276,9 @@ async def run_row_concurrent_evaluation(samples: List[dict], judge: OpenAIJudgeC
 
 
 async def run_experiment():
-    """运行成本优化实验"""
+    """运行并发优化实验"""
 
-    print(f"📊 成本优化实验")
+    print(f"📊 并发优化实验（时间优化）")
     print(f"=" * 80)
     print(f"样本数量: {len(SAMPLE_DATA)}")
     print(f"指标数量: 3 (faithfulness, answer_relevancy, context_recall)")
@@ -330,7 +334,8 @@ async def run_experiment():
     # 保存报告
     report = {
         "experiment_info": {
-            "name": "成本优化实验",
+            "name": "并发优化实验（时间优化）",
+            "note": "本实验测试并发对评测耗时的影响。并发不会降低 token 消耗（成本相同），仅优化响应速度。",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "samples": len(SAMPLE_DATA),
             "metrics": 3,
@@ -341,16 +346,17 @@ async def run_experiment():
             "baseline_time": baseline_time,
             "best_time_saving": f"{max((baseline_time - e['elapsed_time']) / baseline_time * 100 for e in experiments):.1f}%",
             "quality_stable": all(abs(e["weighted_mean"] - experiments[0]["weighted_mean"]) < 0.05 for e in experiments),
-            "recommendation": "行并发 + 指标并发是最优解：大幅降低耗时，质量几乎不变"
+            "recommendation": "行并发 + 指标并发是最优解：大幅降低耗时，质量几乎不变",
+            "cost_note": "⚠️ 并发优化的是时间，不是成本。token 消耗与串行相同。真正的成本优化需要批量推理或模型分层。"
         }
     }
 
-    report_path = Path(__file__).parent.parent / "cost_optimization_report.json"
+    report_path = Path(__file__).parent.parent / "concurrency_optimization_report.json"
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     print(f"\n✓ 报告已保存: {report_path}")
-    print(f"\n💡 核心结论：")
+    print(f"\n💡 核心结论（时间优化）：")
     print(f"  - 指标并发可降低耗时 {(baseline_time - experiments[1]['elapsed_time']) / baseline_time * 100:.1f}%")
     print(f"  - 行并发 + 指标并发可降低耗时 {(baseline_time - experiments[2]['elapsed_time']) / baseline_time * 100:.1f}%")
     print(f"  - 质量保持稳定（weighted_mean 变化 <0.05）")

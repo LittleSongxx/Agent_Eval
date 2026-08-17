@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from sqlalchemy.orm import Session
 
@@ -1046,7 +1046,7 @@ def run_seed(db: Session) -> None:
     # ------------------------------------------------------------------
     # 5. Sample Completed Evaluation
     # ------------------------------------------------------------------
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     eval_task = EvalTask(
         name="RAG \u793a\u4f8b\u8bc4\u6d4b",
         dataset_id=dataset.id,
