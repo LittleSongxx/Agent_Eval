@@ -56,6 +56,18 @@
 | `CORS_ORIGINS` | CORS 白名单 | ["http://localhost:5173"] |
 | `SEED_ON_STARTUP` | 启动时填充种子数据 | true |
 
+### `SEED_ON_STARTUP` 详细说明
+
+**种子数据包含**：
+- 3 个评测模板（RAG 场景、Agent 场景、多轮对话场景）
+- 2 个示例数据集（RAG 评测样本、Agent 轨迹样本）
+- 1 个默认 LLM 配置（qwen-plus）
+- 1 个已完成的示例评测任务（含结果数据）
+
+**幂等性**：重启服务不会重复插入（有唯一性检查）。
+
+**清理方式**：删除 `eval_platform.db` 后重启服务，或使用 SQLite 工具手动清理表数据。
+
 ## 注意事项
 
 1. **API Key 安全**：永远不要将 `.env` 文件提交到版本控制
