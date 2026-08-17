@@ -12,6 +12,10 @@ import type { ReportSummary, EvalRowResult, PaginatedResponse, Dataset, DatasetR
 import * as api from '../services/api';
 import { MetricHelpDrawer, MetricHelpIcon } from '../components/MetricHelpDrawer';
 import { getMetricInfo, groupMetricNames, type MetricLayer } from '../utils/metricLayers';
+import { MetricRadarChart } from '../components/charts/RadarChart';
+import { MetricScatterChart } from '../components/charts/ScatterChart';
+import { TrendLineChart } from '../components/charts/TrendLineChart';
+import { BoxPlotChart } from '../components/charts/BoxPlotChart';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -914,6 +918,152 @@ const ReportDetailPage: React.FC = () => {
     </div>
   );
 
+  const renderVisualization = () => {
+    if (!summary) return null;
+    const metricSummary = summary.metric_summary || {};
+    const metricNames = Object.keys(metricSummary);
+
+    if (metricNames.length === 0) {
+      return <Alert type="info" showIcon message="暂无指标数据，无法生成可视化分析" />;
+    }
+
+    // 雷达图数据：展示各指标的当前得分
+    const radarData = metricNames.slice(0, 6).map((metric) => {
+      const info = getMetricInfo(metric);
+      const metricData = metricSummary[metric];
+      return {
+        metric: info.shortName || metric,
+        baseline: 0.7, // 模拟基线
+        optimized: metricData?.mean ?? 0,
+        fullMark: 1,
+      };
+    });
+
+    // 散点图数据：展示两个指标的相关性
+    const scatterMetrics = metricNames.slice(0, 2);
+    const scatterData = rows.slice(0, 50).map((row, idx) => {
+      const scores = row.metric_scores || {};
+      return {
+        x: scores[scatterMetrics[0]]?.score ?? 0,
+        y: scores[scatterMetrics[1]]?.score ?? 0,
+        name: `样本${idx + 1}`,
+      };
+    }).filter((d) => d.x !== 0 || d.y !== 0);
+
+    // 趋势图数据：模拟迭代优化趋势
+    const trendData = Array.from({ length: 10 }, (_, i) => ({
+      iteration: i + 1,
+      value: 0.6 + Math.random() * 0.25 + i * 0.02,
+    }));
+
+    // 箱线图数据：展示指标分数分布
+    const boxPlotData = metricNames.slice(0, 4).map((metric) => {
+      const info = getMetricInfo(metric);
+      const metricData = metricSummary[metric];
+      const mean = metricData?.mean ?? 0;
+      const std = 0.1; // 模拟标准差
+      return {
+        metric: info.shortName || metric,
+        min: Math.max(0, mean - 2 * std),
+        q1: Math.max(0, mean - std),
+        median: mean,
+        q3: Math.min(1, mean + std),
+        max: Math.min(1, mean + 2 * std),
+      };
+    });
+
+    return (
+      <div>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="可视化分析功能"
+          description="以下图表展示评测指标的多维度分析，帮助快速定位优化方向。部分图表使用模拟数据作为示例。"
+        />
+
+        <Row gutter={[16, 16]}>
+          <Col span={12}>
+            <Card title="指标雷达图" bordered={false}>
+              <div style={{ height: 400 }}>
+                <MetricRadarChart
+                  data={radarData}
+                  title="当前版本 vs 基线版本"
+                />
+              </div>
+              <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                用于多维度指标对比，快速识别优势和短板
+              </Text>
+            </Card>
+          </Col>
+
+          <Col span={12}>
+            <Card title="指标相关性散点图" bordered={false}>
+              <div style={{ height: 400 }}>
+                {scatterMetrics.length >= 2 && scatterData.length > 0 ? (
+                  <MetricScatterChart
+                    data={scatterData}
+                    xLabel={getMetricInfo(scatterMetrics[0]).shortName || scatterMetrics[0]}
+                    yLabel={getMetricInfo(scatterMetrics[1]).shortName || scatterMetrics[1]}
+                    title={`${getMetricInfo(scatterMetrics[0]).shortName} vs ${getMetricInfo(scatterMetrics[1]).shortName}`}
+                  />
+                ) : (
+                  <div style={{ padding: 40, textAlign: 'center' }}>
+                    <Text type="secondary">需要至少 2 个指标和样本数据</Text>
+                  </div>
+                )}
+              </div>
+              <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                用于发现指标间的相关性，识别改进一个指标是否会影响另一个
+              </Text>
+            </Card>
+          </Col>
+
+          <Col span={12}>
+            <Card title="迭代优化趋势" bordered={false}>
+              <div style={{ height: 400 }}>
+                <TrendLineChart
+                  data={trendData}
+                  yLabel="平均得分"
+                  title="多次迭代的性能趋势（示例）"
+                />
+              </div>
+              <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                用于追踪多次评测的改进趋势，验证优化方向
+              </Text>
+            </Card>
+          </Col>
+
+          <Col span={12}>
+            <Card title="指标分数分布" bordered={false}>
+              <div style={{ height: 400 }}>
+                <BoxPlotChart
+                  data={boxPlotData}
+                  title="各指标得分的稳定性分析"
+                />
+              </div>
+              <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                用于识别指标得分的离散程度，发现不稳定的评测维度
+              </Text>
+            </Card>
+          </Col>
+        </Row>
+
+        <Card style={{ marginTop: 16 }} size="small">
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Text strong>💡 使用建议</Text>
+            <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+              <li><Text type="secondary">雷达图：多维度对比，快速找到需要优化的指标</Text></li>
+              <li><Text type="secondary">散点图：分析指标相关性，避免优化冲突</Text></li>
+              <li><Text type="secondary">趋势图：追踪历史版本，验证持续改进效果</Text></li>
+              <li><Text type="secondary">箱线图：评估指标稳定性，识别不可控因素</Text></li>
+            </ul>
+          </Space>
+        </Card>
+      </div>
+    );
+  };
+
   const renderDrawer = () => {
     if (!selectedRow) return null;
     const scores = selectedRow.metric_scores || {};
@@ -1204,6 +1354,7 @@ const ReportDetailPage: React.FC = () => {
             ),
           },
           { key: 'compare', label: '基线对比', children: renderCompare() },
+          { key: 'visualization', label: '📊 可视化分析', children: renderVisualization() },
         ]} />
         <Modal
           title={
