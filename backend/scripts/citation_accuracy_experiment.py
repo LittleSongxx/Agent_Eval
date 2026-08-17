@@ -89,7 +89,7 @@ async def run_experiment():
             result = await metric.ascore(row_data, judge)
 
             # 分析结果
-            score = result.score
+            score = result.value
             expected = sample.get("expected_citation_accuracy", 1.0)
             prediction_correct = abs(score - expected) < 0.15  # 容忍 15% 误差
 

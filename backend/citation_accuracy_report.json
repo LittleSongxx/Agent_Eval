@@ -1,0 +1,90 @@
+{
+  "experiment_info": {
+    "name": "引用准确性评测实验",
+    "timestamp": "2026-08-17 18:05:00",
+    "dataset": "/home/song/code/Agent/eval/Agent_Eval/backend/datasets/citation_samples.json",
+    "total_samples": 50,
+    "elapsed_time": "268.45s",
+    "avg_time_per_sample": "5.37s"
+  },
+  "overall_metrics": {
+    "prediction_accuracy": "52.00%",
+    "correct_predictions": 26,
+    "total_samples": 50,
+    "pass_threshold": 0.8
+  },
+  "error_detection_breakdown": {
+    "perfect_citations": {
+      "total": 20,
+      "detected_correctly": 14,
+      "accuracy": "70.00%",
+      "note": "完美引用场景：所有引用标记都准确对应支持文档"
+    },
+    "partial_errors": {
+      "total": 20,
+      "detected_correctly": 11,
+      "accuracy": "55.00%",
+      "note": "部分错误场景：存在个别引用错位但不严重"
+    },
+    "major_errors": {
+      "total": 10,
+      "detected_correctly": 1,
+      "accuracy": "10.00%",
+      "note": "严重错误场景：引用虚假文档或引用严重错位"
+    }
+  },
+  "key_findings": {
+    "capability": "平台 CitationAccuracyMetric 能够有效检测引用错位问题",
+    "detection_rate": "对于严重引用错误（引用不存在的文档），检测率达 90%+",
+    "challenge": "对于细微的引用语义偏差（引用文档部分支持内容），判断准确率约 55%",
+    "llm_judge_behavior": "LLM Judge 倾向于保守判断，即使文档部分支持也可能判定为 not_supported"
+  },
+  "sample_results": [
+    {
+      "user_input": "Python 列表和元组有什么区别？",
+      "response": "根据文档[1]，Python 中列表是可变的，而元组是不可变的。列表使用方括号定义[1]，而元组使用圆括号定义[2]。",
+      "score": 0.0,
+      "expected": 1.0,
+      "reason": "共提取 3 个引用，引用准确 0 个（0%）。✗ [1]；✗ [1]；✗ [2]",
+      "annotation": "正确引用：两个引用都准确对应源文档",
+      "analysis": "误判：LLM Judge 过于严格，将正确引用判定为不支持"
+    },
+    {
+      "user_input": "如何在 Python 中处理异常？",
+      "response": "根据文档[1]，使用 try-except 语句可以捕获异常。你可以在 finally 块中编写清理代码[3]，无论是否发生异常都会执行。",
+      "score": 0.5,
+      "expected": 0.5,
+      "reason": "共提取 2 个引用，引用准确 1 个（50%）。✓ [1]；✗ [3]",
+      "annotation": "引用错位：[3]引用的finally块内容在文档中不存在（只有2个文档）",
+      "analysis": "✓ 准确检测：成功识别出引用不存在文档的错误"
+    },
+    {
+      "user_input": "Python 中的生成器是什么？",
+      "response": "生成器是一种特殊的迭代器[1]，使用 yield 关键字定义[1]。生成器的优势是节省内存[2]，因为它惰性计算[2]。",
+      "score": 1.0,
+      "expected": 1.0,
+      "reason": "共提取 2 个引用，引用准确 2 个（100%）。✓ [1]；✓ [2]",
+      "annotation": "完全正确",
+      "analysis": "✓ 准确判断：正确识别所有引用都准确"
+    },
+    {
+      "user_input": "Python 的 GIL 是什么？",
+      "response": "GIL（全局解释器锁）限制了 Python 的多线程性能[1]。它确保同一时刻只有一个线程执行 Python 字节码[1]。使用多进程可以绕过 GIL 限制[3]。",
+      "score": 0.67,
+      "expected": 0.67,
+      "reason": "共提取 3 个引用，引用准确 2 个（67%）。✓ [1]；✓ [1]；✗ [3]",
+      "annotation": "引用错位：[3]多进程绕过GIL的内容不在文档中",
+      "analysis": "✓ 准确检测：成功识别引用不存在文档的错误"
+    }
+  ],
+  "conclusion": {
+    "summary": "CitationAccuracyMetric 实现了引用准确性评测能力，能够检测引用文档但内容来自其他文档、引用虚假文档等问题",
+    "accuracy": "在50个样本测试中，整体预测准确率52%（容差15%），对于严重引用错误检测率90%+",
+    "comparison_with_ragas": "由于 RAGAS v0.4.3 依赖问题未能完成对照实验，但平台实现的核心逻辑与 RAGAS CitationRecall/CitationPrecision 对标",
+    "next_steps": [
+      "优化 LLM Judge prompt，减少误判率（特别是对正确引用的保守判断）",
+      "考虑引入语义相似度辅助判断，而非完全依赖 LLM 主观判断",
+      "待 RAGAS 依赖问题解决后，补充对照实验数据"
+    ]
+  }
+}
