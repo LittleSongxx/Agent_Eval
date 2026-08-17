@@ -446,6 +446,210 @@ class ClaimFaithfulnessMetric:
         return _MetricResult(score, reason)
 
 
+class CitationAccuracyMetric:
+    """引用准确性：回答中的引用标记是否指向真正支持该内容的文档。
+
+    评测目标：检测"引用文档 A 但内容实际来自文档 B"的引用错位问题。
+    这在金融、法律、医疗等需要可溯源的场景下是严重问题。
+
+    实现方式：
+    1. 提取回答中的引用标记（如 [1], [Doc A], 根据文档X）
+    2. 提取被引用的内容片段（引用标记前后的句子）
+    3. 用 LLM Judge 判断：被引用的文档是否真正支持该内容
+    4. 计算引用准确率 = 正确引用数 / 总引用数
+
+    与 RAGAS v0.4 CitationRecall/CitationPrecision 对标。
+    """
+
+    def __init__(
+        self,
+        metric_def,
+        prompt_override: str | None = None,
+        pass_threshold: float | None = None,
+        weight: float | None = None,
+    ):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        # 需要：response（含引用标记）、retrieved_contexts（文档列表）
+        self.required_fields = ["response", "retrieved_contexts"]
+
+    async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+
+        response = str(row_data.get("response") or "")
+        contexts = list(row_data.get("retrieved_contexts") or [])
+
+        if not contexts:
+            return _MetricResult(None, "缺少 retrieved_contexts，无法验证引用。")
+
+        # 提取引用标记和对应的内容片段
+        citations = self._extract_citations(response)
+
+        if not citations:
+            # 无引用标记 = 回答未标注引用来源，引用准确性按 N/A 处理
+            return _MetricResult(None, "回答未包含引用标记（如 [1], [Doc A]），无法评测引用准确性。")
+
+        # 构建文档索引映射（支持 [1], [Doc A] 等格式）
+        doc_index = self._build_doc_index(contexts)
+
+        correct = 0
+        details: list[dict[str, t.Any]] = []
+
+        for citation in citations:
+            cite_mark = citation["mark"]  # 如 "[1]"
+            content = citation["content"]  # 引用标记附近的内容
+
+            # 找到被引用的文档
+            cited_doc = self._resolve_citation(cite_mark, doc_index, contexts)
+
+            if cited_doc is None:
+                details.append({
+                    "citation": cite_mark,
+                    "content": content[:50],
+                    "correct": False,
+                    "reason": f"引用标记 {cite_mark} 未能匹配到任何文档"
+                })
+                continue
+
+            # 用 LLM Judge 判断：cited_doc 是否真正支持 content
+            try:
+                verification_prompt = f"""判断以下文档是否支持所引用的内容。
+
+被引用的内容：
+{content}
+
+被引用的文档：
+{cited_doc}
+
+如果文档明确支持该内容（包含相同或等价的事实），返回 {{"verdict": "supported", "reason": "具体理由"}}；
+否则返回 {{"verdict": "not_supported", "reason": "具体理由"}}。"""
+
+                verdict = await judge.chat_json(
+                    STRUCTURED_JSON_SYSTEM_PROMPT,
+                    verification_prompt,
+                )
+
+                is_correct = str(verdict.get("verdict") or "").strip().lower() == "supported"
+                if is_correct:
+                    correct += 1
+
+                details.append({
+                    "citation": cite_mark,
+                    "content": content[:50],
+                    "correct": is_correct,
+                    "reason": str(verdict.get("reason") or "")[:150],
+                })
+            except Exception as exc:
+                details.append({
+                    "citation": cite_mark,
+                    "content": content[:50],
+                    "correct": False,
+                    "reason": f"验证失败: {str(exc)[:100]}"
+                })
+
+        score = round(correct / len(citations), 4)
+        preview = "；".join(
+            f"{'✓' if item['correct'] else '✗'} {item['citation']}" for item in details[:6]
+        )
+        reason = (
+            f"共提取 {len(citations)} 个引用，引用准确 {correct} 个"
+            f"（{round(score * 100)}%）。{preview}"
+        )
+        return _MetricResult(score, reason)
+
+    def _extract_citations(self, response: str) -> list[dict[str, str]]:
+        """提取回答中的引用标记和对应内容。
+
+        支持格式：
+        - [1], [2], [3] （数字索引）
+        - [Doc A], [文档 B] （文档标识）
+        - 根据文档1, 根据文档A （中文格式）
+        """
+        citations = []
+
+        # 正则匹配：[数字] 或 [文档名]
+        pattern = r'\[([^\]]+)\]'
+
+        # 按句子分割，找到每个引用标记所在的句子
+        sentences = re.split(r'[。！？\.\!\?]', response)
+
+        for sentence in sentences:
+            matches = re.finditer(pattern, sentence)
+            for match in matches:
+                cite_mark = match.group(0)  # 完整标记 "[1]"
+                cite_id = match.group(1)    # 标记内容 "1"
+
+                citations.append({
+                    "mark": cite_mark,
+                    "id": cite_id,
+                    "content": sentence.strip()  # 该引用标记所在的句子
+                })
+
+        # 去重（同一个引用标记在同一句话中可能出现多次）
+        seen = set()
+        unique_citations = []
+        for c in citations:
+            key = (c["mark"], c["content"])
+            if key not in seen:
+                seen.add(key)
+                unique_citations.append(c)
+
+        return unique_citations
+
+    def _build_doc_index(self, contexts: list[str]) -> dict[str, str]:
+        """构建文档索引映射。
+
+        Returns:
+            {"1": "文档1内容", "2": "文档2内容", ...}
+        """
+        doc_index = {}
+        for idx, doc in enumerate(contexts, start=1):
+            # 支持数字索引
+            doc_index[str(idx)] = doc
+            # 支持字母索引（A, B, C, ...）
+            if idx <= 26:
+                doc_index[chr(64 + idx)] = doc  # A=65
+        return doc_index
+
+    def _resolve_citation(
+        self,
+        cite_mark: str,
+        doc_index: dict[str, str],
+        contexts: list[str]
+    ) -> str | None:
+        """将引用标记解析到具体文档。
+
+        Args:
+            cite_mark: 如 "[1]", "[Doc A]"
+            doc_index: 文档索引映射
+            contexts: 原始文档列表
+
+        Returns:
+            被引用的文档内容，如果无法解析则返回 None
+        """
+        # 提取标记内的 ID
+        inner = cite_mark.strip("[]")
+
+        # 直接匹配
+        if inner in doc_index:
+            return doc_index[inner]
+
+        # 尝试去掉前缀（如 "Doc 1" -> "1", "文档A" -> "A"）
+        cleaned = re.sub(r'^(Doc|文档|document)\s*', '', inner, flags=re.IGNORECASE).strip()
+        if cleaned in doc_index:
+            return doc_index[cleaned]
+
+        # 无法解析
+        return None
+
+
 class GenerativeAnswerRelevancyMetric:
     """生成式相关性：从回答反推它可能回答的问题，与用户问题做语义相似度。
 
@@ -673,7 +877,7 @@ def build_metric(
     metric_type: str = metric_def.metric_type
     config: dict = metric_def.config or {}
 
-    # 平台原生复合指标（多步结构化判定：断言拆解 / 生成式语义比较）优先于通用
+    # 平台原生复合指标（多步结构化判定：断言拆解 / 生成式语义比较 / 引用准确性）优先于通用
     # Judge 路径——它们的 spec 条目仅用于指标元数据，实际执行走专用执行器
     if metric_type == "builtin_faithfulness_claim":
         return (
@@ -690,6 +894,28 @@ def build_metric(
         return (
             "llm",
             GenerativeAnswerRelevancyMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_citation_accuracy":
+        return (
+            "llm",
+            CitationAccuracyMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_citation_accuracy":
+        return (
+            "llm",
+            CitationAccuracyMetric(
                 metric_def,
                 prompt_override=prompt_override,
                 pass_threshold=getattr(scenario_metric, "pass_threshold", None),
