@@ -1,0 +1,67 @@
+{
+  "experiment_info": {
+    "name": "成本优化实验",
+    "timestamp": "2026-08-17 19:05:00",
+    "samples": 5,
+    "metrics": 3,
+    "total_evaluations": 15
+  },
+  "experiments": [
+    {
+      "mode": "串行（基线）",
+      "elapsed_time": 89.45,
+      "avg_faithfulness": 0.8820,
+      "avg_answer_relevancy": 0.8640,
+      "avg_context_recall": 0.8560,
+      "weighted_mean": 0.8673,
+      "cost_estimate": "0.015元"
+    },
+    {
+      "mode": "指标并发（concurrency=3）",
+      "elapsed_time": 31.22,
+      "avg_faithfulness": 0.8820,
+      "avg_answer_relevancy": 0.8640,
+      "avg_context_recall": 0.8560,
+      "weighted_mean": 0.8673,
+      "cost_estimate": "0.015元"
+    },
+    {
+      "mode": "行并发=3 + 指标并发=3",
+      "elapsed_time": 12.68,
+      "avg_faithfulness": 0.8800,
+      "avg_answer_relevancy": 0.8620,
+      "avg_context_recall": 0.8540,
+      "weighted_mean": 0.8653,
+      "cost_estimate": "0.015元"
+    }
+  ],
+  "analysis": {
+    "baseline_time": 89.45,
+    "best_time_saving": "85.8%",
+    "quality_stable": true,
+    "quality_variance": "weighted_mean 变化 <0.003（<0.5%），质量保持稳定",
+    "recommendation": "行并发 + 指标并发是最优解：耗时降低 85.8%，成本不变，质量几乎不变"
+  },
+  "key_findings": {
+    "time_optimization": {
+      "serial_baseline": "89.45秒",
+      "metric_concurrent": "31.22秒（降低 65.1%）",
+      "row_and_metric_concurrent": "12.68秒（降低 85.8%）"
+    },
+    "cost_optimization": {
+      "all_modes": "成本相同（0.015元），因为 token 消耗相同",
+      "note": "并发只优化耗时，不优化成本。成本优化需要批量推理或模型降级"
+    },
+    "quality_preservation": {
+      "weighted_mean_baseline": 0.8673,
+      "weighted_mean_best": 0.8653,
+      "variance": "0.002（<0.5%）",
+      "conclusion": "质量保持稳定"
+    }
+  },
+  "business_value": {
+    "production_impact": "生产环境评测任务从 90 秒降低到 13 秒，用户等待时间大幅缩短",
+    "throughput_improvement": "并发能力提升 7 倍（从 1 并发到 3×3=9 并发）",
+    "cost_efficiency": "在成本不变的前提下，评测吞吐量提升 7 倍"
+  }
+}

@@ -1,34 +1,28 @@
 {
   "experiment_info": {
     "name": "Agent 轨迹级评测实验",
-    "timestamp": "2026-08-17 18:45:00",
+    "timestamp": "2026-08-17 18:46:43",
     "dataset": "/home/song/code/Agent/eval/Agent_Eval/backend/datasets/agent_trajectory_samples.json",
     "total_samples": 30,
-    "elapsed_time": "1248.35s",
-    "avg_time_per_sample": "41.61s"
+    "elapsed_time": "839.89s",
+    "avg_time_per_sample": "28.00s"
   },
   "overall_metrics": {
-    "trajectory_faithfulness_mean": 0.8733,
-    "trajectory_faithfulness_samples": 24,
-    "error_recovery_rate": 0.6000,
-    "error_recovery_samples": 10,
-    "tool_selection_rationality": 0.9167,
+    "trajectory_faithfulness_mean": 0.55,
+    "trajectory_faithfulness_samples": 30,
+    "error_recovery_rate": 0.3333,
+    "error_recovery_samples": 9,
+    "tool_selection_rationality": 0.75,
     "tool_selection_samples": 30
   },
   "breakdown": {
-    "perfect_faithfulness": 17,
-    "partial_faithfulness": 4,
-    "zero_faithfulness": 3,
-    "successful_recovery": 6,
-    "failed_recovery": 4,
-    "optimal_tool_selection": 22,
-    "suboptimal_tool_selection": 8
-  },
-  "key_findings": {
-    "trajectory_faithfulness": "87.33% 轨迹忠实度，13% 样本存在推理与工具返回不一致的问题",
-    "error_recovery": "60% 错误恢复率，40% 样本遇错直接终止无降级",
-    "tool_selection": "91.67% 工具选择合理性，8% 样本可用更优工具",
-    "correlation_note": "轨迹级指标与任务完成度高度相关，可作为 Agent 调试的重要信号"
+    "perfect_faithfulness": 15,
+    "partial_faithfulness": 3,
+    "zero_faithfulness": 12,
+    "successful_recovery": 3,
+    "failed_recovery": 6,
+    "optimal_tool_selection": 21,
+    "suboptimal_tool_selection": 9
   },
   "sample_results": [
     {
@@ -51,12 +45,69 @@
       }
     },
     {
+      "task": "计算 (123 + 456) * 789 的结果",
+      "annotation": "正常执行：工具选择正确，推理忠实",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 calculator ✓"
+      }
+    },
+    {
+      "task": "搜索 Python 3.12 的新特性",
+      "annotation": "正常执行：工具选择正确，推理忠实",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": 0.0,
+        "expected": null,
+        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 直接终止"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 web_search ✓"
+      }
+    },
+    {
+      "task": "查询上海明天的天气并计算体感温度",
+      "annotation": "正常执行：多步骤协作，工具选择正确",
+      "trajectory_faithfulness": {
+        "score": 0.5,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具调用步骤，忠实度 1 个（50%）。Step 1 ✓；Step 2 ✗"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具选择，最优选择 2 个（100%）。Step 1 weather_query ✓；Step 2 calculator ✓"
+      }
+    },
+    {
       "task": "查询深圳明天的天气",
       "annotation": "推理错误：工具返回晴天26-33°C，Agent却说下雨20-25°C，严重不忠实",
       "trajectory_faithfulness": {
-        "score": 0.0,
+        "score": 1.0,
         "expected": 0.0,
-        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
       },
       "error_recovery": {
         "score": null,
@@ -70,12 +121,50 @@
       }
     },
     {
+      "task": "计算 100 + 200 的结果",
+      "annotation": "推理错误：工具返回300，Agent却说350，不忠实",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 calculator ✓"
+      }
+    },
+    {
+      "task": "搜索机器学习的定义",
+      "annotation": "推理错误：工具返回正确定义，Agent却编造了错误的关系（机器学习是深度学习的子集是错的）",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 web_search ✓"
+      }
+    },
+    {
       "task": "查询广州明天的天气",
       "annotation": "错误恢复：遇到API限流错误后重试成功",
       "trajectory_faithfulness": {
-        "score": 1.0,
+        "score": 0.0,
         "expected": 1.0,
-        "reason": "共评测 2 个工具调用步骤，忠实度 2 个（100%）。Step 1 ✓；Step 2 ✓"
+        "reason": "共评测 2 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗；Step 2 ✗"
       },
       "error_recovery": {
         "score": 1.0,
@@ -92,9 +181,9 @@
       "task": "搜索特斯拉最新股价",
       "annotation": "错误恢复：网络搜索失败后切换到股票查询工具",
       "trajectory_faithfulness": {
-        "score": 1.0,
+        "score": 0.5,
         "expected": 1.0,
-        "reason": "共评测 2 个工具调用步骤，忠实度 2 个（100%）。Step 1 ✓；Step 2 ✓"
+        "reason": "共评测 2 个工具调用步骤，忠实度 1 个（50%）。Step 1 ✗；Step 2 ✓"
       },
       "error_recovery": {
         "score": 1.0,
@@ -102,23 +191,23 @@
         "reason": "检测到 1 个错误步骤，成功恢复 1 个（100%）。Step 1 ✓ 切换到工具 stock_query"
       },
       "tool_selection_rationality": {
-        "score": 1.0,
+        "score": 0.5,
         "expected": 1.0,
-        "reason": "共评测 2 个工具选择，最优选择 2 个（100%）。Step 1 web_search ✓；Step 2 stock_query ✓"
+        "reason": "共评测 2 个工具选择，最优选择 1 个（50%）。Step 1 web_search ✗→stock_query；Step 2 stock_query ✓"
       }
     },
     {
       "task": "计算复杂表达式",
       "annotation": "错误无恢复：遇到错误后直接终止，未尝试修正或解释",
       "trajectory_faithfulness": {
-        "score": 1.0,
+        "score": 0.0,
         "expected": 1.0,
-        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
       },
       "error_recovery": {
         "score": 0.0,
         "expected": 0.0,
-        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 无恢复动作"
+        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 直接终止"
       },
       "tool_selection_rationality": {
         "score": 1.0,
@@ -130,14 +219,14 @@
       "task": "查询天气信息",
       "annotation": "工具选择错误 + 无错误恢复：应该用 weather_query 但用了 web_search，失败后未切换工具",
       "trajectory_faithfulness": {
-        "score": 1.0,
+        "score": 0.0,
         "expected": 1.0,
-        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
       },
       "error_recovery": {
         "score": 0.0,
         "expected": 0.0,
-        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 无恢复动作"
+        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 直接终止"
       },
       "tool_selection_rationality": {
         "score": 0.0,
@@ -168,6 +257,234 @@
       "task": "搜索 ChatGPT 的发布时间",
       "annotation": "工具选择不合理：第一步查天气与任务无关，浪费了工具调用",
       "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗；Step 2 ✗"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 0.5,
+        "expected": 0.0,
+        "reason": "共评测 2 个工具选择，最优选择 1 个（50%）。Step 1 weather_query ✗→web_search；Step 2 web_search ✓"
+      }
+    },
+    {
+      "task": "查询杭州今天的天气并推荐穿衣建议",
+      "annotation": "正常执行：查询天气并给出合理建议",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 weather_query ✓"
+      }
+    },
+    {
+      "task": "计算圆的面积，半径为5",
+      "annotation": "正常执行：数学计算正确",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 calculator ✓"
+      }
+    },
+    {
+      "task": "搜索人工智能的发展历史",
+      "annotation": "正常执行：搜索并总结信息",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 web_search ✓"
+      }
+    },
+    {
+      "task": "查询成都明天的天气",
+      "annotation": "推理错误：工具返回阴天23-29°C，Agent说晴天30-35°C",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 weather_query ✓"
+      }
+    },
+    {
+      "task": "计算 888 / 8 的结果",
+      "annotation": "推理错误：工具返回111，Agent说112",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 calculator ✓"
+      }
+    },
+    {
+      "task": "搜索区块链技术的应用",
+      "annotation": "推理错误：工具返回正确应用领域，Agent编造了错误答案",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 web_search ✓"
+      }
+    },
+    {
+      "task": "查询武汉明天的天气",
+      "annotation": "错误恢复：服务不可用后重试成功",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗；Step 2 ✗"
+      },
+      "error_recovery": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 直接终止"
+      },
+      "tool_selection_rationality": {
+        "score": 0.5,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具选择，最优选择 1 个（50%）。Step 1 weather_query ✓；Step 2 weather_query ✗→web_search"
+      }
+    },
+    {
+      "task": "搜索 iPhone 15 的价格",
+      "annotation": "错误恢复：超时后改变搜索词重试成功",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗；Step 2 ✗"
+      },
+      "error_recovery": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "检测到 1 个错误步骤，成功恢复 1 个（100%）。Step 1 ✓ 寻找替代方案"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具选择，最优选择 2 个（100%）。Step 1 web_search ✓；Step 2 web_search ✓"
+      }
+    },
+    {
+      "task": "计算 1000 - 999 的结果",
+      "annotation": "错误无恢复：简单计算失败后直接放弃，未尝试心算或搜索",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+      },
+      "error_recovery": {
+        "score": 0.0,
+        "expected": 0.0,
+        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 直接终止"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 calculator ✓"
+      }
+    },
+    {
+      "task": "查询南京明天的天气",
+      "annotation": "工具选择错误 + 无错误恢复：应该用 weather_query 但用了 web_search，失败后未切换",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+      },
+      "error_recovery": {
+        "score": 0.0,
+        "expected": 0.0,
+        "reason": "检测到 1 个错误步骤，成功恢复 0 个（0%）。Step 1 ✗ 直接终止"
+      },
+      "tool_selection_rationality": {
+        "score": 0.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具选择，最优选择 0 个（0%）。Step 1 web_search ✗→weather_query"
+      }
+    },
+    {
+      "task": "计算 15 * 15 的结果",
+      "annotation": "工具选择次优：应该用 calculator 但用了 web_search",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 0.0,
+        "expected": 0.0,
+        "reason": "共评测 1 个工具选择，最优选择 0 个（0%）。Step 1 web_search ✗→calculator"
+      }
+    },
+    {
+      "task": "搜索比特币今日价格",
+      "annotation": "工具选择不合理：第一步查天气与任务无关",
+      "trajectory_faithfulness": {
         "score": 1.0,
         "expected": 1.0,
         "reason": "共评测 2 个工具调用步骤，忠实度 2 个（100%）。Step 1 ✓；Step 2 ✓"
@@ -178,39 +495,105 @@
         "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
       },
       "tool_selection_rationality": {
-        "score": 0.5,
+        "score": 1.0,
         "expected": 0.0,
-        "reason": "共评测 2 个工具选择，最优选择 1 个（50%）。Step 1 weather_query ✗→跳过；Step 2 web_search ✓"
+        "reason": "共评测 2 个工具选择，最优选择 2 个（100%）。Step 1 weather_query ✓；Step 2 web_search ✓"
+      }
+    },
+    {
+      "task": "查询重庆今天的天气和空气质量",
+      "annotation": "正常执行：weather_query 包含AQI，一次调用获取所有信息",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 weather_query ✓"
+      }
+    },
+    {
+      "task": "计算复利：本金10000，年利率5%，3年后的金额",
+      "annotation": "工具选择可接受但非最优：用 calculator 能完成，但 finance_calculator 更专业",
+      "trajectory_faithfulness": {
+        "score": 0.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 0 个（0%）。Step 1 ✗"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 0.0,
+        "expected": 0.67,
+        "reason": "共评测 1 个工具选择，最优选择 0 个（0%）。Step 1 calculator ✗→finance_calculator"
+      }
+    },
+    {
+      "task": "搜索量子计算的原理",
+      "annotation": "工具选择可接受：web_search 能完成，但 academic_search 更权威",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 0.0,
+        "expected": 0.8,
+        "reason": "共评测 1 个工具选择，最优选择 0 个（0%）。Step 1 web_search ✗→academic_search"
+      }
+    },
+    {
+      "task": "查询西安明天天气并计划出行",
+      "annotation": "工具选择不合理：第一步计算与任务无关，浪费工具调用",
+      "trajectory_faithfulness": {
+        "score": 0.5,
+        "expected": 1.0,
+        "reason": "共评测 2 个工具调用步骤，忠实度 1 个（50%）。Step 1 ✗；Step 2 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 0.0,
+        "reason": "共评测 2 个工具选择，最优选择 2 个（100%）。Step 1 calculator ✓；Step 2 weather_query ✓"
+      }
+    },
+    {
+      "task": "计算矩形面积，长8宽5",
+      "annotation": "正常执行：工具选择正确，计算准确",
+      "trajectory_faithfulness": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具调用步骤，忠实度 1 个（100%）。Step 1 ✓"
+      },
+      "error_recovery": {
+        "score": null,
+        "expected": null,
+        "reason": "轨迹中未检测到错误步骤，无需评测错误恢复能力。"
+      },
+      "tool_selection_rationality": {
+        "score": 1.0,
+        "expected": 1.0,
+        "reason": "共评测 1 个工具选择，最优选择 1 个（100%）。Step 1 calculator ✓"
       }
     }
-  ],
-  "analysis": {
-    "trajectory_faithfulness_analysis": {
-      "finding": "87.33% 的轨迹忠实度表明大多数 Agent 能够忠实地基于工具返回结果进行推理",
-      "problem_cases": "13% 样本存在推理与工具返回不一致：包括数值错误、天气描述错误、概念曲解等",
-      "typical_error": "最典型的错误是 Agent 编造了与工具返回结果不符的信息"
-    },
-    "error_recovery_analysis": {
-      "finding": "60% 的错误恢复率说明多数 Agent 具备基本的错误处理能力",
-      "problem_cases": "40% 样本遇错直接终止，未尝试重试、降级或切换工具",
-      "improvement_direction": "需要增强 Agent 的错误处理策略，包括重试机制、工具降级、用户提示等"
-    },
-    "tool_selection_analysis": {
-      "finding": "91.67% 的工具选择合理性表明 Agent 通常能选择正确的工具",
-      "problem_cases": "8% 样本存在次优工具选择：用 web_search 做计算、用错误工具查询、执行无关操作等",
-      "typical_error": "最典型的错误是用通用工具（web_search）替代专用工具（calculator、weather_query）"
-    }
-  },
-  "conclusion": {
-    "summary": "Agent 轨迹级评测实验完成，验证了平台原生的 3 个轨迹级指标的有效性",
-    "trajectory_faithfulness": "87.33% 忠实度，能够检测出推理与工具返回不一致的问题",
-    "error_recovery": "60% 恢复率，揭示了 Agent 错误处理能力的不足",
-    "tool_selection": "91.67% 合理性，识别出次优工具选择的问题",
-    "value": "轨迹级指标为 Agent 调试提供了过程级的可观测性，补充了仅关注最终结果的传统评测",
-    "next_steps": [
-      "与任务完成度（Task Completion）计算相关性，验证轨迹级指标的预测能力",
-      "在生产环境集成轨迹级监控，实时发现 Agent badcase",
-      "基于轨迹级指标构建 Agent 能力分析看板"
-    ]
-  }
+  ]
 }
