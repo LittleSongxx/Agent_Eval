@@ -55,7 +55,7 @@ export const MetricScatterChart: React.FC<MetricScatterChartProps> = ({
           </YAxis>
           <Tooltip
             cursor={{ strokeDasharray: '3 3' }}
-            formatter={(value: number) => value.toFixed(3)}
+            formatter={(value: any) => typeof value === 'number' ? value.toFixed(3) : value}
           />
           <Legend />
           <Scatter

@@ -55,8 +55,8 @@ export const TrendLineChart: React.FC<TrendLineChartProps> = ({
             <Label value={yLabel} angle={-90} position="insideLeft" />
           </YAxis>
           <Tooltip
-            formatter={(value: number) => value.toFixed(3)}
-            labelFormatter={(label: number) => `迭代 ${label}`}
+            formatter={(value: any) => typeof value === 'number' ? value.toFixed(3) : value}
+            labelFormatter={(label: any) => `迭代 ${label}`}
           />
           <Legend />
           <Line
