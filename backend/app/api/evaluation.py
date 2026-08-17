@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
-from app.core.scenario_snapshot import build_scenario_snapshot, snapshot_to_scenario_metrics
+from app.core.scenario_snapshot import (
+    build_judge_snapshot,
+    build_scenario_snapshot,
+    compute_eval_fingerprint,
+    snapshot_to_scenario_metrics,
+)
 from app.models.evaluation import EvalTask
 from app.models.dataset import Dataset, DatasetRow
 from app.models.endpoint_target import EndpointTarget
@@ -169,7 +174,8 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
     )
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if not db.query(LLMConfig).filter(LLMConfig.id == payload.llm_config_id).first():
+    llm_config = db.query(LLMConfig).filter(LLMConfig.id == payload.llm_config_id).first()
+    if not llm_config:
         raise HTTPException(status_code=404, detail="LLM config not found")
 
     dataset = db.query(Dataset).filter(Dataset.id == payload.dataset_id).first()
@@ -188,6 +194,11 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         if panel_config_id != payload.llm_config_id:
             judge_panel.append(panel_config_id)
 
+    # 评测口径 = 数据 + 尺子 + 裁判。三者都得在建任务时冻结，否则事后无法
+    # 判断两个任务的分差来自被测系统还是来自口径本身。
+    scenario_snapshot = build_scenario_snapshot(scenario, payload.metric_overrides)
+    judge_snapshot = build_judge_snapshot(llm_config, judge_panel)
+
     task = EvalTask(
         name=payload.name,
         dataset_id=payload.dataset_id,
@@ -195,7 +206,7 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         llm_config_id=payload.llm_config_id,
         status="pending",
         total_rows=actual_row_count,
-        scenario_snapshot=build_scenario_snapshot(scenario, payload.metric_overrides),
+        scenario_snapshot=scenario_snapshot,
         evaluation_mode=payload.evaluation_mode,
         endpoint_target_id=payload.endpoint_target_id,
         target_config=target_config,
@@ -203,6 +214,14 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         result_save_mode=payload.result_save_mode,
         judge_panel=judge_panel or None,
         dataset_version=dataset.version,
+        judge_snapshot=judge_snapshot,
+        eval_fingerprint=compute_eval_fingerprint(
+            scenario_snapshot,
+            judge_snapshot,
+            payload.dataset_id,
+            dataset.version,
+            judge_samples=int(settings.EVAL_JUDGE_SAMPLES),
+        ),
     )
     db.add(task)
     db.commit()

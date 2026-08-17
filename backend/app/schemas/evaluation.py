@@ -107,6 +107,25 @@ class EvalTaskResponse(EvalTaskBrief):
     llm_config: Optional[LLMConfigBrief] = None
 
 
+class RowAnnotationResponse(BaseModel):
+    """单条标注记录。前端要展示「谁标的」就必须读这个列表。
+
+    只读 manual_* 投影只能看到「当前生效的那一条」，看不出它是一个人说的、
+    两个人一致同意的，还是仲裁的结果——而这三者证据强度差一个量级。
+    """
+
+    id: int
+    annotator: str
+    status: Optional[str] = None
+    score: Optional[float] = None
+    tags: Optional[List[str]] = None
+    note: Optional[str] = None
+    is_adjudication: bool = False
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EvalRowResultResponse(BaseModel):
     id: int
     eval_task_id: int
@@ -121,6 +140,8 @@ class EvalRowResultResponse(BaseModel):
     manual_tags: Optional[List[str]] = None
     manual_note: Optional[str] = None
     reviewed_at: Optional[datetime] = None
+    # 全部标注记录（真值）。上面 manual_* 五列只是它的投影。
+    annotations: List[RowAnnotationResponse] = []
     dataset_row: Optional[DatasetRowResponse] = None
     created_at: datetime
 
@@ -132,6 +153,16 @@ class EvalRowReviewUpdate(BaseModel):
     manual_score: Optional[float] = None
     manual_tags: Optional[List[str]] = None
     manual_note: Optional[str] = None
+    # 标注者身份。不传 → 落到 DEFAULT_ANNOTATOR，旧前端行为与重构前逐字段一致。
+    #
+    # 这里必须写清一件事：平台还没有登录态（API 鉴权是 P2 项），标注者身份由调用方
+    # 自己声明，服务端无法验证。也就是说「两位标注者独立标注」这个前提当前靠**流程**
+    # 保证，不靠系统保证——同一个人可以传两个名字，伪造出一个虚高的人-人 kappa。
+    # 有了鉴权之后这里应改为从会话推断，而不是继续读请求体。
+    annotator: Optional[str] = None
+    # True = 看过分歧后的仲裁记录。仲裁不参与人-人一致性统计（仲裁者已知双方答案，
+    # 与其算一致性是循环论证），只用于决定生效标签。
+    is_adjudication: bool = False
 
 
 class ReportSummary(BaseModel):
@@ -152,8 +183,22 @@ class ReportSummary(BaseModel):
     manual_auto_disagreement_count: int = 0
     # 人工 vs 自动二分类的 Cohen's kappa（修正偶然一致后的真实一致程度）
     manual_auto_kappa: Optional[float] = None
-    # kappa 低于 0.7 时的校准提示（判分标准可能需要修订）
+    # kappa 的 Bootstrap 95% 置信区间。点估计单独看不出抽样不确定性：
+    # n=25 时 kappa=0.82 完全可能对应下界 0.55，只报点估计等于把区间伪装成定论。
+    manual_auto_kappa_ci: Optional[Dict[str, Any]] = None
+    # 校准提示：按 CI 下界而非点估计出（下界没过线 → 是样本量不足，不是口径有问题）
     calibration_suggestion: Optional[str] = None
+    # 人-人一致性（两两 kappa + CI）。这是上面 manual_auto_kappa 的**上界参照**：
+    # 判断本身主观的任务上人类可能只有 0.6，此时 judge 的 0.82 不是"更准"而是
+    # "拟合了某个标注者"。只有 1 位标注者时带 insufficient_annotators=True 返回，
+    # 因为"测不出来"和"一致性很好"是两回事，而缺省值最容易被读成后者。
+    annotator_agreement: Optional[Dict[str, Any]] = None
+    # judge kappa 是否显著超过人-人 kappa（配对检验，非两个独立区间比大小）
+    judge_ceiling_check: Optional[Dict[str, Any]] = None
+    # 标注者之间结论相反的行，供人工仲裁
+    annotation_disagreements: Optional[List[Dict[str, Any]]] = None
+    # 生效标签的来源分布：单人标注 25 条 vs 两人一致 25 条是不同量级的证据
+    label_basis_summary: Optional[Dict[str, int]] = None
 
 
 class ReportRowsResponse(BaseModel):
@@ -230,9 +275,28 @@ class ReportCompareSummaryDelta(BaseModel):
     error_count_delta: int
 
 
+class ReportCompareComparability(BaseModel):
+    """口径可比性：两个任务是否在同一把尺子下测出来的。
+
+    对比本身不该被拦死（用更严的尺子重测一遍恰恰是常见需求），但必须显式
+    告诉读数的人：差值里有多少来自被测系统，有多少来自尺子变了。
+    """
+
+    # identical / changed / unknown 三态，不能压成布尔：
+    # unknown（指纹上线前的历史任务）既不是"一致"也不是"变了"，
+    # 把它当成任何一端都会让读数的人做出错误归因。
+    status: Literal["identical", "changed", "unknown"]
+    attribution_safe: bool
+    current_fingerprint: Optional[str] = None
+    baseline_fingerprint: Optional[str] = None
+    changed_dimensions: List[str] = []
+    warning: Optional[str] = None
+
+
 class ReportCompareResponse(BaseModel):
     current_eval: EvalTaskResponse
     baseline_eval: EvalTaskResponse
+    comparability: ReportCompareComparability
     summary_delta: ReportCompareSummaryDelta
     metric_deltas: List[ReportCompareMetricDelta]
     row_changes: Dict[str, List[ReportCompareRowItem]]

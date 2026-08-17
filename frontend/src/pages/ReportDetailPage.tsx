@@ -76,6 +76,15 @@ const formatScore = (score: any, metricName: string): { display: string; color: 
   return { display: `${pct}%`, color, explain: `${level}（${num.toFixed(4)} / 1.0）` };
 };
 
+// 生效标签的来源。这四个词的区别不是措辞问题：单人标注 25 条和两人一致 25 条
+// 是差一个量级的证据，报告里必须能一眼看出是哪一种。
+const LABEL_BASIS_TEXT: Record<string, string> = {
+  single_annotator: '单人标注',
+  unanimous: '两人一致',
+  adjudicated: '已仲裁',
+  unresolved_disagreement: '分歧未仲裁',
+};
+
 const FIELD_META: Record<string, { label: string; group: string; tip: string }> = {
   user_input:           { label: '测试问题 / 对话记录', group: 'input',   tip: '你设计的测试用例输入' },
   response:             { label: '被测系统的回答',      group: 'output',  tip: '从你的 RAG/Agent 系统收集的回答，评测引擎对它打分' },
@@ -531,6 +540,30 @@ const ReportDetailPage: React.FC = () => {
                       <> · Kappa {summary.manual_auto_kappa}</>
                     )}
                   </Text>
+                  {/* 区间必须贴着点估计显示：kappa 0.82 配上下界 0.57 时，
+                      只看点估计会把"可能只是中等一致"读成"已经显著一致"。 */}
+                  {summary.manual_auto_kappa_ci && (
+                    <div style={{ marginTop: 4 }}>
+                      <Text
+                        type={summary.manual_auto_kappa_ci.spans_bands ? 'warning' : 'secondary'}
+                        style={{ fontSize: 12 }}
+                      >
+                        95% CI [{summary.manual_auto_kappa_ci.ci_low}, {summary.manual_auto_kappa_ci.ci_high}]
+                        {' '}· n={summary.manual_auto_kappa_ci.n}
+                      </Text>
+                      {summary.manual_auto_kappa_ci.spans_bands && (
+                        <Tooltip
+                          title={`置信区间横跨 ${summary.manual_auto_kappa_ci.ci_band} 档（Landis-Koch）。`
+                            + `样本量 n=${summary.manual_auto_kappa_ci.n} 下能站住的结论是下界那一档，`
+                            + `不是点估计 ${summary.manual_auto_kappa_ci.point} 所在的 ${summary.manual_auto_kappa_ci.point_band} 档。`}
+                        >
+                          <Text type="warning" style={{ fontSize: 12, cursor: 'help' }}>
+                            {' '}⚠ 跨档
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </div>
+                  )}
                 </Card>
               </Col>
             )}
@@ -541,8 +574,80 @@ const ReportDetailPage: React.FC = () => {
             style={{ marginBottom: 24 }}
             type="warning"
             showIcon
-            message="人工与自动评分一致性偏低"
+            /* 两种情况的处理动作完全不同：点估计没过线是判分口径问题（改 criteria），
+               点估计过线但区间下界没过是样本量问题（补标注）。标题必须区分，
+               否则会照着错误的方向去修。 */
+            message={
+              summary.manual_auto_kappa != null && summary.manual_auto_kappa >= 0.7
+                ? '一致性达标但样本量不足以支撑结论'
+                : '人工与自动评分一致性偏低'
+            }
             description={summary.calibration_suggestion}
+          />
+        )}
+
+        {/* 人-人 kappa 是上面那个 judge-人 kappa 的上界参照，必须贴着它显示。
+            只报 judge kappa=0.82 而不报人类彼此能到多少，等于让读者拿一个
+            没有参照系的分数下结论：判断本身主观的任务上人类可能只有 0.6，
+            此时 0.82 更可能是"judge 拟合了这一位标注者"而不是"judge 更准"。
+            单标注者时这里显示"上界未知"——"测不出来"和"一致性很好"是两回事。 */}
+        {summary.annotator_agreement && summary.manual_auto_kappa != null && (
+          <Alert
+            style={{ marginBottom: 24 }}
+            type={
+              summary.judge_ceiling_check?.status === 'judge_above_ceiling'
+                ? 'warning'
+                : summary.annotator_agreement.insufficient_annotators
+                  ? 'info'
+                  : 'success'
+            }
+            showIcon
+            message={
+              summary.annotator_agreement.insufficient_annotators
+                ? `judge 一致性 kappa ${summary.manual_auto_kappa}：上界未知（仅 1 位标注者）`
+                : summary.judge_ceiling_check?.status === 'judge_above_ceiling'
+                  ? `judge 一致性超过人-人上界（人-人 kappa ${summary.annotator_agreement.ceiling_kappa}）`
+                  : `judge 一致性处在人-人上界之内（人-人 kappa ${summary.annotator_agreement.ceiling_kappa}）`
+            }
+            description={
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Text style={{ fontSize: 13 }}>{summary.annotator_agreement.note}</Text>
+                {summary.judge_ceiling_check && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {summary.judge_ceiling_check.note}
+                  </Text>
+                )}
+                {summary.annotator_agreement.pairs.map((pair) => (
+                  <Text key={`${pair.annotator_a}-${pair.annotator_b}`} type="secondary" style={{ fontSize: 12 }}>
+                    {pair.annotator_a} vs {pair.annotator_b}：kappa {pair.kappa ?? '-'}
+                    {pair.kappa_ci && (
+                      <> · 95% CI [{pair.kappa_ci.ci_low}, {pair.kappa_ci.ci_high}]</>
+                    )}
+                    {' '}· 共同标注 {pair.overlap_n} 条 · 分歧 {pair.disagreement_count} 条
+                  </Text>
+                ))}
+                {/* 生效标签的来源分布：单人标注 25 条和两人一致 25 条不是同一个证据强度 */}
+                {summary.label_basis_summary && (
+                  <Space size={[4, 4]} wrap>
+                    {Object.entries(summary.label_basis_summary).map(([basis, count]) => (
+                      <Tag
+                        key={basis}
+                        color={basis === 'unresolved_disagreement' ? 'orange' : basis === 'single_annotator' ? 'default' : 'blue'}
+                      >
+                        {LABEL_BASIS_TEXT[basis] ?? basis} {count}
+                      </Tag>
+                    ))}
+                  </Space>
+                )}
+                {!!summary.annotation_disagreements?.length && (
+                  <Text type="warning" style={{ fontSize: 12 }}>
+                    ⚠ {summary.annotation_disagreements.length} 行标注者结论相反
+                    （其中 {summary.annotation_disagreements.filter((d) => !d.resolved).length} 行未仲裁，
+                    未仲裁行已排除在 judge kappa 之外）
+                  </Text>
+                )}
+              </Space>
+            }
           />
         )}
 
@@ -735,6 +840,33 @@ const ReportDetailPage: React.FC = () => {
       <Spin spinning={compareLoading}>
         {compareData && (
           <>
+            {/* 口径可比性放在差值上方：差值只有在同一把尺子下才能归因给被测系统。
+                指纹不一致时不拦对比（换更严的尺子重测本身是合理需求），但必须先说清楚。 */}
+            {compareData.comparability && compareData.comparability.status !== 'identical' && (
+              <Alert
+                type={compareData.comparability.status === 'changed' ? 'warning' : 'info'}
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={
+                  compareData.comparability.status === 'changed'
+                    ? '评测口径已变化，差值不能直接归因给被测系统'
+                    : '无法确认评测口径是否一致'
+                }
+                description={
+                  <Space direction="vertical" size={4}>
+                    <Text>{compareData.comparability.warning}</Text>
+                    {compareData.comparability.changed_dimensions.length > 0 && (
+                      <Space size={[4, 4]} wrap>
+                        {compareData.comparability.changed_dimensions.map((dim) => (
+                          <Tag key={dim} color="orange">{dim}</Tag>
+                        ))}
+                      </Space>
+                    )}
+                  </Space>
+                }
+              />
+            )}
+
             <Row gutter={16} style={{ marginBottom: 16 }}>
               <Col span={6}>
                 <Card>

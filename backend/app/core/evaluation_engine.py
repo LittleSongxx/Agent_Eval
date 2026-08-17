@@ -47,11 +47,15 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 DEFAULT_SUMMARY_PASS_THRESHOLD = 0.7
 
 # 汇总统计里保留给平台级聚合结果的键，不会出现在指标维度统计中
-RESERVED_SUMMARY_KEYS = ("weighted_total_score", "cost", "judge_reliability")
+RESERVED_SUMMARY_KEYS = ("weighted_total_score", "cost", "judge_reliability", "latency")
 
 # 进程内任务心跳：daemon 工作线程在处理每一行/每个指标时刷新时间戳，
 # API 层据此判断任务是否仍存活，避免把长任务误判为陈旧任务
 task_heartbeats: dict[int, float] = {}
+
+# 取消状态轮询间隔（秒）。抽成模块常量而不是写死在 wait_for 里，是为了让
+# 取消测试能把它调小到毫秒级——否则每个取消用例都得真等 1 秒。
+CANCEL_POLL_INTERVAL_SECONDS = 1.0
 _DECIMAL_SCORE_RANGE_RE = re.compile(
     r"(?:0\.\d+\s*(?:到|至|~|-)\s*(?:0\.\d+|1(?:\.0)?))|(?:0\s*(?:到|至|~|-)\s*1(?:\.0)?)"
 )
@@ -184,6 +188,7 @@ class NativeBuiltinLLMMetric:
         prompt_override: str | None = None,
         pass_threshold: float | None = None,
         weight: float | None = None,
+        effective_criteria: str | None = None,
     ):
         self.id = getattr(metric_def, "id", None)
         self.name = metric_def.name
@@ -205,7 +210,14 @@ class NativeBuiltinLLMMetric:
             or spec.get("judge_fields")
             or self.required_fields
         )
-        self.criteria = (prompt_override or "").strip() or spec["criteria"]
+        # 优先使用任务快照里冻结的判定标准。缺省回落到"override 或当前 spec 常量"
+        # 只为兼容快照生成前创建的历史任务——新任务一律带 effective_criteria，
+        # 否则改一次 prompt_manager 的常量就会让历史任务的口径静默漂移。
+        self.criteria = (
+            (effective_criteria or "").strip()
+            or (prompt_override or "").strip()
+            or spec["criteria"]
+        )
         self.description = self.config.get("description")
 
     async def ascore(self, row_data: dict[str, t.Any], judge: OpenAIJudgeClient) -> _MetricResult:
@@ -695,6 +707,9 @@ def build_metric(
                 prompt_override=prompt_override,
                 pass_threshold=getattr(scenario_metric, "pass_threshold", None),
                 weight=getattr(scenario_metric, "weight", None),
+                # 任务快照冻结的判定标准。由 snapshot_to_scenario_metrics 水合而来，
+                # 因此走任务路径的调用天然带上，脚本/单测直连时为 None 并回落到 spec。
+                effective_criteria=getattr(scenario_metric, "effective_criteria", None),
             ),
         )
 
@@ -967,6 +982,261 @@ def _broadcast_progress(task) -> None:
         logger.debug("WS progress push failed for task %s", getattr(task, "id", None), exc_info=True)
 
 
+def _percentile_ms(sorted_values: list[int], q: float) -> int | None:
+    """已排序耗时列表的分位数（nearest-rank）。
+
+    刻意不引入 numpy：评测样本量在数百量级，nearest-rank 与线性插值的差异
+    远小于 Judge 本身的延迟抖动，为一个分位数加一个二进制依赖不划算。
+    """
+    if not sorted_values:
+        return None
+    idx = max(0, min(len(sorted_values) - 1, int(round(q * (len(sorted_values) - 1)))))
+    return sorted_values[idx]
+
+
+def _build_latency_summary(
+    row_latencies_ms: list[int],
+    metric_latencies_ms: dict[str, list[int]],
+    wall_clock_ms: int,
+    concurrency: int,
+) -> dict[str, t.Any]:
+    """把逐行/逐指标耗时聚合成分位数。
+
+    原先 `execution_time_ms` 只逐行写进 `eval_row_results`，从未聚合——
+    任务级报告里没有任何延迟数字，"这套评测跑一轮多久"只能靠人去翻行记录
+    自己算。而均值对长尾完全不敏感：24 行 2s + 1 行 60s 的均值只有 4.3s，
+    看起来毫无问题，p95 会直接把那根长尾暴露出来。
+
+    `speedup_estimate` 用"逐行耗时之和 / 实际墙钟"估算并发带来的加速比，
+    它同时是一个自检信号：并发数 > 1 而加速比 ≈ 1，说明并发实际没生效
+    （例如全部卡在同一个限流上）。
+    """
+    rows_sorted = sorted(row_latencies_ms)
+    serial_total = sum(row_latencies_ms)
+    summary: dict[str, t.Any] = {
+        "row_count": len(rows_sorted),
+        "row_p50_ms": _percentile_ms(rows_sorted, 0.50),
+        "row_p95_ms": _percentile_ms(rows_sorted, 0.95),
+        "row_max_ms": rows_sorted[-1] if rows_sorted else None,
+        "row_mean_ms": int(serial_total / len(rows_sorted)) if rows_sorted else None,
+        "wall_clock_ms": wall_clock_ms,
+        "row_concurrency": concurrency,
+        # 逐行耗时之和 ÷ 墙钟：并发生效时 > 1，未生效时 ≈ 1
+        "speedup_estimate": (
+            round(serial_total / wall_clock_ms, 2) if wall_clock_ms > 0 and serial_total else None
+        ),
+    }
+    per_metric: dict[str, t.Any] = {}
+    for metric_name, values in metric_latencies_ms.items():
+        if not values:
+            continue
+        values_sorted = sorted(values)
+        per_metric[metric_name] = {
+            "count": len(values_sorted),
+            "p50_ms": _percentile_ms(values_sorted, 0.50),
+            "p95_ms": _percentile_ms(values_sorted, 0.95),
+            "max_ms": values_sorted[-1],
+        }
+    if per_metric:
+        summary["per_metric"] = per_metric
+        # 哪个指标最慢是优化的第一落点：生成式指标要反推问题 + 调 embedding，
+        # 通常是长尾来源，但这句话必须靠数字支撑而不是靠猜
+        slowest = max(per_metric.items(), key=lambda kv: kv[1]["p95_ms"] or 0)
+        summary["slowest_metric"] = {"name": slowest[0], "p95_ms": slowest[1]["p95_ms"]}
+    return summary
+
+
+async def _evaluate_single_row(
+    *,
+    task_id: int,
+    row_index: int,
+    row_position: int,
+    total_rows: int,
+    base_row_data: dict[str, t.Any],
+    metrics: list[tuple[str, t.Any, t.Any]],
+    judge_client: OpenAIJudgeClient,
+    panel_judges: list[OpenAIJudgeClient],
+    panel_judge_names: list[str],
+    primary_judge_name: str,
+    evaluation_mode: str,
+    target_config: dict[str, t.Any],
+    response_mapping: dict[str, t.Any],
+    cancel_event: asyncio.Event,
+) -> dict[str, t.Any]:
+    """评测单行，不碰数据库——所有落库都由调度侧串行完成。
+
+    抽成纯函数是并发化的前提。原来这段逻辑内联在 for 循环里，每写一条日志、
+    每做一次取消检查都紧跟一个 `db.commit()`。多行并发跑的时候那样写有两个
+    后果：一是不同行的中间状态会交叉提交到同一个 session，二是日志按时间
+    穿插成"行1的指标A、行3的指标B、行1的指标C"，没法读。所以这里只返回
+    数据和一整块日志，由调度侧按行原子写入。
+
+    唯一保留的进程内副作用是心跳。`task_heartbeats` 是模块级 dict，asyncio
+    单线程下并发写同一个 key 是安全的；而心跳必须在行内刷新——否则并发跑
+    超过 recovery 窗口的任务会被当成陈旧任务杀掉，这个坑在串行版里被
+    "每个指标都刷一次"掩盖着。
+    """
+    logs: list[str] = []
+    started = time.time()
+    metric_scores: dict[str, t.Any] = {}
+    metric_latency_ms: dict[str, int] = {}
+    endpoint_trace: dict[str, t.Any] | None = None
+    row_error: str | None = None
+    extracted_fields: dict[str, t.Any] = {}
+
+    user_input_preview = str(base_row_data.get("user_input", ""))[:60]
+    logs.append(f"── 行 #{row_position}/{total_rows}: {user_input_preview}...")
+
+    # 已经取消时直接返回：这一行还没开始，不该产生结果记录
+    if cancel_event.is_set():
+        return {"row_index": row_index, "cancelled": True, "logs": logs}
+
+    row_data: dict[str, t.Any] = {**base_row_data, "_dataset_data": base_row_data}
+
+    if evaluation_mode == "endpoint":
+        try:
+            logs.append("  ▸ 调用被测业务接口...")
+            response_payload = await invoke_endpoint(base_row_data, target_config or {})
+            extracted_fields, mapping_errors = extract_eval_fields(
+                response_payload, response_mapping or {}
+            )
+            endpoint_trace = {
+                "status": "success",
+                "status_code": response_payload.get("status_code"),
+                "latency_ms": response_payload.get("latency_ms"),
+                "request_body": response_payload.get("request_body"),
+                "raw_response": response_payload.get("raw_response"),
+                "extracted_fields": extracted_fields,
+                "mapping_errors": mapping_errors,
+            }
+            row_data = {
+                **base_row_data,
+                **extracted_fields,
+                "_dataset_data": base_row_data,
+                "_endpoint_trace": endpoint_trace,
+            }
+            missing_fields = _missing_fields_for_metrics(row_data, metrics)
+            if missing_fields:
+                row_error = f"字段缺失导致无法完整评分: {', '.join(missing_fields)}"
+            logs.append(
+                f"  ✓ 接口调用成功，提取字段: {', '.join(extracted_fields.keys()) or '无'}"
+            )
+            if mapping_errors:
+                logs.append(f"  ⚠ 字段映射提示: {mapping_errors}")
+        except Exception as exc:
+            row_error = f"接口调用失败: {str(exc)[:800]}"
+            endpoint_trace = {"status": "error", "error": row_error}
+            for metric_name, _metric_instance, _sm in metrics:
+                metric_scores[metric_name] = {"score": None, "reason": row_error}
+            logs.append(f"  ✗ {row_error[:200]}")
+
+    for metric_name, metric_instance, _sm in metrics:
+        if row_error and metric_scores.get(metric_name):
+            continue
+        if cancel_event.is_set():
+            logs.append(f"⚠ 用户取消评测，当前行停止在指标 [{metric_name}]")
+            break
+
+        logs.append(f"  ▸ 评测指标 [{metric_name}]...")
+        task_heartbeats[task_id] = time.time()
+        metric_started = time.time()
+
+        is_llm_metric = _is_llm_metric(metric_instance)
+        judges = [judge_client] + (panel_judges if is_llm_metric else [])
+        judge_names = [primary_judge_name] + (panel_judge_names if is_llm_metric else [])
+
+        metric_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        try:
+            # token 计数归零放进 try：这一圈原先在 try 之外，裁判客户端只要在这里
+            # 抛异常（缺方法、连接对象已关闭等），整个任务就带着裸 traceback 变成
+            # failed。而这个 try/except 存在的意义本来就是"单指标失败只坏这一格"，
+            # 归零属于该指标的准备步骤，没有理由被排除在外。
+            for jc in judges:
+                jc.reset_row_usage()
+
+            if len(judges) == 1:
+                result, judge_stats = await _score_metric_with_sampling(
+                    metric_instance, row_data, judge_client
+                )
+                val = result.value
+                if isinstance(val, (int, float)):
+                    val = round(float(val), 4)
+                reason = str(result.reason or "")[:800]
+                metric_scores[metric_name] = {"score": val, "reason": reason}
+                if judge_stats:
+                    metric_scores[metric_name].update(judge_stats)
+            else:
+                panel_results: list[tuple[str, _MetricResult, dict[str, t.Any]]] = []
+                for jc, judge_name in zip(judges, judge_names):
+                    judge_result, judge_stats = await _score_metric_with_sampling(
+                        metric_instance, row_data, jc
+                    )
+                    panel_results.append((judge_name, judge_result, judge_stats))
+                value, reason, panel_stats = _aggregate_judge_results(panel_results)
+                val = round(float(value), 4) if isinstance(value, (int, float)) else value
+                metric_scores[metric_name] = {"score": val, "reason": str(reason)[:800]}
+                metric_scores[metric_name].update(panel_stats)
+
+            for jc in judges:
+                usage = jc.take_row_usage()
+                metric_usage["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+                metric_usage["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+                metric_usage["total_tokens"] += int(usage.get("total_tokens") or 0)
+            if metric_usage.get("total_tokens", 0) > 0:
+                metric_scores[metric_name]["judge_tokens"] = metric_usage
+
+            # 换序互评：反转列表字段后由主裁判复评，检测位置偏置
+            if settings.EVAL_SWAP_CHECK and is_llm_metric:
+                swap_result, _swap_stats = await _score_metric_with_sampling(
+                    metric_instance, _swap_row_data(row_data), judge_client
+                )
+                swap_val = swap_result.value
+                if isinstance(val, (int, float)) and isinstance(swap_val, (int, float)):
+                    consistency = 1.0 - abs(float(val) - float(swap_val))
+                    metric_scores[metric_name]["swap_score"] = round(float(swap_val), 4)
+                    metric_scores[metric_name]["swap_consistency"] = round(
+                        max(0.0, min(1.0, consistency)), 4
+                    )
+                # 换序复评的 token 也计入成本
+                swap_usage = judge_client.take_row_usage()
+                metric_usage["prompt_tokens"] += int(swap_usage.get("prompt_tokens") or 0)
+                metric_usage["completion_tokens"] += int(swap_usage.get("completion_tokens") or 0)
+                metric_usage["total_tokens"] += int(swap_usage.get("total_tokens") or 0)
+                if metric_usage.get("total_tokens", 0) > 0:
+                    metric_scores[metric_name]["judge_tokens"] = metric_usage
+
+            if val is None:
+                logs.append(f"  ✗ [{metric_name}] 无法评分: {str(reason)[:200]}")
+            else:
+                logs.append(f"  ✓ [{metric_name}] = {val}")
+        except Exception as exc:
+            metric_scores[metric_name] = {"score": None, "reason": str(exc)[:800]}
+            logs.append(f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
+
+        metric_latency_ms[metric_name] = int((time.time() - metric_started) * 1000)
+
+    if cancel_event.is_set():
+        return {"row_index": row_index, "cancelled": True, "logs": logs}
+
+    is_pass = _determine_pass(metric_scores, metrics)
+    execution_time_ms = int((time.time() - started) * 1000)
+    status_icon = "✓ 通过" if is_pass else "✗ 不通过"
+    logs.append(f"  → 结果: {status_icon} ({execution_time_ms}ms)")
+
+    return {
+        "row_index": row_index,
+        "cancelled": False,
+        "metric_scores": metric_scores,
+        "metric_latency_ms": metric_latency_ms,
+        "endpoint_trace": endpoint_trace,
+        "extracted_fields": extracted_fields,
+        "row_error": row_error,
+        "is_pass": is_pass,
+        "execution_time_ms": execution_time_ms,
+        "logs": logs,
+    }
+
+
 async def run_evaluation(task_id: int, session_factory) -> None:
     """
     Execute a full evaluation run for the given EvalTask.
@@ -1054,6 +1324,9 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         # 并用裁判间平均绝对偏差量化"换一个模型还认不认这个分"
         panel_judges: list[OpenAIJudgeClient] = []
         panel_judge_names: list[str] = []
+        # 并发跑多行时每个并发槽位需要一整套独立裁判客户端（见下方 bundle 池），
+        # 所以这里把构建成功的配置留下来，而不只留客户端实例
+        panel_configs: list[t.Any] = []
         for panel_config_id in list(task.judge_panel or []):
             panel_config = db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first()
             if panel_config is None:
@@ -1062,6 +1335,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             try:
                 panel_judges.append(OpenAIJudgeClient(panel_config))
                 panel_judge_names.append(panel_config.name or f"judge-{panel_config_id}")
+                panel_configs.append(panel_config)
                 _log(task, f"✓ 附加裁判 [{panel_config.name}] ({panel_config.model_name}) 构建成功")
             except Exception as exc:
                 _log(task, f"⚠ 裁判 [{panel_config.name}] 构建失败: {str(exc)[:200]}")
@@ -1088,208 +1362,227 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             db.commit()
             raise RuntimeError("No metrics could be built for this scenario")
 
-        _log(task, f"========== 开始逐行评测 ({total_rows} 条) ==========")
-        db.commit()
-
-        all_row_scores: list[dict[str, t.Any]] = []
-        task_token_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-        for idx, dataset_row in enumerate(dataset_rows):
-            db.refresh(task)
-            if task.status == "cancelled":
-                _log(task, f"⚠ 用户取消评测，已完成 {idx}/{total_rows} 行")
-                db.commit()
-                break
-
-            task_heartbeats[task_id] = time.time()
-            row_start = time.time()
-            base_row_data: dict = dict(dataset_row.data or {})
-            row_data: dict = {**base_row_data, "_dataset_data": base_row_data}
-            endpoint_trace: dict[str, t.Any] | None = None
-            metric_scores: dict[str, t.Any] = {}
-            row_error: str | None = None
-
-            user_input_preview = str(row_data.get("user_input", ""))[:60]
-            _log(task, f"── 行 #{idx + 1}/{total_rows}: {user_input_preview}...")
-            db.commit()
-
-            if evaluation_mode == "endpoint":
-                try:
-                    _log(task, "  ▸ 调用被测业务接口...")
-                    db.commit()
-                    response_payload = await invoke_endpoint(
-                        base_row_data,
-                        task.target_config or {},
-                    )
-                    extracted_fields, mapping_errors = extract_eval_fields(
-                        response_payload,
-                        task.response_mapping or {},
-                    )
-                    endpoint_trace = {
-                        "status": "success",
-                        "status_code": response_payload.get("status_code"),
-                        "latency_ms": response_payload.get("latency_ms"),
-                        "request_body": response_payload.get("request_body"),
-                        "raw_response": response_payload.get("raw_response"),
-                        "extracted_fields": extracted_fields,
-                        "mapping_errors": mapping_errors,
-                    }
-                    row_data = {
-                        **base_row_data,
-                        **extracted_fields,
-                        "_dataset_data": base_row_data,
-                        "_endpoint_trace": endpoint_trace,
-                    }
-                    if task.result_save_mode == "write_back" and extracted_fields:
-                        dataset_row.data = {**(dataset_row.data or {}), **extracted_fields}
-                        _ensure_dataset_schema_fields(dataset, extracted_fields)
-                    missing_fields = _missing_fields_for_metrics(row_data, metrics)
-                    if missing_fields:
-                        row_error = f"字段缺失导致无法完整评分: {', '.join(missing_fields)}"
-                    _log(
-                        task,
-                        f"  ✓ 接口调用成功，提取字段: {', '.join(extracted_fields.keys()) or '无'}",
-                    )
-                    if mapping_errors:
-                        _log(task, f"  ⚠ 字段映射提示: {mapping_errors}")
-                    db.commit()
-                except Exception as exc:
-                    row_error = f"接口调用失败: {str(exc)[:800]}"
-                    endpoint_trace = {
-                        "status": "error",
-                        "error": row_error,
-                    }
-                    for metric_name, _metric_instance, _sm in metrics:
-                        metric_scores[metric_name] = {"score": None, "reason": row_error}
-                    _log(task, f"  ✗ {row_error[:200]}")
-                    db.commit()
-
-            for metric_name, metric_instance, _sm in metrics:
-                if row_error and metric_scores.get(metric_name):
-                    continue
-                db.refresh(task)
-                if task.status == "cancelled":
-                    _log(task, f"⚠ 用户取消评测，当前行停止在指标 [{metric_name}]")
-                    db.commit()
-                    break
-
-                _log(task, f"  ▸ 评测指标 [{metric_name}]...")
-                db.commit()
-                task_heartbeats[task_id] = time.time()
-
-                is_llm_metric = _is_llm_metric(metric_instance)
-                judges = [judge_client] + (panel_judges if is_llm_metric else [])
-                judge_names = [llm_config.model_name] + (panel_judge_names if is_llm_metric else [])
-                for jc in judges:
-                    jc.reset_row_usage()
-
-                metric_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                try:
-                    if len(judges) == 1:
-                        result, judge_stats = await _score_metric_with_sampling(
-                            metric_instance, row_data, judge_client
-                        )
-                        val = result.value
-                        if isinstance(val, (int, float)):
-                            val = round(float(val), 4)
-                        reason = str(result.reason or "")[:800]
-                        metric_scores[metric_name] = {"score": val, "reason": reason}
-                        if judge_stats:
-                            metric_scores[metric_name].update(judge_stats)
-                    else:
-                        panel_results: list[tuple[str, _MetricResult, dict[str, t.Any]]] = []
-                        for jc, judge_name in zip(judges, judge_names):
-                            judge_result, judge_stats = await _score_metric_with_sampling(
-                                metric_instance, row_data, jc
-                            )
-                            panel_results.append((judge_name, judge_result, judge_stats))
-                        value, reason, panel_stats = _aggregate_judge_results(panel_results)
-                        val = round(float(value), 4) if isinstance(value, (int, float)) else value
-                        metric_scores[metric_name] = {"score": val, "reason": str(reason)[:800]}
-                        metric_scores[metric_name].update(panel_stats)
-
-                    for jc in judges:
-                        usage = jc.take_row_usage()
-                        metric_usage["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
-                        metric_usage["completion_tokens"] += int(usage.get("completion_tokens") or 0)
-                        metric_usage["total_tokens"] += int(usage.get("total_tokens") or 0)
-                    if metric_usage.get("total_tokens", 0) > 0:
-                        metric_scores[metric_name]["judge_tokens"] = metric_usage
-
-                    # 换序互评：反转列表字段后由主裁判复评，检测位置偏置
-                    if settings.EVAL_SWAP_CHECK and is_llm_metric:
-                        swap_result, _swap_stats = await _score_metric_with_sampling(
-                            metric_instance, _swap_row_data(row_data), judge_client
-                        )
-                        swap_val = swap_result.value
-                        if isinstance(val, (int, float)) and isinstance(swap_val, (int, float)):
-                            consistency = 1.0 - abs(float(val) - float(swap_val))
-                            metric_scores[metric_name]["swap_score"] = round(float(swap_val), 4)
-                            metric_scores[metric_name]["swap_consistency"] = round(
-                                max(0.0, min(1.0, consistency)), 4
-                            )
-                        # 换序复评的 token 也计入成本
-                        swap_usage = judge_client.take_row_usage()
-                        metric_usage["prompt_tokens"] += int(swap_usage.get("prompt_tokens") or 0)
-                        metric_usage["completion_tokens"] += int(swap_usage.get("completion_tokens") or 0)
-                        metric_usage["total_tokens"] += int(swap_usage.get("total_tokens") or 0)
-                        if metric_usage.get("total_tokens", 0) > 0:
-                            metric_scores[metric_name]["judge_tokens"] = metric_usage
-
-                    if val is None:
-                        _log(task, f"  ✗ [{metric_name}] 无法评分: {str(reason)[:200]}")
-                    else:
-                        _log(task, f"  ✓ [{metric_name}] = {val}")
-                except Exception as exc:
-                    metric_scores[metric_name] = {"score": None, "reason": str(exc)[:800]}
-                    _log(task, f"  ✗ [{metric_name}] 失败: {str(exc)[:200]}")
-                db.commit()
-                await asyncio.sleep(0)
-
-            db.refresh(task)
-            if task.status == "cancelled":
-                _log(task, f"⚠ 用户取消评测，已完成 {idx}/{total_rows} 行")
-                db.commit()
-                break
-
-            is_pass = _determine_pass(metric_scores, metrics)
-            execution_time_ms = int((time.time() - row_start) * 1000)
-
-            _persist_row_result(
-                db,
-                task,
-                dataset_row,
-                metric_scores,
-                row_error,
-                is_pass,
-                execution_time_ms,
-                endpoint_trace=endpoint_trace,
-            )
-
-            task.completed_rows = idx + 1
-            task.progress = round((idx + 1) / total_rows, 4)
-
-            status_icon = "✓ 通过" if is_pass else "✗ 不通过"
-            _log(task, f"  → 结果: {status_icon} ({execution_time_ms}ms)")
+        row_concurrency = max(1, int(settings.EVAL_ROW_CONCURRENCY))
+        # 并发上限不该超过行数：4 个槽位跑 2 行只会白建 2 套裁判客户端
+        row_concurrency = min(row_concurrency, total_rows)
+        if row_concurrency > 1:
             _log(
                 task,
-                f"  → 进度: {task.completed_rows}/{total_rows} ({round(task.progress * 100, 1)}%)",
+                f"========== 开始并发评测 ({total_rows} 条, 并发 {row_concurrency}) ==========",
             )
-            db.commit()
+            # 并发下日志按"行完成"整块落库而非实时逐行追加，这里说清楚，
+            # 否则看日志的人会以为任务卡住了
+            _log(task, "提示: 并发模式下每行日志在该行评测完成时整块写入")
+        else:
+            _log(task, f"========== 开始逐行评测 ({total_rows} 条) ==========")
+        db.commit()
 
-            for entry in metric_scores.values():
-                if not isinstance(entry, dict):
+        # 按 row_index 存放，最后排序后再算汇总——完成顺序不能影响汇总结果
+        row_scores_by_index: dict[int, dict[str, t.Any]] = {}
+        task_token_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        row_latencies_ms: list[int] = []
+        metric_latencies_ms: dict[str, list[int]] = {}
+        rows_by_index = {row.row_index: row for row in dataset_rows}
+        wall_clock_started = time.time()
+
+        cancel_event = asyncio.Event()
+        watcher_stop = asyncio.Event()
+
+        async def _watch_for_cancel() -> None:
+            """独立 session 轮询取消状态，间隔见 CANCEL_POLL_INTERVAL_SECONDS。
+
+            为什么要单开一个 session：调度侧的 session 正在跑写事务，用同一个
+            连接反复 refresh 会把读到的状态和未提交的写混在一起。取消检查只
+            需要读，单独一个连接最干净。
+
+            为什么要轮询：串行版靠"每个指标前 db.refresh(task)"检查取消，
+            并发化后那样做会变成 N×M 次刷库。轮询把它降到每秒一次，
+            响应延迟从"下一个指标边界"变成"最多一个轮询间隔"，实际更快。
+            """
+            watch_db = session_factory()
+            try:
+                while not watcher_stop.is_set():
+                    try:
+                        await asyncio.wait_for(
+                            watcher_stop.wait(),
+                            timeout=CANCEL_POLL_INTERVAL_SECONDS,
+                        )
+                        return
+                    except asyncio.TimeoutError:
+                        pass
+                    try:
+                        # 结束上一次读事务再读，确保拿到的是最新提交。
+                        # 实测（pysqlite 默认 isolation_level=''）：驱动不会为
+                        # 纯 SELECT 发真正的 BEGIN，所以不 rollback 也能读到新
+                        # 提交——这行是防御性的，防的是日后把连接改成真正会
+                        # 开读事务的配置（显式 BEGIN / 其他驱动），那时缺了它
+                        # 就会一直读到旧快照，取消永远检测不到。
+                        watch_db.rollback()
+                        status = (
+                            watch_db.query(EvalTask.status)
+                            .filter(EvalTask.id == task_id)
+                            .scalar()
+                        )
+                        if status == "cancelled":
+                            cancel_event.set()
+                            return
+                    except Exception:
+                        logger.debug("Cancel watcher query failed", exc_info=True)
+            finally:
+                watch_db.close()
+
+        # 并发路径上一次 ORM 属性访问都不能有。session 默认 expire_on_commit=True，
+        # 而调度侧每完成一行就 commit 一次——commit 之后 task 的属性全部过期，
+        # 协程里再读 task.target_config 就会触发一次同步查库，而这次查库发生在
+        # 其他行正在飞的时候。所以这些值在并发开始前一次性取成纯 dict。
+        frozen_target_config = dict(task.target_config or {})
+        frozen_response_mapping = dict(task.response_mapping or {})
+        frozen_primary_judge_name = llm_config.model_name
+        frozen_save_mode = task.result_save_mode
+
+        async def _run_row(row_position: int, row_index: int, base_row_data: dict) -> dict:
+            """借一套裁判客户端跑一行，跑完归还。
+
+            bundle 池同时充当并发闸门：池里只有 row_concurrency 套客户端，
+            第 N+1 行会阻塞在 `pool.get()` 上。用一个 Queue 同时解决"限并发"
+            和"每行独占一套客户端"，比 Semaphore + 另一个池少一层结构。
+
+            独占是必须的：`OpenAIJudgeClient.row_usage` 是实例级可变状态，
+            两行共用一个客户端时 `reset_row_usage()` / `take_row_usage()`
+            会互相清掉对方的 token 计数，成本统计直接失真。
+            """
+            if cancel_event.is_set():
+                return {"row_index": row_index, "cancelled": True, "logs": []}
+            bundle = await pool.get()
+            try:
+                if cancel_event.is_set():
+                    return {"row_index": row_index, "cancelled": True, "logs": []}
+                return await _evaluate_single_row(
+                    task_id=task_id,
+                    row_index=row_index,
+                    row_position=row_position,
+                    total_rows=total_rows,
+                    base_row_data=base_row_data,
+                    metrics=metrics,
+                    judge_client=bundle["judge"],
+                    panel_judges=bundle["panel"],
+                    panel_judge_names=panel_judge_names,
+                    primary_judge_name=frozen_primary_judge_name,
+                    evaluation_mode=evaluation_mode,
+                    target_config=frozen_target_config,
+                    response_mapping=frozen_response_mapping,
+                    cancel_event=cancel_event,
+                )
+            finally:
+                pool.put_nowait(bundle)
+
+        # 每个并发槽位一套独立裁判客户端。第一套复用已构建好的实例，
+        # 避免并发数为 1 时（默认串行）多建一套连接池。
+        pool: asyncio.Queue = asyncio.Queue()
+        pool.put_nowait({"judge": judge_client, "panel": panel_judges})
+        for _ in range(row_concurrency - 1):
+            pool.put_nowait(
+                {
+                    "judge": OpenAIJudgeClient(llm_config),
+                    "panel": [OpenAIJudgeClient(cfg) for cfg in panel_configs],
+                }
+            )
+
+        # ORM 属性在协程里访问可能触发懒加载，所以行数据在调度侧先取成纯 dict
+        row_payloads = [
+            (position, row.row_index, dict(row.data or {}))
+            for position, row in enumerate(dataset_rows, start=1)
+        ]
+
+        watcher = asyncio.create_task(_watch_for_cancel())
+        pending = [
+            asyncio.ensure_future(_run_row(position, row_index, payload))
+            for position, row_index, payload in row_payloads
+        ]
+
+        try:
+            for finished in asyncio.as_completed(pending):
+                result = await finished
+                row_index = result["row_index"]
+
+                # 整块写入这一行的日志：并发下逐条追加会把不同行的日志穿插
+                # 成没法阅读的样子
+                for line in result.get("logs") or []:
+                    _log(task, line)
+
+                if result.get("cancelled"):
+                    db.commit()
                     continue
-                row_usage = entry.get("judge_tokens")
-                if isinstance(row_usage, dict):
-                    task_token_usage["prompt_tokens"] += int(row_usage.get("prompt_tokens") or 0)
-                    task_token_usage["completion_tokens"] += int(row_usage.get("completion_tokens") or 0)
-                    task_token_usage["total_tokens"] += int(row_usage.get("total_tokens") or 0)
 
-            all_row_scores.append(metric_scores)
-            _broadcast_progress(task)
-            await asyncio.sleep(0)
+                dataset_row = rows_by_index[row_index]
+                metric_scores = result["metric_scores"]
+                extracted_fields = result.get("extracted_fields") or {}
 
+                # 回写必须在调度侧做：worker 拿不到 session，只把提取到的字段带回来
+                if (
+                    evaluation_mode == "endpoint"
+                    and frozen_save_mode == "write_back"
+                    and extracted_fields
+                ):
+                    dataset_row.data = {**(dataset_row.data or {}), **extracted_fields}
+                    _ensure_dataset_schema_fields(dataset, extracted_fields)
+
+                _persist_row_result(
+                    db,
+                    task,
+                    dataset_row,
+                    metric_scores,
+                    result.get("row_error"),
+                    result["is_pass"],
+                    result["execution_time_ms"],
+                    endpoint_trace=result.get("endpoint_trace"),
+                )
+
+                row_scores_by_index[row_index] = metric_scores
+                row_latencies_ms.append(result["execution_time_ms"])
+                for metric_name, elapsed in (result.get("metric_latency_ms") or {}).items():
+                    metric_latencies_ms.setdefault(metric_name, []).append(elapsed)
+
+                for entry in metric_scores.values():
+                    if not isinstance(entry, dict):
+                        continue
+                    row_usage = entry.get("judge_tokens")
+                    if isinstance(row_usage, dict):
+                        task_token_usage["prompt_tokens"] += int(row_usage.get("prompt_tokens") or 0)
+                        task_token_usage["completion_tokens"] += int(row_usage.get("completion_tokens") or 0)
+                        task_token_usage["total_tokens"] += int(row_usage.get("total_tokens") or 0)
+
+                task.completed_rows = len(row_scores_by_index)
+                task.progress = round(task.completed_rows / total_rows, 4)
+                task_heartbeats[task_id] = time.time()
+                _log(
+                    task,
+                    f"  → 进度: {task.completed_rows}/{total_rows} ({round(task.progress * 100, 1)}%)",
+                )
+                # 每行一次 commit。串行版每写一行日志就 commit 一次，
+                # 25 行 × 6 指标下是几百次写事务，绝大多数只为了让日志实时可见
+                db.commit()
+                _broadcast_progress(task)
+        finally:
+            watcher_stop.set()
+            watcher.cancel()
+            for future in pending:
+                if not future.done():
+                    future.cancel()
+
+        wall_clock_ms = int((time.time() - wall_clock_started) * 1000)
+        all_row_scores: list[dict[str, t.Any]] = [
+            row_scores_by_index[idx] for idx in sorted(row_scores_by_index)
+        ]
+
+        # 显式 refresh：取消可能在最后一行完成之后、写终态之前才落库。
+        # 当前 session 是 expire_on_commit=True，逐行 commit 已经让 task 属性
+        # 过期，读 task.status 本身就会重查——也就是说这行在当前配置下是冗余的。
+        # 留着是因为它守的是"跑满也不能覆盖 cancelled"这个语义：一旦日后把
+        # session 改成 expire_on_commit=False（很合理的优化，正好能省掉并发
+        # 路径上那些 frozen_* hoist），没有这行就会把用户的取消写成 completed。
+        # tests/test_eval_cancellation.py 里有一条专门用 expire_on_commit=False
+        # 跑的用例钉住这一点。
         db.refresh(task)
         if task.status == "cancelled":
             _log(task, "========== 评测已取消 ==========")
@@ -1301,6 +1594,11 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             db.commit()
             summary_scores = _compute_summary_scores(all_row_scores, metrics)
             _attach_task_level_aggregates(summary_scores, task_token_usage)
+            # 延迟分位数：execution_time_ms 原先只逐行落库、从未聚合，
+            # 任务级报告里查不到"这轮评测跑了多久、慢在哪个指标"
+            summary_scores["latency"] = _build_latency_summary(
+                row_latencies_ms, metric_latencies_ms, wall_clock_ms, row_concurrency
+            )
             task.status = "completed"
             task.finished_at = datetime.now(timezone.utc)
             task.summary_scores = summary_scores
@@ -1309,9 +1607,28 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             pass_count = sum(1 for s in all_row_scores if _determine_pass(s, metrics))
             _log(task, f"通过: {pass_count}/{total_rows} ({round(pass_count / total_rows * 100, 1)}%)")
             for m_name, info in summary_scores.items():
+                if m_name in RESERVED_SUMMARY_KEYS:
+                    continue
                 mean = info.get("mean")
                 pr = info.get("pass_rate")
                 _log(task, f"  {m_name}: 均值={mean}, 通过率={pr}")
+            latency = summary_scores["latency"]
+            _log(
+                task,
+                f"耗时: 墙钟 {latency['wall_clock_ms']}ms / 行 p50 {latency['row_p50_ms']}ms"
+                f" / 行 p95 {latency['row_p95_ms']}ms"
+                + (
+                    f" / 并发 {row_concurrency} 加速比 {latency['speedup_estimate']}x"
+                    if row_concurrency > 1
+                    else ""
+                ),
+            )
+            if latency.get("slowest_metric"):
+                _log(
+                    task,
+                    f"最慢指标: {latency['slowest_metric']['name']}"
+                    f" (p95 {latency['slowest_metric']['p95_ms']}ms)",
+                )
             _log(task, "========== 评测完成 ==========")
             db.commit()
             _broadcast_progress(task)

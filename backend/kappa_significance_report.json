@@ -1,0 +1,193 @@
+{
+  "generated_at": "2026-08-07T12:45:36.854911+00:00",
+  "provenance": {
+    "db": "/home/song/code/Agent/eval/Agent_Eval/backend/eval_platform.db",
+    "manual_annotation_source": "task 10 manual_status（25 条 pass/fail）",
+    "baseline_task": {
+      "task_id": 10,
+      "name": "信度实验_EVAL_JUDGE_SAMPLES=5（25行×4LLM指标×5采样）",
+      "status": "completed",
+      "scenario_id": 4,
+      "dataset_id": 6,
+      "finished_at": "2026-08-06 13:23:25.838219"
+    },
+    "calibrated_task": {
+      "task_id": 13,
+      "name": "校准重跑3_阈值0.7_AR判分标准修订（25行×5采样）",
+      "status": "completed",
+      "scenario_id": 4,
+      "dataset_id": 6,
+      "finished_at": "2026-08-06 19:43:23.786988"
+    },
+    "auto_verdict_field": "eval_row_results.is_pass（各任务运行时阈值口径）",
+    "note": "同一批人工标注，只换自动判定那一列——这是配对 bootstrap 成立的前提"
+  },
+  "baseline": {
+    "task_id": 10,
+    "matrix": {
+      "total": 25,
+      "both_pass": 8,
+      "manual_pass_auto_fail": 1,
+      "manual_fail_auto_pass": 6,
+      "both_fail": 10,
+      "agreement_rate": 0.72,
+      "kappa": 0.4582
+    },
+    "kappa_band": "中等",
+    "kappa_ci": {
+      "point": 0.4582,
+      "point_band": "中等",
+      "ci_low": 0.1325,
+      "ci_high": 0.7634,
+      "ci_band": "轻微~显著",
+      "spans_bands": true,
+      "agreement_rate_ci_low": 0.52,
+      "agreement_rate_ci_high": 0.88,
+      "n": 25,
+      "method": "percentile bootstrap",
+      "confidence": 0.95,
+      "resamples": 2000,
+      "seed": 20260807,
+      "valid_resamples": 2000,
+      "degenerate_resamples": 0
+    }
+  },
+  "calibrated": {
+    "task_id": 13,
+    "matrix": {
+      "total": 25,
+      "both_pass": 7,
+      "manual_pass_auto_fail": 2,
+      "manual_fail_auto_pass": 0,
+      "both_fail": 16,
+      "agreement_rate": 0.92,
+      "kappa": 0.8175
+    },
+    "kappa_band": "几乎完全一致",
+    "kappa_ci": {
+      "point": 0.8175,
+      "point_band": "几乎完全一致",
+      "ci_low": 0.5192,
+      "ci_high": 1.0,
+      "ci_band": "中等~几乎完全一致",
+      "spans_bands": true,
+      "agreement_rate_ci_low": 0.8,
+      "agreement_rate_ci_high": 1.0,
+      "n": 25,
+      "method": "percentile bootstrap",
+      "confidence": 0.95,
+      "resamples": 2000,
+      "seed": 20260807,
+      "valid_resamples": 2000,
+      "degenerate_resamples": 0
+    }
+  },
+  "paired_delta": {
+    "delta": 0.3593,
+    "baseline_kappa": 0.4582,
+    "calibrated_kappa": 0.8175,
+    "ci_low": -0.0129,
+    "ci_high": 0.6716,
+    "excludes_zero": false,
+    "one_sided_ci_low": 0.0565,
+    "one_sided_excludes_zero": true,
+    "p_delta_gt_zero": 0.9665,
+    "n": 25,
+    "method": "paired percentile bootstrap (同一 resample 重算两侧 kappa)",
+    "confidence": 0.95,
+    "resamples": 2000,
+    "seed": 20260807,
+    "valid_resamples": 2000,
+    "degenerate_resamples": 0
+  },
+  "per_row_effect": {
+    "fixed_rows": [
+      11,
+      14,
+      17,
+      18,
+      20,
+      21
+    ],
+    "broken_rows": [
+      6
+    ],
+    "fixed_count": 6,
+    "broken_count": 1,
+    "note": "broken_count > 0 说明校准不是只赚不赔，净收益才是真实收益"
+  },
+  "baseline_sensitivity": {
+    "alt_baseline_task": {
+      "task_id": 9,
+      "name": "信度实验_EVAL_JUDGE_SAMPLES=5（25行×4LLM指标×5采样）",
+      "status": "completed",
+      "scenario_id": 4,
+      "dataset_id": 6,
+      "finished_at": "2026-08-06 13:12:27.427866"
+    },
+    "alt_baseline_kappa": 0.3939,
+    "primary_baseline_kappa": 0.4582,
+    "judge_noise_floor": 0.0643,
+    "noise_floor_share_of_effect": 0.179,
+    "rows_differing_between_same_config_runs": [
+      12
+    ],
+    "alt_paired_delta": {
+      "delta": 0.4236,
+      "baseline_kappa": 0.3939,
+      "calibrated_kappa": 0.8175,
+      "ci_low": 0.0565,
+      "ci_high": 0.722,
+      "excludes_zero": true,
+      "one_sided_ci_low": 0.1112,
+      "one_sided_excludes_zero": true,
+      "p_delta_gt_zero": 0.984,
+      "n": 25,
+      "method": "paired percentile bootstrap (同一 resample 重算两侧 kappa)",
+      "confidence": 0.95,
+      "resamples": 2000,
+      "seed": 20260807,
+      "valid_resamples": 2000,
+      "degenerate_resamples": 0
+    },
+    "verdict_flips": true,
+    "note": "两个基线任务是同一校准前配置的两次完整跑；verdict_flips=true 表示选哪个基线决定了'提升是否显著'的结论——这本身就是 n=25 不足的证据"
+  },
+  "sample_size_extrapolation": {
+    "caveat": "功效计算，非效应量证据：复制观测模式=假设这 25 行的联合分布即总体分布。回答的是'若效应确为此量级，多少样本能让下界离开 0'，不是'扩样后就能得到该 kappa'",
+    "curve": [
+      {
+        "n": 25,
+        "replication_factor": 1,
+        "delta": 0.3593,
+        "ci_low": -0.0129,
+        "ci_high": 0.6716,
+        "excludes_zero": false
+      },
+      {
+        "n": 50,
+        "replication_factor": 2,
+        "delta": 0.3593,
+        "ci_low": 0.1166,
+        "ci_high": 0.5884,
+        "excludes_zero": true
+      },
+      {
+        "n": 75,
+        "replication_factor": 3,
+        "delta": 0.3593,
+        "ci_low": 0.1514,
+        "ci_high": 0.5503,
+        "excludes_zero": true
+      },
+      {
+        "n": 100,
+        "replication_factor": 4,
+        "delta": 0.3593,
+        "ci_low": 0.1823,
+        "ci_high": 0.5212,
+        "excludes_zero": true
+      }
+    ]
+  }
+}

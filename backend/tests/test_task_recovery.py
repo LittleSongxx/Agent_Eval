@@ -20,6 +20,10 @@ TEST_ENGINE = create_engine(
     connect_args={"check_same_thread": False},
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=TEST_ENGINE)
+# 先 drop 再 create：这个测试库是磁盘文件且不像 conftest 那样每个用例重建，
+# 只 create_all 的话 SQLite 不会给已存在的表补新列——模型加一列就会让本文件
+# 在本地报 "no such column"，而 CI 因为是全新 clone（没有 .db 文件）照常通过。
+Base.metadata.drop_all(bind=TEST_ENGINE)
 Base.metadata.create_all(bind=TEST_ENGINE)
 
 

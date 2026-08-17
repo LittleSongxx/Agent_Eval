@@ -106,7 +106,13 @@ def _backfill_eval_task_scenario_snapshots() -> None:
         for task in tasks:
             scenario = scenario_by_id.get(task.scenario_id)
             if scenario is not None:
-                task.scenario_snapshot = build_scenario_snapshot(scenario)
+                snapshot = build_scenario_snapshot(scenario)
+                # 回填只能拿到"当前"的场景配置与 criteria 常量，历史任务当初用的
+                # 是哪把尺子已经无从考证。打上标记，避免把重建出来的口径当成当初
+                # 冻结的口径读——这类任务的 eval_fingerprint 也保持为空，对比接口
+                # 会据此报 unknown 而不是 identical。
+                snapshot["reconstructed"] = True
+                task.scenario_snapshot = snapshot
         db.commit()
     finally:
         db.close()

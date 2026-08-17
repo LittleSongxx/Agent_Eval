@@ -23,6 +23,12 @@ backend/.env.*
 *.db-wal
 *.db-shm
 *.db-journal
+# 数据库备份：`*.db` 匹配不到 `eval_platform.db.bak-...`（后缀在 .db 之后），
+# 而备份是真库的完整副本，含 llm_configs.api_key 明文 → 必须显式挡掉。
+# 迁移前备份真库是既定流程（见 HANDOFF 5.8），所以这类文件会反复出现。
+*.db.bak*
+*.db.bak-*
+*-backup.db*
 backend/uploads/
 backend/venv/
 uploads/

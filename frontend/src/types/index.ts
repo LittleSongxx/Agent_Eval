@@ -151,8 +151,21 @@ export interface EvalRowResult {
   manual_tags?: string[] | null;
   manual_note?: string | null;
   reviewed_at?: string | null;
+  // 全部标注记录（真值）。manual_* 五列只是它的投影。
+  annotations?: RowAnnotation[];
   dataset_row?: DatasetRow;
   created_at: string;
+}
+
+export interface RowAnnotation {
+  id: number;
+  annotator: string;
+  status?: string | null;
+  score?: number | null;
+  tags?: string[] | null;
+  note?: string | null;
+  is_adjudication: boolean;
+  created_at?: string | null;
 }
 
 export interface ReportSummary {
@@ -170,7 +183,86 @@ export interface ReportSummary {
   manual_auto_agreement_rate?: number | null;
   manual_auto_disagreement_count?: number;
   manual_auto_kappa?: number | null;
+  // kappa 的 bootstrap 置信区间：点估计单独展示会把区间伪装成定论
+  manual_auto_kappa_ci?: ReportKappaCI | null;
   calibration_suggestion?: string | null;
+  // 人-人一致性：上面 manual_auto_kappa 的上界参照。只有 1 位标注者时
+  // insufficient_annotators=true——"测不出上界"必须显式展示，否则读者会把
+  // 一个没有参照系的 0.82 当成"judge 已经够准了"。
+  annotator_agreement?: AnnotatorAgreement | null;
+  judge_ceiling_check?: JudgeCeilingCheck | null;
+  annotation_disagreements?: AnnotationDisagreement[] | null;
+  label_basis_summary?: Record<string, number> | null;
+}
+
+export interface AnnotatorPairKappa {
+  annotator_a: string;
+  annotator_b: string;
+  overlap_n: number;
+  kappa: number | null;
+  band: string | null;
+  agreement_rate: number | null;
+  disagreement_count: number;
+  kappa_ci?: ReportKappaCI | null;
+}
+
+export interface AnnotatorAgreement {
+  annotator_count: number;
+  annotators: string[];
+  pairs: AnnotatorPairKappa[];
+  mean_kappa: number | null;
+  min_kappa: number | null;
+  ceiling_kappa: number | null;
+  ceiling_band: string | null;
+  insufficient_annotators: boolean;
+  note: string;
+}
+
+export interface JudgeCeilingCheck {
+  // ceiling_unknown / insufficient_overlap / judge_above_ceiling / within_ceiling
+  status: string;
+  note: string;
+  comparison_count: number;
+  comparisons: {
+    reference_annotator: string;
+    other_annotator: string;
+    n: number;
+    human_human_kappa: number | null;
+    judge_human_kappa: number | null;
+    delta: number;
+    delta_ci_low: number;
+    delta_ci_high: number;
+    judge_exceeds_human: boolean;
+  }[];
+  multiplicity_note: string;
+}
+
+export interface AnnotationDisagreement {
+  row_result_id: number;
+  row_index: number;
+  labels: Record<string, string>;
+  auto_is_pass: boolean | null;
+  adjudicated_status: string | null;
+  adjudicator: string | null;
+  resolved: boolean;
+}
+
+export interface ReportKappaCI {
+  point: number;
+  point_band: string;
+  ci_low: number;
+  ci_high: number;
+  ci_band: string;
+  spans_bands: boolean;
+  agreement_rate_ci_low: number;
+  agreement_rate_ci_high: number;
+  n: number;
+  method: string;
+  confidence: number;
+  resamples: number;
+  seed: number;
+  valid_resamples: number;
+  degenerate_resamples: number;
 }
 
 export interface ReportListItem {
@@ -232,9 +324,19 @@ export interface ReportCompareRowItem {
   dataset_row?: DatasetRow | null;
 }
 
+export interface ReportCompareComparability {
+  status: 'identical' | 'changed' | 'unknown';
+  attribution_safe: boolean;
+  current_fingerprint?: string | null;
+  baseline_fingerprint?: string | null;
+  changed_dimensions: string[];
+  warning?: string | null;
+}
+
 export interface ReportCompareResponse {
   current_eval: EvalTask;
   baseline_eval: EvalTask;
+  comparability: ReportCompareComparability;
   summary_delta: {
     current_pass_rate: number;
     baseline_pass_rate: number;

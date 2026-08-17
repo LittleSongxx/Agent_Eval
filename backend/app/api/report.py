@@ -1,12 +1,28 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Integer, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
 from app.models.evaluation import EvalTask, EvalRowResult
+from app.core.agreement import (
+    bootstrap_kappa_ci,
+    build_calibration_suggestion,
+    cohens_kappa,
+    judge_ceiling_comparison,
+    pairwise_annotator_kappa,
+)
+from app.core.annotation import (
+    ANNOTATION_PAYLOAD_FIELDS,
+    BASIS_NONE,
+    DEFAULT_ANNOTATOR,
+    delete_annotation,
+    disagreement_rows,
+    effective_annotation,
+    labels_by_annotator,
+    upsert_annotation,
+)
 from app.core.evaluation_engine import DEFAULT_SUMMARY_PASS_THRESHOLD
+from app.core.scenario_snapshot import describe_fingerprint_diff
 from app.schemas.evaluation import (
     EvalTaskResponse,
     EvalRowResultResponse,
@@ -138,6 +154,9 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
 
     row_results = (
         db.query(EvalRowResult)
+        # 一致性统计要遍历每行的全部标注：不预加载会退化成 1+N 次查询
+        # （25 行标注时 25 次额外 SELECT，报告页每次刷新都付这个代价）
+        .options(selectinload(EvalRowResult.annotations))
         .filter(EvalRowResult.eval_task_id == eval_id)
         .all()
     )
@@ -177,27 +196,48 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
     )
     manual_auto_disagreement_count = len(comparable_reviews) - agreed
 
-    # Cohen's kappa：人工 vs 自动二分类，修正偶然一致后的真实一致程度
+    # Cohen's kappa：人工 vs 自动二分类，修正偶然一致后的真实一致程度。
+    # 公式与 bootstrap 都在 core/agreement.py，校准脚本共用同一份实现——
+    # 报告接口和离线脚本各算一遍 kappa 迟早会漂移成两个口径。
     manual_auto_kappa = None
+    manual_auto_kappa_ci = None
     calibration_suggestion = None
     if comparable_reviews:
-        both_pass = sum(1 for r in comparable_reviews if r.manual_status == "pass" and r.is_pass is True)
-        manual_pass_auto_fail = sum(1 for r in comparable_reviews if r.manual_status == "pass" and r.is_pass is False)
-        manual_fail_auto_pass = sum(1 for r in comparable_reviews if r.manual_status == "fail" and r.is_pass is True)
-        both_fail = sum(1 for r in comparable_reviews if r.manual_status == "fail" and r.is_pass is False)
-        total = len(comparable_reviews)
-        observed = (both_pass + both_fail) / total
-        expected = (
-            (both_pass + manual_pass_auto_fail) * (both_pass + manual_fail_auto_pass)
-            + (manual_fail_auto_pass + both_fail) * (manual_pass_auto_fail + both_fail)
-        ) / (total * total)
-        if expected < 1.0:
-            manual_auto_kappa = round((observed - expected) / (1.0 - expected), 4)
-        if manual_auto_kappa is not None and manual_auto_kappa < 0.7 and total >= 10:
-            calibration_suggestion = (
-                f"人工与自动评分一致性的 Cohen's kappa 为 {manual_auto_kappa}（< 0.7），"
-                "建议复核判分标准（指标 prompt_override）与人工标注口径，修订后重新评测。"
-            )
+        pairs = [
+            (r.manual_status == "pass", r.is_pass is True)
+            for r in comparable_reviews
+        ]
+        manual_auto_kappa = cohens_kappa(pairs)["kappa"]
+        # 点估计单独看不出抽样不确定性：n=25 时 0.82 可能对应下界 0.55，
+        # 区间必须和点估计一起返回，否则前端只能展示一个伪装成定论的数字。
+        manual_auto_kappa_ci = bootstrap_kappa_ci(pairs)
+        calibration_suggestion = build_calibration_suggestion(
+            manual_auto_kappa, manual_auto_kappa_ci, len(comparable_reviews)
+        )
+
+    # 人-人一致性：上面那个 manual_auto_kappa 现在测的是「judge vs 生效标签」
+    # （生效标签 = 单标注 / 多标注一致 / 仲裁结果，见 core/annotation.py）。
+    # 但 0.82 这个数算高还是算离谱，取决于两位人类之间能到多少——判断本身主观的
+    # 任务上人类可能只有 0.6。所以上界必须和 judge kappa 一起返回，不能让前端
+    # 拿一个没有参照系的分数去下结论。
+    annotator_labels = labels_by_annotator(row_results)
+    annotator_agreement = pairwise_annotator_kappa(annotator_labels)
+    judge_labels = {
+        r.id: (r.is_pass is True)
+        for r in row_results
+        if r.is_pass is not None and r.error is None
+    }
+    judge_ceiling_check = judge_ceiling_comparison(annotator_labels, judge_labels)
+    annotation_disagreements = disagreement_rows(row_results)
+
+    # 生效标签的来源分布：单人标注 25 条和两人一致 25 条是完全不同的证据强度，
+    # 报告必须能区分，否则「25 条人工标注」这句话在两种情况下听起来一样强。
+    label_basis_summary: dict[str, int] = {}
+    for row in row_results:
+        basis = effective_annotation(list(row.annotations or []))["basis"]
+        if basis == BASIS_NONE:
+            continue
+        label_basis_summary[basis] = label_basis_summary.get(basis, 0) + 1
 
     return ReportSummary(
         eval_task=EvalTaskResponse.model_validate(task),
@@ -214,7 +254,12 @@ def get_report_summary(eval_id: int, db: Session = Depends(get_db)):
         manual_auto_agreement_rate=manual_auto_agreement_rate,
         manual_auto_disagreement_count=manual_auto_disagreement_count,
         manual_auto_kappa=manual_auto_kappa,
+        manual_auto_kappa_ci=manual_auto_kappa_ci,
         calibration_suggestion=calibration_suggestion,
+        annotator_agreement=annotator_agreement,
+        judge_ceiling_check=judge_ceiling_check,
+        annotation_disagreements=annotation_disagreements,
+        label_basis_summary=label_basis_summary or None,
     )
 
 
@@ -275,7 +320,11 @@ def get_report_rows(
 
     query = (
         db.query(EvalRowResult)
-        .options(joinedload(EvalRowResult.dataset_row))
+        .options(
+            joinedload(EvalRowResult.dataset_row),
+            # 响应里带 annotations，不预取就是每页 20 行 20 条额外查询
+            selectinload(EvalRowResult.annotations),
+        )
         .filter(EvalRowResult.eval_task_id == eval_id)
     )
 
@@ -311,7 +360,10 @@ def get_report_row_detail(
 ):
     row_result = (
         db.query(EvalRowResult)
-        .options(joinedload(EvalRowResult.dataset_row))
+        .options(
+            joinedload(EvalRowResult.dataset_row),
+            selectinload(EvalRowResult.annotations),
+        )
         .filter(
             EvalRowResult.eval_task_id == eval_id,
             EvalRowResult.id == row_id,
@@ -332,7 +384,10 @@ def update_report_row_review(
 ):
     row_result = (
         db.query(EvalRowResult)
-        .options(joinedload(EvalRowResult.dataset_row))
+        .options(
+            joinedload(EvalRowResult.dataset_row),
+            selectinload(EvalRowResult.annotations),
+        )
         .filter(
             EvalRowResult.eval_task_id == eval_id,
             EvalRowResult.id == row_id,
@@ -343,9 +398,32 @@ def update_report_row_review(
         raise HTTPException(status_code=404, detail="Row result not found")
 
     data = payload.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        setattr(row_result, key, value)
-    row_result.reviewed_at = None if not data else datetime.now(timezone.utc)
+    annotator = data.pop("annotator", None) or DEFAULT_ANNOTATOR
+    is_adjudication = bool(data.pop("is_adjudication", False))
+    # 只有这四个键算标注内容；annotator / is_adjudication 是"写给谁"的路由信息，
+    # 不能计入"这次请求有没有给出标注"的判断——否则带 annotator 的空请求会被
+    # 误判成一次有效标注。
+    annotation_fields = {k: v for k, v in data.items() if k in ANNOTATION_PAYLOAD_FIELDS}
+
+    if annotation_fields:
+        # 注意：全为 None 的 annotation_fields（前端"清空复核"就是这样）仍走 upsert，
+        # 得到一条状态为空的标注 + reviewed_at=now。这与重构前逐字段一致：
+        # 旧代码在 data 非空时同样会盖上 reviewed_at。
+        upsert_annotation(
+            db,
+            row_result,
+            annotation_fields,
+            annotator=annotator,
+            is_adjudication=is_adjudication,
+        )
+    else:
+        # 空请求体 = 撤回该标注者的标注。旧代码此时只把 reviewed_at 清成 None
+        # 却把 manual_* 留在原处（状态自相矛盾：有标注但显示未复核）。
+        # 前端从不发空请求体，也没有测试依赖旧行为，所以这里改成一致地整条撤回。
+        delete_annotation(
+            db, row_result, annotator=annotator, is_adjudication=is_adjudication
+        )
+
     db.commit()
     db.refresh(row_result)
     return row_result
@@ -432,6 +510,55 @@ def compare_report(
             for name in metric_names
         ],
         "row_changes": row_changes,
+        "comparability": _build_comparability(current, baseline),
+    }
+
+
+def _build_comparability(current: EvalTask, baseline: EvalTask) -> dict:
+    """State whether the two tasks were graded by the same ruler.
+
+    对比接口原来只校验数据集/场景/指标集一致，于是"换了判定标准后分数变好"
+    和"系统真的变好"在结果里长得一模一样。跨口径对比本身是合理需求（就是要
+    看严一点的尺子会怎样），所以这里不拦，只把变化的维度说清楚：
+    identical 才能把 delta 直接归因于被测系统。
+    """
+    changed = describe_fingerprint_diff(
+        {
+            "dataset_version": current.dataset_version,
+            "judge_snapshot": current.judge_snapshot,
+            "scenario_snapshot": current.scenario_snapshot,
+        },
+        {
+            "dataset_version": baseline.dataset_version,
+            "judge_snapshot": baseline.judge_snapshot,
+            "scenario_snapshot": baseline.scenario_snapshot,
+        },
+    )
+    current_fp = current.eval_fingerprint
+    baseline_fp = baseline.eval_fingerprint
+
+    if not current_fp or not baseline_fp:
+        # 指纹上线前创建的任务无法追溯口径，只能说"不确定"，不能假装一致。
+        status = "unknown"
+        warning = (
+            "其中一个任务创建于口径指纹上线前，无法确认两次评测是否用了同一把尺子；"
+            "差值不能直接归因于被测系统。"
+        )
+    elif current_fp == baseline_fp:
+        status = "identical"
+        warning = None
+    else:
+        status = "changed"
+        detail = "、".join(changed) if changed else "未能定位到具体维度"
+        warning = f"两个任务的评测口径不一致（变化维度：{detail}），差值包含尺子变化带来的部分。"
+
+    return {
+        "status": status,
+        "current_fingerprint": current_fp,
+        "baseline_fingerprint": baseline_fp,
+        "changed_dimensions": changed,
+        "attribution_safe": status == "identical",
+        "warning": warning,
     }
 
 

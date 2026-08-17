@@ -581,10 +581,30 @@ def test_endpoint_evaluation_can_write_back_extracted_fields(
         }
 
     monkeypatch.setattr("app.core.evaluation_engine.invoke_endpoint", fake_invoke_endpoint)
-    monkeypatch.setattr(
-        "app.core.evaluation_engine.OpenAIJudgeClient",
-        lambda _llm_config: object(),
-    )
+
+    class _StubJudge:
+        """最小可用裁判替身：必须带 token 核算接口。
+
+        原来这里是 `lambda _llm_config: object()`。裸 object 没有
+        `reset_row_usage` / `take_row_usage`，评测引擎调到就抛 AttributeError，
+        任务被标记为 failed——而这个测试当时仍然是绿的，因为它断言的是回写
+        字段，而回写在指标循环崩溃**之前**就已经 commit 了。也就是说这个用例
+        从来没有真正验证过"评分跑通"，只验证了"回写落库"。并发化把回写移到
+        行评测完成之后，这个洞才暴露出来。
+        """
+
+        def __init__(self, _llm_config):
+            self.row_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        def reset_row_usage(self):
+            self.row_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        def take_row_usage(self):
+            usage = dict(self.row_usage)
+            self.reset_row_usage()
+            return usage
+
+    monkeypatch.setattr("app.core.evaluation_engine.OpenAIJudgeClient", _StubJudge)
 
     async def fake_ascore(self, row_data, judge):
         from app.core.evaluation_engine import _MetricResult

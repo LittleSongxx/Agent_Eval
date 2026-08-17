@@ -71,7 +71,7 @@ def list_blind_tests(db: Session = Depends(get_db)):
 
 
 @router.post("/test-target", response_model=BlindTestTargetTestResponse)
-async def test_blind_test_target(payload: BlindTestTargetTestRequest, db: Session = Depends(get_db)):
+async def check_blind_test_target(payload: BlindTestTargetTestRequest, db: Session = Depends(get_db)):
     try:
         target = _validate_target(payload.target, db)
         row_data = {"user_input": payload.test_question}

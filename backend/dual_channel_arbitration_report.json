@@ -1,7 +1,7 @@
 {
   "provenance": {
     "script": "scripts/dual_channel_arbitration.py",
-    "task_id": 13,
+    "task_id": 10,
     "thresholds_evaluated": [
       0.5,
       0.7
@@ -11,12 +11,12 @@
   },
   "threshold_0.5": {
     "ar_channel_vs_human": {
-      "agree": 19,
+      "agree": 13,
       "total": 25,
-      "rate": 0.76,
-      "kappa": 0.5253,
+      "rate": 0.52,
+      "kappa": 0.162,
       "human_pass_auto_fail": 1,
-      "human_fail_auto_pass": 5
+      "human_fail_auto_pass": 11
     },
     "generative_channel_vs_human": {
       "agree": 9,
@@ -27,12 +27,12 @@
       "human_fail_auto_pass": 16
     },
     "min_channel_vs_human": {
-      "agree": 19,
+      "agree": 13,
       "total": 25,
-      "rate": 0.76,
-      "kappa": 0.5253,
+      "rate": 0.52,
+      "kappa": 0.162,
       "human_pass_auto_fail": 1,
-      "human_fail_auto_pass": 5
+      "human_fail_auto_pass": 11
     },
     "max_channel_vs_human": {
       "agree": 9,
@@ -43,38 +43,38 @@
       "human_fail_auto_pass": 16
     },
     "mean_channel_vs_human": {
-      "agree": 11,
+      "agree": 10,
       "total": 25,
-      "rate": 0.44,
-      "kappa": 0.0933,
+      "rate": 0.4,
+      "kappa": 0.0458,
       "human_pass_auto_fail": 0,
-      "human_fail_auto_pass": 14
+      "human_fail_auto_pass": 15
     }
   },
   "threshold_0.7": {
     "ar_channel_vs_human": {
-      "agree": 18,
+      "agree": 15,
       "total": 25,
-      "rate": 0.72,
-      "kappa": 0.4337,
-      "human_pass_auto_fail": 2,
-      "human_fail_auto_pass": 5
+      "rate": 0.6,
+      "kappa": 0.2733,
+      "human_pass_auto_fail": 1,
+      "human_fail_auto_pass": 9
     },
     "generative_channel_vs_human": {
-      "agree": 11,
+      "agree": 12,
       "total": 25,
-      "rate": 0.44,
-      "kappa": 0.0933,
+      "rate": 0.48,
+      "kappa": 0.1425,
       "human_pass_auto_fail": 0,
-      "human_fail_auto_pass": 14
+      "human_fail_auto_pass": 13
     },
     "min_channel_vs_human": {
-      "agree": 19,
+      "agree": 17,
       "total": 25,
-      "rate": 0.76,
-      "kappa": 0.5033,
-      "human_pass_auto_fail": 2,
-      "human_fail_auto_pass": 4
+      "rate": 0.68,
+      "kappa": 0.3939,
+      "human_pass_auto_fail": 1,
+      "human_fail_auto_pass": 7
     },
     "max_channel_vs_human": {
       "agree": 10,
@@ -85,40 +85,31 @@
       "human_fail_auto_pass": 15
     },
     "mean_channel_vs_human": {
-      "agree": 19,
+      "agree": 13,
       "total": 25,
-      "rate": 0.76,
-      "kappa": 0.5253,
+      "rate": 0.52,
+      "kappa": 0.162,
       "human_pass_auto_fail": 1,
-      "human_fail_auto_pass": 5
+      "human_fail_auto_pass": 11
     }
   },
   "dispute_rows": [
     {
-      "row": 6,
-      "kind": "correct",
-      "manual": "pass",
-      "ar": 0.52,
-      "ar_gen": 0.8809,
-      "diff": 0.361,
-      "low_channel": "ar"
-    },
-    {
       "row": 7,
       "kind": "correct",
       "manual": "pass",
-      "ar": 0.3,
-      "ar_gen": 0.9528,
-      "diff": 0.653,
+      "ar": 0.36,
+      "ar_gen": 0.9535,
+      "diff": 0.594,
       "low_channel": "ar"
     },
     {
       "row": 9,
       "kind": "hallucinated",
       "manual": "fail",
-      "ar": 0.4,
-      "ar_gen": 0.865,
-      "diff": 0.465,
+      "ar": 0.24,
+      "ar_gen": 0.915,
+      "diff": 0.675,
       "low_channel": "ar"
     },
     {
@@ -126,98 +117,62 @@
       "kind": "hallucinated",
       "manual": "fail",
       "ar": 1.0,
-      "ar_gen": 0.6355,
-      "diff": 0.365,
+      "ar_gen": 0.6279,
+      "diff": 0.372,
       "low_channel": "ar_gen"
-    },
-    {
-      "row": 11,
-      "kind": "hallucinated",
-      "manual": "fail",
-      "ar": 0.44,
-      "ar_gen": 0.8802,
-      "diff": 0.44,
-      "low_channel": "ar"
     },
     {
       "row": 13,
       "kind": "hallucinated",
       "manual": "fail",
-      "ar": 0.34,
+      "ar": 0.5,
       "ar_gen": 0.9555,
-      "diff": 0.615,
+      "diff": 0.456,
       "low_channel": "ar"
-    },
-    {
-      "row": 14,
-      "kind": "hallucinated",
-      "manual": "fail",
-      "ar": 1.0,
-      "ar_gen": 0.7836,
-      "diff": 0.216,
-      "low_channel": "ar_gen"
     },
     {
       "row": 17,
       "kind": "truncated",
       "manual": "fail",
-      "ar": 0.3,
-      "ar_gen": 0.6698,
-      "diff": 0.37,
-      "low_channel": "ar"
-    },
-    {
-      "row": 18,
-      "kind": "truncated",
-      "manual": "fail",
-      "ar": 0.3,
-      "ar_gen": 0.9945,
-      "diff": 0.695,
-      "low_channel": "ar"
+      "ar": 1.0,
+      "ar_gen": 0.683,
+      "diff": 0.317,
+      "low_channel": "ar_gen"
     },
     {
       "row": 19,
       "kind": "truncated",
       "manual": "fail",
-      "ar": 0.1,
-      "ar_gen": 0.7904,
-      "diff": 0.69,
+      "ar": 0.0,
+      "ar_gen": 0.6396,
+      "diff": 0.64,
       "low_channel": "ar"
     },
     {
       "row": 20,
       "kind": "truncated",
       "manual": "fail",
-      "ar": 0.3,
-      "ar_gen": 0.9055,
-      "diff": 0.605,
-      "low_channel": "ar"
-    },
-    {
-      "row": 21,
-      "kind": "truncated",
-      "manual": "fail",
-      "ar": 0.3,
-      "ar_gen": 0.9937,
-      "diff": 0.694,
+      "ar": 0.66,
+      "ar_gen": 0.9168,
+      "diff": 0.257,
       "low_channel": "ar"
     },
     {
       "row": 22,
       "kind": "truncated",
       "manual": "fail",
-      "ar": 0.1,
+      "ar": 0.08,
       "ar_gen": 0.9833,
-      "diff": 0.883,
+      "diff": 0.903,
       "low_channel": "ar"
     },
     {
       "row": 23,
       "kind": "truncated",
       "manual": "fail",
-      "ar": 0.16,
-      "ar_gen": 0.8952,
-      "diff": 0.735,
+      "ar": 0.26,
+      "ar_gen": 0.8871,
+      "diff": 0.627,
       "low_channel": "ar"
     },
     {
@@ -231,36 +186,31 @@
     }
   ],
   "dispute_resolution_@0.7": {
-    "n_disputes": 15,
+    "n_disputes": 10,
     "use_low_channel": {
-      "agree": 12,
-      "total": 15,
-      "rate": 0.8,
-      "kappa": -0.0976,
-      "human_pass_auto_fail": 2,
-      "human_fail_auto_pass": 1
+      "agree": 9,
+      "total": 10,
+      "rate": 0.9,
+      "kappa": 0.0,
+      "human_pass_auto_fail": 1,
+      "human_fail_auto_pass": 0
     },
     "use_high_channel": {
-      "agree": 3,
-      "total": 15,
+      "agree": 2,
+      "total": 10,
       "rate": 0.2,
-      "kappa": 0.0217,
+      "kappa": 0.0244,
       "human_pass_auto_fail": 0,
-      "human_fail_auto_pass": 12
+      "human_fail_auto_pass": 8
     },
     "human_labels": {
-      "6": "pass",
       "7": "pass",
       "9": "fail",
       "10": "fail",
-      "11": "fail",
       "13": "fail",
-      "14": "fail",
       "17": "fail",
-      "18": "fail",
       "19": "fail",
       "20": "fail",
-      "21": "fail",
       "22": "fail",
       "23": "fail",
       "24": "fail"

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     JUDGE_COT_MODE: bool = False
     # 换序互评：对 LLM 指标额外用打乱字段顺序的样本复评一次，报告一致性（防位置偏置）
     EVAL_SWAP_CHECK: bool = False
+    # 行级并发数：同时评测的数据行数量。行内指标仍按顺序执行——
+    # 一行的多个指标共用同一份 row_data 与同一个裁判客户端，串行才能保证
+    # token 核算按"行 × 指标"归属正确。默认 4：DashScope 侧限流风险可控，
+    # 25 行 × 6 指标的任务墙钟时间约降到 1/4。设为 1 即退回完全串行。
+    EVAL_ROW_CONCURRENCY: int = 4
     # 生成式指标与污染检测共用的 embedding 模型（OpenAI 兼容 /embeddings）
     LLM_EMBEDDING_MODEL: str = "text-embedding-v3"
     # 生成式相关性指标的反推问题数量

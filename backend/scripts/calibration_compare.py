@@ -107,28 +107,27 @@ def _get_thresholds(db_path: pathlib.Path, scenario_id: int) -> dict[str, float]
     return {name: thr for name, thr in rows if thr is not None}
 
 
-def kappa_matrix(manual: dict[int, str], auto: dict[int, bool]) -> tuple:
-    """人工 pass/fail vs 自动 pass/fail 的 2×2 Cohen's kappa（口径与 report.py 一致）。"""
-    both_pass = sum(1 for i in manual if manual[i] == "pass" and auto[i])
-    manual_pass_auto_fail = sum(1 for i in manual if manual[i] == "pass" and not auto[i])
-    manual_fail_auto_pass = sum(1 for i in manual if manual[i] == "fail" and auto[i])
-    both_fail = sum(1 for i in manual if manual[i] == "fail" and not auto[i])
-    total = len(manual)
-    observed = (both_pass + both_fail) / total
-    expected = (
-        (both_pass + manual_pass_auto_fail) * (both_pass + manual_fail_auto_pass)
-        + (manual_fail_auto_pass + both_fail) * (manual_pass_auto_fail + both_fail)
-    ) / (total * total)
-    kappa = None if expected >= 1.0 else (observed - expected) / (1.0 - expected)
-    return {
-        "total": total,
-        "both_pass": both_pass,
-        "manual_pass_auto_fail": manual_pass_auto_fail,
-        "manual_fail_auto_pass": manual_fail_auto_pass,
-        "both_fail": both_fail,
-        "agreement_rate": round(observed, 4),
-        "kappa": round(kappa, 4) if kappa is not None else None,
-    }
+def _pairs(manual: dict[int, str], auto: dict[int, bool]) -> list[tuple[bool, bool]]:
+    """把 {row: 人工判定} / {row: 自动判定} 对齐成 (人工通过, 自动通过) 布尔对。"""
+    return [(manual[i] == "pass", auto[i] is True) for i in sorted(manual)]
+
+
+def kappa_matrix(manual: dict[int, str], auto: dict[int, bool]) -> dict:
+    """人工 pass/fail vs 自动 pass/fail 的 2×2 Cohen's kappa + bootstrap 置信区间。
+
+    公式实现在 app/core/agreement.py，与 /api/reports/{id}/summary 共用同一份代码。
+    这里原先自己抄了一份同样的公式：两处独立实现意味着改一处、忘一处，
+    脚本报的 kappa 和接口报的 kappa 就会静默变成两个口径——而这类不一致
+    恰恰是最难发现的，因为两边都"看起来算对了"。
+    """
+    from app.core.agreement import bootstrap_kappa_ci, cohens_kappa, interpret_kappa
+
+    pairs = _pairs(manual, auto)
+    matrix = cohens_kappa(pairs)
+    matrix["kappa_band"] = interpret_kappa(matrix["kappa"])
+    # 点估计旁边必须挂着区间：n=25 的 kappa 抽样噪声足以跨越 Landis-Koch 一整档
+    matrix["kappa_ci"] = bootstrap_kappa_ci(pairs)
+    return matrix
 
 
 def threshold_sweep(rows: dict[int, dict], manual: dict[int, str]) -> list[dict]:
@@ -246,6 +245,14 @@ def main() -> int:
         if (manual[i] == "pass") != (after_auto[i] is True)
     ]
 
+    # 配对 Δkappa：两个 kappa 是对着同一批人工标注算的，属于配对数据，
+    # 必须在同一份 resample 上重算两个 kappa 再取差（详见函数 docstring）。
+    from app.core.agreement import paired_kappa_delta_ci
+
+    paired_delta = paired_kappa_delta_ci(
+        _pairs(manual, before_auto), _pairs(manual, after_auto)
+    )
+
     report = {
         "provenance": {
             "script": "scripts/calibration_compare.py",
@@ -258,6 +265,7 @@ def main() -> int:
         },
         "before_calibration": before_k,
         "after_calibration": after_k,
+        "paired_kappa_delta": paired_delta,
         "stratified_agreement_before": stratified(before_auto),
         "stratified_agreement_after": stratified(after_auto),
         "verdict_flips": flips,
@@ -266,12 +274,43 @@ def main() -> int:
     }
     OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2))
 
+    def _ci_text(matrix: dict) -> str:
+        ci = matrix.get("kappa_ci")
+        if not ci:
+            return "（样本量不足，未报区间）"
+        span = "（跨档）" if ci.get("spans_bands") else ""
+        return (
+            f"95%CI [{ci['ci_low']}, {ci['ci_high']}] {ci['ci_band']}{span}"
+            f"  n={ci['n']}"
+        )
+
     print(f"=== 校准对比（人工 {len(manual)} 条，kind 分层: {dict(sorted(kinds.items()))}）===")
     print(f"阈值（校准后）: {thresholds}")
     print(f"校准前(任务{before_meta['id']}): 一致率 {before_k['agreement_rate']}  kappa {before_k['kappa']}"
           f"  (人工过松 {before_k['manual_pass_auto_fail']} / 自动过松 {before_k['manual_fail_auto_pass']})")
+    print(f"           {_ci_text(before_k)}")
     print(f"校准后(任务{after_meta['id']}): 一致率 {after_k['agreement_rate']}  kappa {after_k['kappa']}"
           f"  (人工过松 {after_k['manual_pass_auto_fail']} / 自动过松 {after_k['manual_fail_auto_pass']})")
+    print(f"           {_ci_text(after_k)}")
+    # 这里原先是"两个区间是否重叠"的判定，那是个**错的检验**，已删除：
+    # 两个 kappa 是对着同一批 25 条人工标注算的，属于配对数据；拿两个独立区间
+    # 看重不重叠会低估检验效力（两个宽区间几乎必然重叠，而配对差的区间可以窄
+    # 得多）。正确做法是一次重采样行下标、在同一份 resample 上重算两个 kappa
+    # 再取差——见 core/agreement.py 的 paired_kappa_delta_ci 与
+    # scripts/kappa_significance.py（后者还给出基线敏感性与样本量外推）。
+    if paired_delta:
+        verdict = (
+            "✓ 配对区间排除 0：提升超出抽样噪声"
+            if paired_delta["excludes_zero"]
+            else "⚠ 配对区间含 0：方向明确、量级待定，不能表述为「已验证」"
+        )
+        print(
+            f"配对 Δkappa: {paired_delta['delta']}"
+            f"  95%双侧 CI [{paired_delta['ci_low']}, {paired_delta['ci_high']}]"
+            f"  单侧下界 {paired_delta['one_sided_ci_low']}"
+            f"  P(Δ>0)={paired_delta['p_delta_gt_zero']}"
+        )
+        print(f"配对显著性判定: {verdict}")
     print("分层一致率 校准前→后:")
     sb, sa = stratified(before_auto), stratified(after_auto)
     for kind in sb:
