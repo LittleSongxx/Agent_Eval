@@ -13,6 +13,7 @@ import {
   ExperimentOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 
 import ExperimentWorkbenchPage from './pages/ExperimentWorkbenchPage';
@@ -27,6 +28,7 @@ import EvaluationPage from './pages/EvaluationPage';
 import ReportListPage from './pages/ReportListPage';
 import ReportDetailPage from './pages/ReportDetailPage';
 import BlindTestPage from './pages/BlindTestPage';
+import ToolRegistryPage from './pages/ToolRegistryPage';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -48,6 +50,7 @@ const menuItems = [
       { key: '/datasets', icon: <DatabaseOutlined />, label: '数据管理' },
       { key: '/metrics', icon: <SlidersOutlined />, label: '指标管理' },
       { key: '/endpoint-targets', icon: <ApiOutlined />, label: '被测接口' },
+      { key: '/tool-registry', icon: <SafetyCertificateOutlined />, label: '工具目录' },
       { key: '/scenarios', icon: <AppstoreOutlined />, label: '场景管理' },
       { key: '/llm-configs', icon: <SettingOutlined />, label: 'LLM配置' },
     ],
@@ -126,6 +129,7 @@ const App: React.FC = () => {
               <Route path="/datasets/:id" element={<DatasetDetailPage />} />
               <Route path="/metrics" element={<MetricListPage />} />
               <Route path="/endpoint-targets" element={<EndpointTargetPage />} />
+              <Route path="/tool-registry" element={<ToolRegistryPage />} />
               <Route path="/scenarios" element={<ScenarioListPage />} />
               <Route path="/evaluations" element={<EvaluationPage />} />
               <Route path="/blind-tests" element={<BlindTestPage />} />

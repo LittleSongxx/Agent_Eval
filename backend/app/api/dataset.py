@@ -1,5 +1,6 @@
 import io
 import json
+import csv
 from typing import Any, Dict, List
 from urllib.parse import quote
 
@@ -8,6 +9,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.agent_trace import (
+    AgentTraceValidationError,
+    canonical_agent_trace,
+    normalize_agent_trace,
+)
 from app.models.dataset import Dataset, DatasetRow
 from app.schemas.dataset import (
     DatasetCreate,
@@ -16,6 +22,8 @@ from app.schemas.dataset import (
     DatasetRowCreate,
     DatasetRowResponse,
     DatasetRowsResponse,
+    AgentTraceImportRequest,
+    AgentTraceImportResponse,
 )
 
 
@@ -95,8 +103,17 @@ def _canonicalize_record(record: Dict[str, Any]) -> str:
 def _load_import_records(filename: str, content: bytes) -> list[dict[str, Any]]:
     filename_lower = filename.lower()
     if filename_lower.endswith(".csv"):
-        import pandas as pd
-
+        try:
+            import pandas as pd
+        except ImportError:
+            # CSV import is a core dataset operation and should not depend on an
+            # optional dataframe package being present in the runtime image.
+            text = content.decode("utf-8-sig")
+            reader = csv.DictReader(io.StringIO(text))
+            return [
+                {key: (value if value != "" else None) for key, value in row.items()}
+                for row in reader
+            ]
         df = pd.read_csv(io.BytesIO(content))
         return df.where(df.notna(), None).to_dict(orient="records")
     if filename_lower.endswith(".json"):
@@ -368,6 +385,146 @@ def import_dataset_rows(
         "imported_count": len(normalized_records),
         "skipped_duplicates": skipped_duplicates,
     }
+
+
+@router.post(
+    "/{dataset_id}/agent-traces/import",
+    response_model=AgentTraceImportResponse,
+)
+def import_agent_traces(
+    dataset_id: int,
+    payload: AgentTraceImportRequest,
+    db: Session = Depends(get_db),
+):
+    """Normalize and append Agent traces atomically.
+
+    The endpoint intentionally accepts JSON rather than a second file format:
+    callers can paste traces captured from LangGraph, LangChain, or a custom
+    executor after adapting only the small documented event contract.
+    """
+
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if not payload.traces:
+        raise HTTPException(status_code=422, detail="traces 不能为空")
+
+    normalized_records: list[dict[str, Any]] = []
+    try:
+        for index, trace in enumerate(payload.traces):
+            normalized = normalize_agent_trace(trace, index=index)
+            # Validate against user-declared required fields before any DB write.
+            if dataset.field_schema:
+                errors = _validate_row_data(normalized, dataset.field_schema)
+                if errors:
+                    raise AgentTraceValidationError("; ".join(errors))
+            normalized_records.append(normalized)
+    except AgentTraceValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    existing_keys = {
+        canonical_agent_trace(row.data or {})
+        for row in db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).all()
+    }
+    seen_keys: set[str] = set()
+    unique_records: list[dict[str, Any]] = []
+    skipped_duplicates = 0
+    for record in normalized_records:
+        key = canonical_agent_trace(record)
+        if key in existing_keys or key in seen_keys:
+            skipped_duplicates += 1
+            continue
+        seen_keys.add(key)
+        unique_records.append(record)
+
+    max_index = (
+        db.query(DatasetRow.row_index)
+        .filter(DatasetRow.dataset_id == dataset_id)
+        .order_by(DatasetRow.row_index.desc())
+        .first()
+    )
+    start_index = (max_index[0] + 1) if max_index else 0
+    for offset, record in enumerate(unique_records):
+        db.add(
+            DatasetRow(
+                dataset_id=dataset_id,
+                row_index=start_index + offset,
+                data=record,
+            )
+        )
+
+    if unique_records:
+        _bump_dataset_version(dataset)
+        dataset.row_count = (
+            db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).count()
+            + len(unique_records)
+        )
+        _ensure_agent_trace_schema(dataset)
+    else:
+        dataset.row_count = db.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).count()
+
+    db.commit()
+    return AgentTraceImportResponse(
+        dataset_id=dataset_id,
+        imported_count=len(unique_records),
+        skipped_duplicates=skipped_duplicates,
+        row_count=dataset.row_count,
+        dataset_version=dataset.version or 1,
+        trace_ids=[str(record["trace_id"]) for record in unique_records],
+    )
+
+
+def _ensure_agent_trace_schema(dataset: Dataset) -> None:
+    fields = [
+        {
+            "name": "trace_id",
+            "type": "text",
+            "required": False,
+            "description": "Agent 轨迹唯一标识",
+        },
+        {
+            "name": "response",
+            "type": "text",
+            "required": False,
+            "description": "Agent 最终回复",
+        },
+        {
+            "name": "reference",
+            "type": "text",
+            "required": False,
+            "description": "任务期望目标",
+        },
+        {
+            "name": "reference_tool_calls",
+            "type": "tool_call_list",
+            "required": False,
+            "description": "期望工具调用列表",
+        },
+        {
+            "name": "agent_trajectory",
+            "type": "json",
+            "required": False,
+            "description": "标准化 Agent 工具执行轨迹",
+        },
+        {
+            "name": "available_tools",
+            "type": "json",
+            "required": False,
+            "description": "评测时可供 Agent 选择的工具及描述",
+        },
+        {
+            "name": "tool_calls",
+            "type": "tool_call_list",
+            "required": False,
+            "description": "实际工具调用列表",
+        },
+    ]
+    schema = [dict(item) for item in (dataset.field_schema or [])]
+    by_name = {item.get("name"): item for item in schema}
+    for field in fields:
+        if field["name"] not in by_name:
+            schema.append(field)
+    dataset.field_schema = schema
 
 
 @router.get("/{dataset_id}/export")

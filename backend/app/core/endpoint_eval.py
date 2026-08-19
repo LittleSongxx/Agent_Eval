@@ -145,6 +145,8 @@ def extract_eval_fields(
         "retrieved_contexts": mapping.get("retrieved_contexts_path"),
         "tool_calls": mapping.get("tool_calls_path"),
         "retrieved_context_ids": mapping.get("retrieved_context_ids_path"),
+        "agent_trajectory": mapping.get("agent_trajectory_path"),
+        "available_tools": mapping.get("available_tools_path"),
     }
 
     for field, path in path_by_field.items():
@@ -156,6 +158,22 @@ def extract_eval_fields(
         if value is None:
             errors[field] = f"响应字段路径不存在: {path}"
             continue
+        if field == "available_tools":
+            try:
+                from app.core.agent_trace import normalize_available_tools
+
+                value = normalize_available_tools(value)
+            except ValueError as exc:
+                errors[field] = str(exc)
+                continue
+        if field == "agent_trajectory":
+            try:
+                from app.core.agent_trace import normalize_agent_trajectory
+
+                value = normalize_agent_trajectory(value)
+            except ValueError as exc:
+                errors[field] = str(exc)
+                continue
         extracted[field] = value
 
     if "response" not in extracted and isinstance(raw_text, str) and raw_text.strip():
@@ -244,4 +262,3 @@ def _safe_json(value: str) -> t.Any:
         return json.loads(value)
     except Exception:
         return {"text": value}
-

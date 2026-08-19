@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FieldDefinition(BaseModel):
@@ -55,3 +55,18 @@ class DatasetRowsResponse(BaseModel):
     page: int
     page_size: int
     items: List[DatasetRowResponse]
+
+
+class AgentTraceImportRequest(BaseModel):
+    """Raw Agent traces accepted by the normalized import endpoint."""
+
+    traces: List[Dict[str, Any]] = Field(min_length=1)
+
+
+class AgentTraceImportResponse(BaseModel):
+    dataset_id: int
+    imported_count: int
+    skipped_duplicates: int
+    row_count: int
+    dataset_version: int
+    trace_ids: List[str] = Field(default_factory=list)

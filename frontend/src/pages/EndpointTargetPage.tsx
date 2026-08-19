@@ -136,10 +136,11 @@ const EndpointTargetPage: React.FC = () => {
       render: (_: unknown, record: EndpointTarget) => (
         <Space direction="vertical" size={2}>
           <Text code>{record.response_mapping?.response_path || '未配置回答字段'}</Text>
-          {(record.response_mapping?.retrieved_contexts_path || record.response_mapping?.tool_calls_path) && (
+          {(record.response_mapping?.retrieved_contexts_path || record.response_mapping?.tool_calls_path || record.response_mapping?.agent_trajectory_path) && (
             <Text type="secondary" style={{ fontSize: 12 }}>
               {record.response_mapping?.retrieved_contexts_path ? `ctx: ${record.response_mapping.retrieved_contexts_path}` : ''}
               {record.response_mapping?.tool_calls_path ? ` tool: ${record.response_mapping.tool_calls_path}` : ''}
+              {record.response_mapping?.agent_trajectory_path ? ` trace: ${record.response_mapping.agent_trajectory_path}` : ''}
             </Text>
           )}
         </Space>

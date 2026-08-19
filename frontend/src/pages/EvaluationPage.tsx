@@ -67,6 +67,9 @@ const metricRequiredFields: Record<string, string[]> = {
   argument_correctness: ['user_input', 'reference_tool_calls'],
   step_efficiency: ['user_input', 'reference_tool_calls'],
   agent_goal_accuracy: ['user_input', 'reference'],
+  trajectory_faithfulness: ['agent_trajectory'],
+  error_recovery: ['agent_trajectory'],
+  tool_selection_rationality: ['agent_trajectory', 'available_tools'],
   topic_adherence: ['user_input', 'reference_topics'],
   turn_relevancy: ['user_input'],
   conversation_completeness: ['user_input', 'reference'],
@@ -468,6 +471,8 @@ const EvaluationPage: React.FC = () => {
     if (mapping.retrieved_contexts_path) produced.add('retrieved_contexts');
     if (mapping.tool_calls_path) produced.add('tool_calls');
     if (mapping.retrieved_context_ids_path) produced.add('retrieved_context_ids');
+    if (mapping.agent_trajectory_path) produced.add('agent_trajectory');
+    if (mapping.available_tools_path) produced.add('available_tools');
     return produced;
   };
 
@@ -538,6 +543,8 @@ const EvaluationPage: React.FC = () => {
         retrieved_contexts_path: target.response_mapping?.retrieved_contexts_path || '',
         retrieved_context_ids_path: target.response_mapping?.retrieved_context_ids_path || '',
         tool_calls_path: target.response_mapping?.tool_calls_path || '',
+        agent_trajectory_path: target.response_mapping?.agent_trajectory_path || '',
+        available_tools_path: target.response_mapping?.available_tools_path || '',
       },
       endpoint_test_user_input: target.default_test_input || DEFAULT_DEEPSEEK_TEST_INPUT,
     });
@@ -925,6 +932,16 @@ const EvaluationPage: React.FC = () => {
                 <Col span={5}>
                   <Form.Item name={['response_mapping', 'tool_calls_path']} label="工具调用字段">
                     <Input placeholder="trace.tool_calls" />
+                  </Form.Item>
+                </Col>
+                <Col span={5}>
+                  <Form.Item name={['response_mapping', 'agent_trajectory_path']} label="Agent轨迹字段">
+                    <Input placeholder="trace.events" />
+                  </Form.Item>
+                </Col>
+                <Col span={5}>
+                  <Form.Item name={['response_mapping', 'available_tools_path']} label="可用工具字段">
+                    <Input placeholder="trace.available_tools" />
                   </Form.Item>
                 </Col>
                 <Col span={4}>

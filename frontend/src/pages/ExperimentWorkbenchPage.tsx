@@ -82,6 +82,9 @@ const metricRequiredFields: Record<string, string[]> = {
   argument_correctness: ['user_input', 'reference_tool_calls'],
   step_efficiency: ['user_input', 'reference_tool_calls'],
   agent_goal_accuracy: ['user_input', 'reference'],
+  trajectory_faithfulness: ['agent_trajectory'],
+  error_recovery: ['agent_trajectory'],
+  tool_selection_rationality: ['agent_trajectory', 'available_tools'],
   topic_adherence: ['user_input', 'reference_topics'],
   turn_relevancy: ['user_input'],
   conversation_completeness: ['user_input', 'reference'],
@@ -382,6 +385,8 @@ const ExperimentWorkbenchPage: React.FC = () => {
     if (mapping.retrieved_contexts_path) produced.add('retrieved_contexts');
     if (mapping.retrieved_context_ids_path) produced.add('retrieved_context_ids');
     if (mapping.tool_calls_path) produced.add('tool_calls');
+    if (mapping.agent_trajectory_path) produced.add('agent_trajectory');
+    if (mapping.available_tools_path) produced.add('available_tools');
     return produced;
   }, [selectedEndpoint]);
 
@@ -930,6 +935,8 @@ const ExperimentWorkbenchPage: React.FC = () => {
                   <Descriptions.Item label="接口地址" span={2}>{selectedEndpoint.endpoint_url}</Descriptions.Item>
                   <Descriptions.Item label="回答字段">{selectedEndpoint.response_mapping?.response_path || '-'}</Descriptions.Item>
                   <Descriptions.Item label="上下文字段">{selectedEndpoint.response_mapping?.retrieved_contexts_path || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Agent轨迹字段">{selectedEndpoint.response_mapping?.agent_trajectory_path || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="可用工具字段">{selectedEndpoint.response_mapping?.available_tools_path || '-'}</Descriptions.Item>
                 </Descriptions>
               </Card>
               <TextArea

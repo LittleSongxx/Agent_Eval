@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, UTC
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.agent_trace import normalize_agent_trace
 from app.models import (
     LLMConfig,
     Dataset,
@@ -12,6 +13,7 @@ from app.models import (
     ScenarioMetric,
     EvalTask,
     EvalRowResult,
+    ToolDefinition,
 )
 
 
@@ -71,6 +73,121 @@ RAG_METRIC_LAYER_META = {
         "required_fields": ["retrieved_context_ids", "reference_context_ids"],
     },
 }
+
+
+AGENT_SAMPLE_AVAILABLE_TOOLS = {
+    "query_order": "查询订单状态、商品和物流信息",
+    "create_return": "为已确认的订单商品创建退货申请",
+    "get_weather": "查询指定城市和日期的天气",
+    "send_message": "向指定联系人发送消息",
+}
+
+AGENT_SAMPLE_TOOL_DEFINITIONS = [
+    {
+        "name": "query_order",
+        "description": AGENT_SAMPLE_AVAILABLE_TOOLS["query_order"],
+        "parameters_schema": {
+            "type": "object",
+            "properties": {"order_id": {"type": "string"}},
+            "required": ["order_id"],
+        },
+        "risk_level": "low",
+    },
+    {
+        "name": "create_return",
+        "description": AGENT_SAMPLE_AVAILABLE_TOOLS["create_return"],
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "item": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["order_id", "item", "reason"],
+        },
+        "risk_level": "medium",
+        "has_side_effect": True,
+        "idempotency_required": True,
+    },
+    {"name": "get_weather", "description": AGENT_SAMPLE_AVAILABLE_TOOLS["get_weather"], "risk_level": "low"},
+    {
+        "name": "send_message",
+        "description": AGENT_SAMPLE_AVAILABLE_TOOLS["send_message"],
+        "risk_level": "high",
+        "has_side_effect": True,
+        "idempotency_required": True,
+    },
+]
+
+
+def _ensure_sample_tool_registry(db: Session) -> None:
+    for data in AGENT_SAMPLE_TOOL_DEFINITIONS:
+        if db.query(ToolDefinition).filter(ToolDefinition.name == data["name"]).first():
+            continue
+        db.add(ToolDefinition(**data))
+
+AGENT_TRACE_SCHEMA_FIELDS = [
+    {"name": "trace_id", "type": "text", "required": False, "description": "Agent 轨迹唯一标识"},
+    {"name": "response", "type": "text", "required": False, "description": "Agent 最终回复"},
+    {"name": "tool_calls", "type": "tool_call_list", "required": False, "description": "Agent 实际工具调用列表"},
+    {"name": "agent_trajectory", "type": "json", "required": True, "description": "标准化 Agent 工具执行轨迹"},
+    {"name": "available_tools", "type": "json", "required": True, "description": "执行时可用工具及能力描述"},
+]
+
+AGENT_TRAJECTORY_METRIC_DATA = [
+    {
+        "name": "trajectory_faithfulness",
+        "display_name": "轨迹忠实度 (Trajectory Faithfulness)",
+        "metric_type": "builtin_trajectory_faithfulness",
+        "config": {
+            "description": "逐步核验 Agent 后续推理和最终回答是否忠实于工具返回。需要字段：agent_trajectory",
+            "required_fields": ["agent_trajectory"],
+        },
+        "category": "agent",
+        "is_builtin": True,
+    },
+    {
+        "name": "error_recovery",
+        "display_name": "错误恢复能力 (Error Recovery)",
+        "metric_type": "builtin_error_recovery",
+        "config": {
+            "description": "检查工具失败后是否重试、切换工具或采用替代方案。需要字段：agent_trajectory",
+            "required_fields": ["agent_trajectory"],
+        },
+        "category": "agent",
+        "is_builtin": True,
+    },
+    {
+        "name": "tool_selection_rationality",
+        "display_name": "工具选择合理性 (Tool Selection Rationality)",
+        "metric_type": "builtin_tool_selection_rationality",
+        "config": {
+            "description": "结合可用工具集判断每一步工具选择是否合理。需要字段：agent_trajectory, available_tools",
+            "required_fields": ["agent_trajectory", "available_tools"],
+        },
+        "category": "agent",
+        "is_builtin": True,
+    },
+    {
+        "name": "trace_lint",
+        "display_name": "轨迹规则校验 (Trace Lint)",
+        "metric_type": "builtin_trace_lint",
+        "config": {
+            "description": "确定性检查工具注册、参数、重复调用、死循环风险和高风险确认。需要字段：agent_trajectory",
+            "required_fields": ["agent_trajectory"],
+            "max_steps": 20,
+        },
+        "category": "agent",
+        "is_builtin": True,
+    },
+]
+
+
+def _enrich_agent_trace_row(row_data: dict) -> dict:
+    normalized = normalize_agent_trace(
+        {**row_data, "available_tools": row_data.get("available_tools") or AGENT_SAMPLE_AVAILABLE_TOOLS}
+    )
+    return {**row_data, **normalized}
 
 
 def _with_metric_layer_meta(data: dict) -> dict:
@@ -212,6 +329,7 @@ def _upgrade_existing_sample_datasets(db: Session) -> None:
                 {"name": "reference_topics", "type": "text_list", "required": False, "description": "该 Agent 任务允许围绕的话题列表，用于 Topic Adherence 等多轮对话指标"},
                 {"name": "reference_role", "type": "text", "required": False, "description": "Agent 在任务中应遵守的角色和职责边界"},
                 {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "任务相关的工具/业务背景资料，用于 Turn Faithfulness 等可信度指标"},
+                *AGENT_TRACE_SCHEMA_FIELDS,
             ],
         )
         _merge_dataset_row_data(
@@ -235,6 +353,14 @@ def _upgrade_existing_sample_datasets(db: Session) -> None:
                 },
             ],
         )
+        agent_rows = (
+            db.query(DatasetRow)
+            .filter(DatasetRow.dataset_id == agent_dataset.id)
+            .order_by(DatasetRow.row_index)
+            .all()
+        )
+        for row in agent_rows:
+            row.data = _enrich_agent_trace_row(dict(row.data or {}))
 
     multi_turn_dataset = db.query(Dataset).filter(Dataset.name == "多轮对话示例数据集").first()
     if multi_turn_dataset is not None:
@@ -315,6 +441,7 @@ def _upgrade_existing_agent_conversation_metrics(db: Session) -> None:
             "category": "agent",
             "is_builtin": True,
         },
+        *AGENT_TRAJECTORY_METRIC_DATA,
         {
             "name": "turn_relevancy",
             "display_name": "轮次相关性 (Turn Relevancy)",
@@ -364,9 +491,27 @@ def _upgrade_existing_agent_conversation_metrics(db: Session) -> None:
         .first()
     )
     if agent_scenario is not None:
-        agent_scenario.description = "Agent 核心评测模板，覆盖任务完成、工具正确性、参数正确性、步骤效率和目标准确度。"
-        for metric_name in ["task_completion", "tool_call_accuracy", "argument_correctness", "step_efficiency", "agent_goal_accuracy"]:
-            _ensure_scenario_metric(db, agent_scenario.id, metrics[metric_name].id, pass_threshold=0.7)
+        agent_scenario.description = (
+            "Agent 核心评测模板，覆盖任务结果、工具调用、轨迹忠实度、错误恢复和工具选择合理性。"
+        )
+        thresholds = {
+            "task_completion": 0.7,
+            "tool_call_accuracy": 0.7,
+            "argument_correctness": 0.7,
+            "step_efficiency": 0.7,
+            "agent_goal_accuracy": 0.7,
+            "trajectory_faithfulness": 0.8,
+            "error_recovery": 0.6,
+            "tool_selection_rationality": 0.8,
+            "trace_lint": 0.8,
+        }
+        for metric_name, threshold in thresholds.items():
+            _ensure_scenario_metric(
+                db,
+                agent_scenario.id,
+                metrics[metric_name].id,
+                pass_threshold=threshold,
+            )
 
     multi_turn_scenario = (
         db.query(EvalScenario)
@@ -574,6 +719,7 @@ def run_seed(db: Session) -> None:
 
     existing = db.query(LLMConfig).first()
     llm_config, _ = sync_default_llm_config(db)
+    _ensure_sample_tool_registry(db)
     if existing is not None:
         _upgrade_existing_rag_seed(db)
         _upgrade_existing_agent_conversation_metrics(db)
@@ -710,6 +856,7 @@ def run_seed(db: Session) -> None:
             "category": "agent",
             "is_builtin": True,
         },
+        *AGENT_TRAJECTORY_METRIC_DATA,
         {
             "name": "topic_adherence",
             "display_name": "话题遵守度 (Topic Adherence)",
@@ -865,7 +1012,7 @@ def run_seed(db: Session) -> None:
     # 3b. Agent Evaluation Template
     agent_scenario = EvalScenario(
         name="Agent \u8bc4\u6d4b\u6a21\u677f",
-        description="Agent 核心评测模板，覆盖任务完成、工具正确性、参数正确性、步骤效率和目标准确度。",
+        description="Agent 核心评测模板，覆盖任务结果、工具调用、轨迹忠实度、错误恢复和工具选择合理性。",
         scene_type="agent",
         sample_type="multi_turn",
         is_preset=True,
@@ -903,6 +1050,30 @@ def run_seed(db: Session) -> None:
             metric_definition_id=metric_objects["agent_goal_accuracy"].id,
             weight=1.0,
             pass_threshold=0.7,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["trajectory_faithfulness"].id,
+            weight=1.0,
+            pass_threshold=0.8,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["error_recovery"].id,
+            weight=1.0,
+            pass_threshold=0.6,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["tool_selection_rationality"].id,
+            weight=1.0,
+            pass_threshold=0.8,
+        ),
+        ScenarioMetric(
+            scenario_id=agent_scenario.id,
+            metric_definition_id=metric_objects["trace_lint"].id,
+            weight=1.0,
+            pass_threshold=0.8,
         ),
     ]
     db.add_all(agent_metrics)
@@ -1258,6 +1429,7 @@ def run_seed(db: Session) -> None:
             {"name": "reference_topics", "type": "text_list", "required": False, "description": "该 Agent 任务允许围绕的话题列表，用于 Topic Adherence 等多轮对话指标"},
             {"name": "reference_role", "type": "text", "required": False, "description": "Agent 在任务中应遵守的角色和职责边界"},
             {"name": "retrieved_contexts", "type": "text_list", "required": False, "description": "任务相关的工具/业务背景资料，用于 Turn Faithfulness 等可信度指标"},
+            *AGENT_TRACE_SCHEMA_FIELDS,
         ],
         row_count=3,
     )
@@ -1318,6 +1490,7 @@ def run_seed(db: Session) -> None:
         },
     ]
 
+    agent_rows_data = [_enrich_agent_trace_row(row_data) for row_data in agent_rows_data]
     for idx, row_data in enumerate(agent_rows_data):
         db.add(DatasetRow(dataset_id=agent_dataset.id, row_index=idx, data=row_data))
     db.flush()

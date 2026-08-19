@@ -40,6 +40,33 @@ BUILTIN_LLM_SCORE_INSTRUCTION = (
     "指出哪里支持高分或哪里导致扣分。"
 )
 
+TRAJECTORY_FAITHFULNESS_PROMPT = """判断 Agent 的后续推理或最终回答是否忠实于工具返回结果。
+
+工具返回结果：
+{tool_output}
+
+Agent 后续推理或最终回答：
+{reasoning}
+
+如果内容与工具返回结果一致（没有编造信息、没有曲解结果），返回
+{{"verdict": "faithful", "reason": "具体理由"}}；否则返回
+{{"verdict": "not_faithful", "reason": "具体理由"}}。"""
+
+TOOL_SELECTION_RATIONALITY_PROMPT = """判断 Agent 的工具选择是否最优。
+
+当前步骤目标：
+{thought}
+
+实际选择的工具：
+{selected_tool}
+
+可用工具列表：
+{tools_desc}
+
+如果 Agent 选择了最优工具，返回
+{{"verdict": "optimal", "reason": "具体理由"}}；如果存在更优选择，返回
+{{"verdict": "suboptimal", "better_tool": "工具名", "reason": "为什么更优"}}。"""
+
 
 # Built-in metric criteria are platform defaults. Scenario-level
 # ``prompt_override`` can replace a criterion for a specific business scenario.

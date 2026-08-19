@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Tabs, Table, Card, Row, Col, Statistic, Tag, Button, Space, Select,
-  Descriptions, Drawer, Typography, Spin, message, Progress, Divider, Tooltip, Alert, Modal, Input,
+  Descriptions, Drawer, Typography, Spin, message, Progress, Divider, Tooltip, Alert, Modal, Input, Form, InputNumber,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
@@ -193,6 +193,10 @@ const ReportDetailPage: React.FC = () => {
   const [baselineEvalId, setBaselineEvalId] = useState<number | undefined>(undefined);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareData, setCompareData] = useState<ReportCompareResponse | null>(null);
+  const [badcases, setBadcases] = useState<any>(null);
+  const [badcaseLoading, setBadcaseLoading] = useState(false);
+  const [gateModalOpen, setGateModalOpen] = useState(false);
+  const [gateResult, setGateResult] = useState<any>(null);
   const [manualReview, setManualReview] = useState({
     manual_status: undefined as string | undefined,
     manual_score: undefined as number | undefined,
@@ -215,6 +219,15 @@ const ReportDetailPage: React.FC = () => {
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  const loadBadcases = useCallback(async () => {
+    setBadcaseLoading(true);
+    try { setBadcases(await api.listBadcases(evalId)); }
+    catch { message.error('加载 Bad Case 失败'); }
+    finally { setBadcaseLoading(false); }
+  }, [evalId]);
+
+  useEffect(() => { loadBadcases(); }, [loadBadcases]);
 
   useEffect(() => {
     const loadCompareTasks = async () => {
@@ -250,6 +263,50 @@ const ReportDetailPage: React.FC = () => {
       setCompareLoading(false);
     }
   };
+
+  const runQualityGate = async (values: any) => {
+    if (!baselineEvalId) { message.warning('请先选择基线任务'); return; }
+    try {
+      const result = await api.evaluateQualityGate(evalId, {
+        baseline_eval_id: baselineEvalId,
+        maximum_new_failures: Number(values.maximum_new_failures ?? 0),
+        maximum_new_errors: Number(values.maximum_new_errors ?? 0),
+        maximum_cost_increase_cny: values.maximum_cost_increase_cny,
+        maximum_latency_p95_increase_ms: values.maximum_latency_p95_increase_ms,
+      });
+      setGateResult(result);
+      message[result.passed ? 'success' : 'warning'](result.passed ? '质量门禁通过' : '质量门禁阻断');
+    } catch (error: any) { message.error(error?.response?.data?.detail || '质量门禁执行失败'); }
+  };
+
+  const renderBadcases = () => (
+    <div>
+      <Card style={{ marginBottom: 16 }} loading={badcaseLoading}>
+        <Space wrap>
+          {Object.entries((badcases?.counts || {}) as Record<string, number>).map(([category, count]) => (
+            <Tag key={category} color={count ? 'red' : 'default'}>{category}: {count}</Tag>
+          ))}
+          <Button onClick={async () => {
+            try { const result = await api.createRegressionDataset(evalId); message.success('已生成回归集：' + result.name); }
+            catch (error: any) { message.error(error?.response?.data?.detail || '生成回归集失败'); }
+          }}>失败样本生成回归集</Button>
+        </Space>
+      </Card>
+      <Table
+        rowKey="result_id"
+        loading={badcaseLoading}
+        dataSource={badcases?.items || []}
+        pagination={{ pageSize: 10 }}
+        columns={[
+          { title: '行', dataIndex: 'row_index', width: 70 },
+          { title: '分类', dataIndex: 'category', render: (v: string, row: any) => <Tag color="red">{row.category_label || v}</Tag> },
+          { title: '来源', dataIndex: 'source' },
+          { title: '置信度', dataIndex: 'confidence', render: (v: number | null) => v == null ? '-' : v.toFixed(2) },
+          { title: '操作', key: 'action', render: (_: unknown, row: any) => <Button type="link" onClick={() => openDetail({ id: row.result_id } as EvalRowResult)}>详情</Button> },
+        ]}
+      />
+    </div>
+  );
 
   const openDetail = async (row: EvalRowResult) => {
     setDrawerOpen(true); setDetailLoading(true);
@@ -1322,10 +1379,11 @@ const ReportDetailPage: React.FC = () => {
         `}
       </style>
       <Spin spinning={loading}>
-        <Space style={{ marginBottom: 16 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/evaluations')}>返回评测列表</Button>
-          <Title level={4} style={{ margin: 0 }}>评测报告</Title>
-        </Space>
+          <Space style={{ marginBottom: 16 }}>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/evaluations')}>返回评测列表</Button>
+            <Title level={4} style={{ margin: 0 }}>评测报告</Title>
+            <Button type="primary" onClick={() => setGateModalOpen(true)}>质量门禁</Button>
+          </Space>
 
         <Tabs defaultActiveKey="overview" items={[
           { key: 'overview', label: '评测总览', children: renderOverview() },
@@ -1354,8 +1412,20 @@ const ReportDetailPage: React.FC = () => {
             ),
           },
           { key: 'compare', label: '基线对比', children: renderCompare() },
+          { key: 'badcases', label: 'Bad Case', children: renderBadcases() },
           { key: 'visualization', label: '📊 可视化分析', children: renderVisualization() },
         ]} />
+        <Modal title="执行质量门禁" open={gateModalOpen} onCancel={() => setGateModalOpen(false)} footer={null}>
+          <Form layout="vertical" onFinish={runQualityGate} initialValues={{ maximum_new_failures: 0, maximum_new_errors: 0 }}>
+            <Form.Item label="基线任务"><Text>{baselineEvalId ? ('#' + baselineEvalId) : '请先在“基线对比”页选择基线任务'}</Text></Form.Item>
+            <Form.Item name="maximum_new_failures" label="允许新增失败数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="maximum_new_errors" label="允许新增异常数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="maximum_cost_increase_cny" label="最大成本增量（元）"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="maximum_latency_p95_increase_ms" label="最大 P95 延迟增量（ms）"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Button type="primary" htmlType="submit" block>执行门禁</Button>
+          </Form>
+          {gateResult && <Alert style={{ marginTop: 16 }} type={gateResult.passed ? 'success' : 'error'} showIcon message={gateResult.passed ? 'passed' : 'blocked'} description={(gateResult.violations || []).map((item: any) => item.message).join('；') || '所有规则通过'} />}
+        </Modal>
         <Modal
           title={
             <Space>

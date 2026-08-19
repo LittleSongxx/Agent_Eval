@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
 from app.models.evaluation import EvalTask, EvalRowResult
+from app.models.dataset import Dataset, DatasetRow
+from app.core.badcase import BADCASE_CATEGORIES, CATEGORY_LABELS, classify_badcase
 from app.core.agreement import (
     bootstrap_kappa_ci,
     build_calibration_suggestion,
@@ -28,6 +30,10 @@ from app.schemas.evaluation import (
     EvalRowResultResponse,
     EvalRowReviewUpdate,
     ReportCompareResponse,
+    QualityGateRequest,
+    QualityGateResponse,
+    BadCaseUpdate,
+    RegressionDatasetRequest,
     ReportListResponse,
     ReportSummary,
     ReportRowsResponse,
@@ -354,6 +360,101 @@ def get_report_rows(
     )
 
 
+@router.get("/{eval_id}/badcases")
+def list_badcases(
+    eval_id: int,
+    category: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    task = db.query(EvalTask).filter(EvalTask.id == eval_id).first()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Evaluation task not found")
+    query = (
+        db.query(EvalRowResult)
+        .options(joinedload(EvalRowResult.dataset_row))
+        .filter(EvalRowResult.eval_task_id == eval_id, EvalRowResult.is_pass.is_(False))
+    )
+    if category:
+        if category not in BADCASE_CATEGORIES:
+            raise HTTPException(status_code=422, detail="不支持的 Bad Case 分类")
+        query = query.filter(EvalRowResult.badcase_category == category)
+    rows = query.order_by(EvalRowResult.row_index).all()
+    counts = {item: 0 for item in BADCASE_CATEGORIES}
+    items = []
+    for row in rows:
+        info = classify_badcase(row.metric_scores, row.error, row.endpoint_trace)
+        if not row.badcase_category:
+            row.badcase_category = info["category"]
+            row.badcase_confidence = info["confidence"]
+            row.badcase_source = info["source"]
+        counts[row.badcase_category] = counts.get(row.badcase_category, 0) + 1
+        items.append({
+            "result_id": row.id,
+            "dataset_row_id": row.dataset_row_id,
+            "row_index": row.row_index,
+            "category": row.badcase_category,
+            "category_label": CATEGORY_LABELS.get(row.badcase_category, row.badcase_category),
+            "confidence": row.badcase_confidence,
+            "source": row.badcase_source,
+            "error": row.error,
+            "metric_scores": row.metric_scores or {},
+            "dataset_row": row.dataset_row,
+        })
+    db.commit()
+    return {"eval_id": eval_id, "total": len(items), "counts": counts, "items": items}
+
+
+@router.patch("/{eval_id}/rows/{row_id}/badcase")
+def update_badcase_category(
+    eval_id: int, row_id: int, payload: BadCaseUpdate, db: Session = Depends(get_db)
+):
+    if payload.category not in BADCASE_CATEGORIES:
+        raise HTTPException(status_code=422, detail="不支持的 Bad Case 分类")
+    row = db.query(EvalRowResult).filter(EvalRowResult.eval_task_id == eval_id, EvalRowResult.id == row_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Row result not found")
+    row.badcase_category = payload.category
+    row.badcase_confidence = 1.0
+    row.badcase_source = "manual"
+    db.commit()
+    return {"result_id": row.id, "category": row.badcase_category, "source": row.badcase_source}
+
+
+@router.post("/{eval_id}/badcases/regression-dataset")
+def create_regression_dataset(
+    eval_id: int, payload: RegressionDatasetRequest, db: Session = Depends(get_db)
+):
+    task = db.query(EvalTask).filter(EvalTask.id == eval_id).first()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Evaluation task not found")
+    query = db.query(EvalRowResult).options(joinedload(EvalRowResult.dataset_row)).filter(
+        EvalRowResult.eval_task_id == eval_id, EvalRowResult.is_pass.is_(False)
+    )
+    if payload.row_ids:
+        query = query.filter(EvalRowResult.id.in_(payload.row_ids))
+    rows = query.order_by(EvalRowResult.row_index).all()
+    if not rows:
+        raise HTTPException(status_code=422, detail="没有可加入回归集的失败样本")
+    dataset = Dataset(
+        name=payload.name or f"{task.name} Bad Case 回归集",
+        description=f"从评测任务 #{eval_id} 自动生成，保留 badcase_category 便于回归切片。",
+        sample_type=task.dataset.sample_type if task.dataset else "single_turn",
+        field_schema=list((task.dataset.field_schema if task.dataset else None) or []),
+    )
+    db.add(dataset)
+    db.flush()
+    for index, result in enumerate(rows):
+        source = dict(result.dataset_row.data or {}) if result.dataset_row else {}
+        source["badcase_category"] = result.badcase_category or classify_badcase(result.metric_scores, result.error, result.endpoint_trace)["category"]
+        source["badcase_source_eval_id"] = eval_id
+        db.add(DatasetRow(dataset_id=dataset.id, row_index=index, data=source))
+    dataset.row_count = len(rows)
+    dataset.version = 1
+    db.commit()
+    db.refresh(dataset)
+    return {"dataset_id": dataset.id, "name": dataset.name, "row_count": dataset.row_count, "source_eval_id": eval_id}
+
+
 @router.get("/{eval_id}/rows/{row_id}", response_model=EvalRowResultResponse)
 def get_report_row_detail(
     eval_id: int, row_id: int, db: Session = Depends(get_db)
@@ -437,6 +538,176 @@ def compare_report(
 ):
     current = _load_eval_task_for_compare(db, eval_id)
     baseline = _load_eval_task_for_compare(db, baseline_eval_id)
+    return _build_comparison_payload(db, current, baseline)
+
+
+@router.post("/{eval_id}/quality-gate", response_model=QualityGateResponse)
+def evaluate_quality_gate(
+    eval_id: int,
+    payload: QualityGateRequest,
+    db: Session = Depends(get_db),
+):
+    """Make a deterministic release/regression decision from two reports.
+
+    This is intentionally a local API rather than CI/deployment integration: it
+    closes the evaluate -> compare -> decide loop while remaining easy to run in
+    an interview project or a notebook.
+    """
+
+    current = _load_eval_task_for_compare(db, eval_id)
+    baseline = _load_eval_task_for_compare(db, payload.baseline_eval_id)
+    if current.status != "completed" or baseline.status != "completed":
+        raise HTTPException(status_code=422, detail="质量门禁只能用于已完成的评测任务")
+    comparison = _build_comparison_payload(db, current, baseline)
+    violations: list[dict] = []
+    comparability = comparison["comparability"]
+    if payload.require_identical_fingerprint and comparability["status"] != "identical":
+        violations.append(
+            {
+                "rule": "require_identical_fingerprint",
+                "expected": "identical",
+                "actual": comparability["status"],
+                "message": "当前评测与基线的评测口径不一致或无法追溯，不能安全归因回归结果。",
+            }
+        )
+
+    summary_delta = comparison["summary_delta"]
+    if summary_delta["pass_rate_delta"] < payload.minimum_pass_rate_delta:
+        violations.append(
+            {
+                "rule": "minimum_pass_rate_delta",
+                "expected": payload.minimum_pass_rate_delta,
+                "actual": summary_delta["pass_rate_delta"],
+                "message": (
+                    f"整体通过率变化 {summary_delta['pass_rate_delta']:.4f}"
+                    f" 低于门槛 {payload.minimum_pass_rate_delta:.4f}。"
+                ),
+            }
+        )
+
+    new_failures = len(comparison["row_changes"].get("new_failures") or [])
+    if new_failures > payload.maximum_new_failures:
+        violations.append(
+            {
+                "rule": "maximum_new_failures",
+                "expected": payload.maximum_new_failures,
+                "actual": new_failures,
+                "message": f"发现 {new_failures} 条新增失败样本。",
+            }
+        )
+    new_errors = len(comparison["row_changes"].get("new_errors") or [])
+    if new_errors > payload.maximum_new_errors:
+        violations.append(
+            {
+                "rule": "maximum_new_errors",
+                "expected": payload.maximum_new_errors,
+                "actual": new_errors,
+                "message": f"发现 {new_errors} 条新增异常样本。",
+            }
+        )
+
+    gate_summary = comparison["summary_delta"]
+    if payload.maximum_cost_increase_cny is not None and (gate_summary.get("cost_delta_cny") or 0) > payload.maximum_cost_increase_cny:
+        violations.append({
+            "rule": "maximum_cost_increase_cny",
+            "expected": payload.maximum_cost_increase_cny,
+            "actual": gate_summary.get("cost_delta_cny"),
+            "message": f"估算成本增加 {gate_summary.get('cost_delta_cny')} 元，超过门槛。",
+        })
+    if payload.maximum_cost_increase_ratio is not None and gate_summary.get("cost_delta_ratio") is not None and gate_summary["cost_delta_ratio"] > payload.maximum_cost_increase_ratio:
+        violations.append({
+            "rule": "maximum_cost_increase_ratio",
+            "expected": payload.maximum_cost_increase_ratio,
+            "actual": gate_summary.get("cost_delta_ratio"),
+            "message": "估算成本增幅超过门槛。",
+        })
+    if payload.maximum_latency_p95_increase_ms is not None and (gate_summary.get("latency_p95_delta_ms") or 0) > payload.maximum_latency_p95_increase_ms:
+        violations.append({
+            "rule": "maximum_latency_p95_increase_ms",
+            "expected": payload.maximum_latency_p95_increase_ms,
+            "actual": gate_summary.get("latency_p95_delta_ms"),
+            "message": "行级 P95 延迟增量超过门槛。",
+        })
+    if payload.maximum_latency_p95_increase_ratio is not None and gate_summary.get("latency_p95_delta_ratio") is not None and gate_summary["latency_p95_delta_ratio"] > payload.maximum_latency_p95_increase_ratio:
+        violations.append({
+            "rule": "maximum_latency_p95_increase_ratio",
+            "expected": payload.maximum_latency_p95_increase_ratio,
+            "actual": gate_summary.get("latency_p95_delta_ratio"),
+            "message": "行级 P95 延迟增幅超过门槛。",
+        })
+
+    missing_current = len(comparison["row_changes"].get("missing_in_current") or [])
+    if missing_current:
+        violations.append(
+            {
+                "rule": "all_baseline_rows_evaluated",
+                "expected": 0,
+                "actual": missing_current,
+                "message": f"当前评测缺少 {missing_current} 条基线样本结果，不能判定为通过。",
+            }
+        )
+
+    metric_deltas = {
+        item["metric"]: item for item in comparison.get("metric_deltas") or []
+    }
+    for rule in payload.metric_rules:
+        delta = metric_deltas.get(rule.metric)
+        if delta is None:
+            violations.append(
+                {
+                    "rule": f"metric.{rule.metric}.exists",
+                    "expected": True,
+                    "actual": False,
+                    "message": f"基线对比中不存在指标 {rule.metric}。",
+                }
+            )
+            continue
+        if rule.minimum_mean_delta is not None and (
+            delta["mean_delta"] is None or delta["mean_delta"] < rule.minimum_mean_delta
+        ):
+            violations.append(
+                {
+                    "rule": f"metric.{rule.metric}.minimum_mean_delta",
+                    "expected": rule.minimum_mean_delta,
+                    "actual": delta["mean_delta"],
+                    "message": f"指标 {rule.metric} 的均分变化未达到门槛。",
+                }
+            )
+        if rule.minimum_pass_rate_delta is not None and (
+            delta["pass_rate_delta"] is None
+            or delta["pass_rate_delta"] < rule.minimum_pass_rate_delta
+        ):
+            violations.append(
+                {
+                    "rule": f"metric.{rule.metric}.minimum_pass_rate_delta",
+                    "expected": rule.minimum_pass_rate_delta,
+                    "actual": delta["pass_rate_delta"],
+                    "message": f"指标 {rule.metric} 的通过率变化未达到门槛。",
+                }
+            )
+        if rule.minimum_mean_score is not None and (
+            delta["current_mean"] is None or delta["current_mean"] < rule.minimum_mean_score
+        ):
+            violations.append(
+                {
+                    "rule": f"metric.{rule.metric}.minimum_mean_score",
+                    "expected": rule.minimum_mean_score,
+                    "actual": delta["current_mean"],
+                    "message": f"指标 {rule.metric} 当前均分低于门槛。",
+                }
+            )
+
+    return QualityGateResponse(
+        passed=not violations,
+        status="passed" if not violations else "blocked",
+        baseline_eval_id=baseline.id,
+        current_eval_id=current.id,
+        violations=violations,
+        comparison=comparison,
+    )
+
+
+def _build_comparison_payload(db: Session, current: EvalTask, baseline: EvalTask) -> dict:
     _validate_comparable_tasks(current, baseline)
 
     current_rows = _load_compare_rows(db, current.id)
@@ -489,6 +760,12 @@ def compare_report(
 
     current_summary = _normalize_metric_summary(current.summary_scores or {}, current_rows)
     baseline_summary = _normalize_metric_summary(baseline.summary_scores or {}, baseline_rows)
+    current_cost = float(((current.summary_scores or {}).get("cost") or {}).get("estimated_cost") or 0)
+    baseline_cost = float(((baseline.summary_scores or {}).get("cost") or {}).get("estimated_cost") or 0)
+    current_p95 = (current.summary_scores or {}).get("latency", {}).get("row_p95_ms")
+    baseline_p95 = (baseline.summary_scores or {}).get("latency", {}).get("row_p95_ms")
+    cost_delta = round(current_cost - baseline_cost, 6)
+    latency_delta = (round(float(current_p95) - float(baseline_p95), 2) if current_p95 is not None and baseline_p95 is not None else None)
     metric_names = _metric_names_from_snapshot(current.scenario_snapshot)
 
     return {
@@ -504,6 +781,14 @@ def compare_report(
             "current_error_count": current_errors,
             "baseline_error_count": baseline_errors,
             "error_count_delta": current_errors - baseline_errors,
+            "current_cost_cny": current_cost,
+            "baseline_cost_cny": baseline_cost,
+            "cost_delta_cny": cost_delta,
+            "cost_delta_ratio": round(cost_delta / baseline_cost, 4) if baseline_cost else None,
+            "current_latency_p95_ms": current_p95,
+            "baseline_latency_p95_ms": baseline_p95,
+            "latency_p95_delta_ms": latency_delta,
+            "latency_p95_delta_ratio": round(latency_delta / float(baseline_p95), 4) if latency_delta is not None and baseline_p95 else None,
         },
         "metric_deltas": [
             _build_metric_delta(name, current_summary.get(name) or {}, baseline_summary.get(name) or {})
@@ -527,11 +812,13 @@ def _build_comparability(current: EvalTask, baseline: EvalTask) -> dict:
             "dataset_version": current.dataset_version,
             "judge_snapshot": current.judge_snapshot,
             "scenario_snapshot": current.scenario_snapshot,
+            "tool_registry_snapshot": current.tool_registry_snapshot,
         },
         {
             "dataset_version": baseline.dataset_version,
             "judge_snapshot": baseline.judge_snapshot,
             "scenario_snapshot": baseline.scenario_snapshot,
+            "tool_registry_snapshot": baseline.tool_registry_snapshot,
         },
     )
     current_fp = current.eval_fingerprint

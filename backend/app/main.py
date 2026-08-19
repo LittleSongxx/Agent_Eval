@@ -189,6 +189,7 @@ app.add_middleware(
 from app.api.llm_config import router as llm_config_router
 from app.api.dataset import router as dataset_router
 from app.api.metric import router as metric_router
+from app.api.tool_registry import router as tool_registry_router
 from app.api.endpoint_target import router as endpoint_target_router
 from app.api.scenario import router as scenario_router
 from app.api.evaluation import router as evaluation_router
@@ -200,6 +201,7 @@ from app.api.ws import router as ws_router
 app.include_router(llm_config_router, prefix="/api")
 app.include_router(dataset_router, prefix="/api")
 app.include_router(metric_router, prefix="/api")
+app.include_router(tool_registry_router, prefix="/api")
 app.include_router(endpoint_target_router, prefix="/api")
 app.include_router(scenario_router, prefix="/api")
 app.include_router(evaluation_router, prefix="/api")

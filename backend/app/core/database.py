@@ -49,6 +49,7 @@ def ensure_runtime_schema() -> None:
         "worker_pid": "ALTER TABLE eval_tasks ADD COLUMN worker_pid INTEGER",
         "judge_snapshot": "ALTER TABLE eval_tasks ADD COLUMN judge_snapshot JSON",
         "eval_fingerprint": "ALTER TABLE eval_tasks ADD COLUMN eval_fingerprint VARCHAR(64)",
+        "tool_registry_snapshot": "ALTER TABLE eval_tasks ADD COLUMN tool_registry_snapshot JSON",
     }
     missing_eval_task_sql = [
         sql for name, sql in eval_task_additions.items() if name not in eval_task_columns
@@ -88,6 +89,9 @@ def ensure_runtime_schema() -> None:
             "manual_note": "ALTER TABLE eval_row_results ADD COLUMN manual_note TEXT",
             "reviewed_at": "ALTER TABLE eval_row_results ADD COLUMN reviewed_at DATETIME",
             "endpoint_trace": "ALTER TABLE eval_row_results ADD COLUMN endpoint_trace JSON",
+            "badcase_category": "ALTER TABLE eval_row_results ADD COLUMN badcase_category VARCHAR(50)",
+            "badcase_confidence": "ALTER TABLE eval_row_results ADD COLUMN badcase_confidence FLOAT",
+            "badcase_source": "ALTER TABLE eval_row_results ADD COLUMN badcase_source VARCHAR(100)",
         }
         missing_sql = [sql for name, sql in additions.items() if name not in row_result_columns]
         if missing_sql:

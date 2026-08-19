@@ -146,6 +146,9 @@ export interface EvalRowResult {
   is_pass: boolean | null;
   execution_time_ms: number | null;
   error: string | null;
+  badcase_category?: string | null;
+  badcase_confidence?: number | null;
+  badcase_source?: string | null;
   manual_status?: 'pass' | 'fail' | 'needs_fix' | 'needs_review' | null;
   manual_score?: number | null;
   manual_tags?: string[] | null;
@@ -193,6 +196,18 @@ export interface ReportSummary {
   judge_ceiling_check?: JudgeCeilingCheck | null;
   annotation_disagreements?: AnnotationDisagreement[] | null;
   label_basis_summary?: Record<string, number> | null;
+}
+
+export interface ToolDefinition {
+  id: number;
+  name: string;
+  description: string;
+  parameters_schema?: Record<string, any> | null;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  has_side_effect: boolean;
+  idempotency_required: boolean;
+  timeout_ms?: number | null;
+  enabled: boolean;
 }
 
 export interface AnnotatorPairKappa {
@@ -347,6 +362,14 @@ export interface ReportCompareResponse {
     current_error_count: number;
     baseline_error_count: number;
     error_count_delta: number;
+    current_cost_cny?: number;
+    baseline_cost_cny?: number;
+    cost_delta_cny?: number;
+    cost_delta_ratio?: number | null;
+    current_latency_p95_ms?: number | null;
+    baseline_latency_p95_ms?: number | null;
+    latency_p95_delta_ms?: number | null;
+    latency_p95_delta_ratio?: number | null;
   };
   metric_deltas: ReportCompareMetricDelta[];
   row_changes: Record<string, ReportCompareRowItem[]>;

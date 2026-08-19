@@ -24,6 +24,8 @@ const defaultMapping = {
   retrieved_contexts_path: '',
   retrieved_context_ids_path: '',
   tool_calls_path: '',
+  agent_trajectory_path: '',
+  available_tools_path: '',
 };
 
 const JsonTextArea: React.FC<React.ComponentProps<typeof TextArea>> = ({ className, ...props }) => (
@@ -261,6 +263,16 @@ const EndpointTargetModal: React.FC<EndpointTargetModalProps> = ({ open, target,
           <Col span={6}>
             <Form.Item name={['response_mapping', 'tool_calls_path']} label="工具调用字段">
               <Input placeholder="trace.tool_calls" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name={['response_mapping', 'agent_trajectory_path']} label="Agent轨迹字段">
+              <Input placeholder="trace.events" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name={['response_mapping', 'available_tools_path']} label="可用工具字段">
+              <Input placeholder="trace.available_tools" />
             </Form.Item>
           </Col>
         </Row>

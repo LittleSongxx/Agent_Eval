@@ -16,6 +16,8 @@ from app.core.prompt_manager import (
     JUDGE_SYSTEM_PROMPT_COT,
     NAMED_LLM_METRIC_SPECS,
     STRUCTURED_JSON_SYSTEM_PROMPT,
+    TOOL_SELECTION_RATIONALITY_PROMPT,
+    TRAJECTORY_FAITHFULNESS_PROMPT,
 )
 
 # 复合指标不读 criteria：它们的判定逻辑写在这些模块级 prompt 常量里，
@@ -28,6 +30,14 @@ _COMPOSITE_METRIC_PROMPTS: dict[str, tuple[str, ...]] = {
     ),
     "builtin_answer_relevancy_generative": (
         GENERATIVE_QUESTION_PROMPT,
+        STRUCTURED_JSON_SYSTEM_PROMPT,
+    ),
+    "builtin_trajectory_faithfulness": (
+        TRAJECTORY_FAITHFULNESS_PROMPT,
+        STRUCTURED_JSON_SYSTEM_PROMPT,
+    ),
+    "builtin_tool_selection_rationality": (
+        TOOL_SELECTION_RATIONALITY_PROMPT,
         STRUCTURED_JSON_SYSTEM_PROMPT,
     ),
 }
@@ -196,6 +206,7 @@ def compute_eval_fingerprint(
     dataset_id: int | None,
     dataset_version: int | None,
     judge_samples: int | None = None,
+    tool_registry_snapshot: list[dict[str, Any]] | None = None,
 ) -> str:
     """Hash every dimension that can move a score, so two tasks are comparable iff equal.
 
@@ -237,6 +248,7 @@ def compute_eval_fingerprint(
             "judge_panel": sorted(judge.get("judge_panel") or []),
         },
         "judge_samples": judge_samples,
+        "tool_registry": tool_registry_snapshot or [],
     }
     payload = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -265,6 +277,9 @@ def describe_fingerprint_diff(
             changed.append(f"judge.{field}")
     if sorted(cur_judge.get("judge_panel") or []) != sorted(base_judge.get("judge_panel") or []):
         changed.append("judge.judge_panel")
+
+    if current.get("tool_registry_snapshot") != baseline.get("tool_registry_snapshot"):
+        changed.append("tool_registry")
 
     def _criteria_map(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         result: dict[str, Any] = {}

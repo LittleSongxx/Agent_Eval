@@ -21,6 +21,7 @@ from app.models.dataset import Dataset, DatasetRow
 from app.models.endpoint_target import EndpointTarget
 from app.models.scenario import EvalScenario, ScenarioMetric
 from app.models.llm_config import LLMConfig
+from app.models.tool_registry import ToolDefinition
 from app.schemas.evaluation import EvalDebugRequest, EvalDebugResponse, EvalTaskCreate, EvalTaskResponse
 from app.schemas.evaluation import EndpointEvalTargetTestRequest, EndpointEvalTargetTestResponse
 
@@ -185,6 +186,19 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         .count()
     )
     dataset.row_count = actual_row_count
+    tool_registry_snapshot = [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters_schema": tool.parameters_schema,
+            "risk_level": tool.risk_level,
+            "has_side_effect": tool.has_side_effect,
+            "idempotency_required": tool.idempotency_required,
+            "timeout_ms": tool.timeout_ms,
+            "enabled": tool.enabled,
+        }
+        for tool in db.query(ToolDefinition).filter(ToolDefinition.enabled.is_(True)).order_by(ToolDefinition.name).all()
+    ]
 
     # 多裁判面板：校验附加裁判配置存在，任务创建时冻结面板
     judge_panel: list[int] = []
@@ -215,12 +229,14 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         judge_panel=judge_panel or None,
         dataset_version=dataset.version,
         judge_snapshot=judge_snapshot,
+        tool_registry_snapshot=tool_registry_snapshot,
         eval_fingerprint=compute_eval_fingerprint(
             scenario_snapshot,
             judge_snapshot,
             payload.dataset_id,
             dataset.version,
             judge_samples=int(settings.EVAL_JUDGE_SAMPLES),
+            tool_registry_snapshot=tool_registry_snapshot,
         ),
     )
     db.add(task)

@@ -34,11 +34,15 @@ from app.core.prompt_manager import (
     NONCOMMITTAL_QUESTION_MARKERS,
     NUMERIC_SCORE_INSTRUCTION,
     STRUCTURED_JSON_SYSTEM_PROMPT,
+    TOOL_SELECTION_RATIONALITY_PROMPT,
+    TRAJECTORY_FAITHFULNESS_PROMPT,
     extract_prompt_variables,
     render_prompt,
     resolve_prompt_variable,
 )
 from app.core.scenario_snapshot import snapshot_to_scenario_metrics
+from app.core.trace_lint import lint_agent_trace
+from app.core.badcase import classify_badcase
 
 logger = logging.getLogger(__name__)
 
@@ -693,9 +697,10 @@ class TrajectoryFaithfulnessMetric:
         faithful_count = 0
         details: list[dict[str, t.Any]] = []
 
-        for step_data in trajectory:
+        verification_errors: list[str] = []
+        response = str(row_data.get("response") or "")
+        for step_index, step_data in enumerate(trajectory):
             step_num = step_data.get("step", 0)
-            thought = str(step_data.get("thought") or "")
             tool_output = str(step_data.get("tool_output") or "")
 
             # 如果该步骤没有工具调用，跳过（纯思考步骤无需验证）
@@ -704,16 +709,14 @@ class TrajectoryFaithfulnessMetric:
 
             # 用 LLM Judge 判断：thought 是否忠实反映 tool_output
             try:
-                verification_prompt = f"""判断 Agent 的推理是否忠实于工具返回结果。
-
-工具返回结果：
-{tool_output}
-
-Agent 推理内容：
-{thought}
-
-如果 Agent 推理内容与工具返回结果一致（没有编造信息、没有曲解结果），返回 {{"verdict": "faithful", "reason": "具体理由"}}；
-否则返回 {{"verdict": "not_faithful", "reason": "具体理由"}}。"""
+                next_thought = ""
+                if step_index + 1 < len(trajectory):
+                    next_thought = str(trajectory[step_index + 1].get("thought") or "")
+                reasoning = next_thought or response or str(step_data.get("thought") or "")
+                verification_prompt = TRAJECTORY_FAITHFULNESS_PROMPT.format(
+                    tool_output=tool_output,
+                    reasoning=reasoning,
+                )
 
                 verdict = await judge.chat_json(
                     STRUCTURED_JSON_SYSTEM_PROMPT,
@@ -731,12 +734,19 @@ Agent 推理内容：
                     "reason": str(verdict.get("reason") or "")[:150],
                 })
             except Exception as exc:
+                verification_errors.append(f"Step {step_num}: {str(exc)[:100]}")
                 details.append({
                     "step": step_num,
                     "tool": step_data.get("tool"),
                     "faithful": False,
                     "reason": f"验证失败: {str(exc)[:100]}"
                 })
+
+        if verification_errors:
+            return _MetricResult(
+                None,
+                "轨迹忠实度验证失败，未将裁判异常计为低分: " + "；".join(verification_errors[:3]),
+            )
 
         # 计算忠实度
         evaluated_steps = len([d for d in details if d])
@@ -800,11 +810,16 @@ class ErrorRecoveryMetric:
         for i, step_data in enumerate(trajectory):
             tool_output = str(step_data.get("tool_output") or "").lower()
             # 检测错误关键词
-            if any(keyword in tool_output for keyword in ["error", "failed", "exception", "错误", "失败"]):
+            if step_data.get("is_error") or any(
+                keyword in tool_output for keyword in ["error", "failed", "exception", "错误", "失败"]
+            ):
                 error_steps.append((i, step_data))
 
         if not error_steps:
-            return _MetricResult(None, "轨迹中未检测到错误步骤，无需评测错误恢复能力。")
+            return _MetricResult(
+                1.0,
+                "轨迹中未检测到工具错误，本行无需触发恢复流程；按质量门禁通过处理，但该样本不证明 Agent 具备错误恢复能力。",
+            )
 
         recovered_count = 0
         details: list[dict[str, t.Any]] = []
@@ -906,6 +921,7 @@ class ToolSelectionRationalityMetric:
         rational_count = 0
         details: list[dict[str, t.Any]] = []
 
+        verification_errors: list[str] = []
         for step_data in trajectory:
             step_num = step_data.get("step", 0)
             thought = str(step_data.get("thought") or "")
@@ -922,19 +938,11 @@ class ToolSelectionRationalityMetric:
 
             # 用 LLM Judge 判断工具选择是否最优
             try:
-                verification_prompt = f"""判断 Agent 的工具选择是否最优。
-
-任务目标：
-{thought}
-
-实际选择的工具：
-{selected_tool}
-
-可用工具列表：
-{tools_desc}
-
-如果 Agent 选择了最优工具（没有更好的替代工具能更高效/准确地完成任务），返回 {{"verdict": "optimal", "reason": "具体理由"}}；
-如果存在更优的工具选择，返回 {{"verdict": "suboptimal", "better_tool": "工具名", "reason": "为什么更优"}}。"""
+                verification_prompt = TOOL_SELECTION_RATIONALITY_PROMPT.format(
+                    thought=thought,
+                    selected_tool=selected_tool,
+                    tools_desc=tools_desc,
+                )
 
                 verdict = await judge.chat_json(
                     STRUCTURED_JSON_SYSTEM_PROMPT,
@@ -953,13 +961,19 @@ class ToolSelectionRationalityMetric:
                     "reason": str(verdict.get("reason") or "")[:150],
                 })
             except Exception as exc:
+                verification_errors.append(f"Step {step_num}: {str(exc)[:100]}")
                 details.append({
                     "step": step_num,
                     "selected_tool": selected_tool,
-                    "optimal": True,  # 默认认为合理（验证失败不应惩罚）
+                    "optimal": False,
                     "reason": f"验证失败: {str(exc)[:100]}"
                 })
-                rational_count += 1
+
+        if verification_errors:
+            return _MetricResult(
+                None,
+                "工具选择验证失败，未将裁判异常默认计为最优: " + "；".join(verification_errors[:3]),
+            )
 
         evaluated_steps = len([d for d in details if d])
         if evaluated_steps == 0:
@@ -1134,6 +1148,41 @@ class ToolCallAccuracyMetric:
         )
 
 
+class TraceLintMetric:
+    """Deterministic structural checks for Agent execution traces."""
+
+    def __init__(self, metric_def, prompt_override=None, pass_threshold=None, weight=None):
+        self.id = getattr(metric_def, "id", None)
+        self.name = metric_def.name
+        self.display_name = metric_def.display_name
+        self.metric_type = metric_def.metric_type
+        self.config = metric_def.config or {}
+        self.pass_threshold = pass_threshold
+        self.weight = weight if weight is not None else 1.0
+        self.required_fields = ["agent_trajectory"]
+
+    async def ascore(self, row_data: dict[str, t.Any], _judge: OpenAIJudgeClient) -> _MetricResult:
+        missing = _missing_required_fields(row_data, self.required_fields)
+        if missing:
+            return _MetricResult(None, f"缺少必需字段: {', '.join(missing)}。")
+        result = lint_agent_trace(
+            row_data.get("agent_trajectory"),
+            row_data.get("available_tools"),
+            row_data.get("tool_registry") or row_data.get("_tool_registry"),
+            int(self.config.get("max_steps", 20)),
+        )
+        violations = result.get("violations") or []
+        if not violations:
+            return _MetricResult(1.0, f"Trace Lint 通过，检查 {result.get('checked_steps', 0)} 个步骤。")
+        preview = "；".join(
+            f"{item.get('rule')}@Step {item.get('step') or '-'}" for item in violations[:5]
+        )
+        return _MetricResult(
+            result.get("score", 0.0),
+            f"Trace Lint 发现 {len(violations)} 个问题：{preview}",
+        )
+
+
 class ArgumentCorrectnessMetric:
     """Deterministic Agent metric focused on arguments after the tool name matches."""
 
@@ -1232,6 +1281,50 @@ def build_metric(
         return (
             "llm",
             CitationAccuracyMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_trajectory_faithfulness":
+        return (
+            "llm",
+            TrajectoryFaithfulnessMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_error_recovery":
+        return (
+            "simple",
+            ErrorRecoveryMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_tool_selection_rationality":
+        return (
+            "llm",
+            ToolSelectionRationalityMetric(
+                metric_def,
+                prompt_override=prompt_override,
+                pass_threshold=getattr(scenario_metric, "pass_threshold", None),
+                weight=getattr(scenario_metric, "weight", None),
+            ),
+        )
+
+    if metric_type == "builtin_trace_lint":
+        return (
+            "simple",
+            TraceLintMetric(
                 metric_def,
                 prompt_override=prompt_override,
                 pass_threshold=getattr(scenario_metric, "pass_threshold", None),
@@ -1404,6 +1497,8 @@ def _is_llm_metric(metric_instance: t.Any) -> bool:
             NativePromptMetric,
             ClaimFaithfulnessMetric,
             GenerativeAnswerRelevancyMetric,
+            TrajectoryFaithfulnessMetric,
+            ToolSelectionRationalityMetric,
         ),
     )
 
@@ -1615,6 +1710,7 @@ async def _evaluate_single_row(
     target_config: dict[str, t.Any],
     response_mapping: dict[str, t.Any],
     cancel_event: asyncio.Event,
+    tool_registry: list[dict[str, t.Any]] | None = None,
 ) -> dict[str, t.Any]:
     """评测单行，不碰数据库——所有落库都由调度侧串行完成。
 
@@ -1644,7 +1740,11 @@ async def _evaluate_single_row(
     if cancel_event.is_set():
         return {"row_index": row_index, "cancelled": True, "logs": logs}
 
-    row_data: dict[str, t.Any] = {**base_row_data, "_dataset_data": base_row_data}
+    row_data: dict[str, t.Any] = {
+        **base_row_data,
+        "tool_registry": tool_registry or [],
+        "_dataset_data": base_row_data,
+    }
 
     if evaluation_mode == "endpoint":
         try:
@@ -1665,6 +1765,7 @@ async def _evaluate_single_row(
             row_data = {
                 **base_row_data,
                 **extracted_fields,
+                "tool_registry": tool_registry or [],
                 "_dataset_data": base_row_data,
                 "_endpoint_trace": endpoint_trace,
             }
@@ -1992,6 +2093,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         frozen_response_mapping = dict(task.response_mapping or {})
         frozen_primary_judge_name = llm_config.model_name
         frozen_save_mode = task.result_save_mode
+        frozen_tool_registry = list(task.tool_registry_snapshot or [])
 
         async def _run_row(row_position: int, row_index: int, base_row_data: dict) -> dict:
             """借一套裁判客户端跑一行，跑完归还。
@@ -2025,6 +2127,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     target_config=frozen_target_config,
                     response_mapping=frozen_response_mapping,
                     cancel_event=cancel_event,
+                    tool_registry=frozen_tool_registry,
                 )
             finally:
                 pool.put_nowait(bundle)
@@ -2217,6 +2320,7 @@ def _persist_row_result(
 ) -> None:
     """Create an EvalRowResult and add it to the session (caller commits)."""
     from app.models.evaluation import EvalRowResult
+    badcase = classify_badcase(metric_scores, error, endpoint_trace)
 
     row_result = EvalRowResult(
         eval_task_id=task.id,
@@ -2227,6 +2331,9 @@ def _persist_row_result(
         is_pass=is_pass,
         execution_time_ms=execution_time_ms,
         error=error,
+        badcase_category=badcase["category"] if not is_pass else None,
+        badcase_confidence=badcase["confidence"] if not is_pass else None,
+        badcase_source=badcase["source"] if not is_pass else None,
     )
     db.add(row_result)
 
@@ -2641,6 +2748,9 @@ def _sample_payload(
         "reference_topics",
         "reference_role",
         "rubrics",
+        "agent_trajectory",
+        "available_tools",
+        "tool_calls",
     ]
 
     if allow_fields is not None:

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.dataset import DatasetRowResponse
 from app.schemas.sensitive import redact_sensitive_mapping
@@ -70,6 +70,7 @@ class EvalTaskBrief(BaseModel):
     result_save_mode: Optional[str] = "task_only"
     judge_panel: Optional[List[int]] = None
     dataset_version: Optional[int] = None
+    tool_registry_snapshot: Optional[List[Dict[str, Any]]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +136,9 @@ class EvalRowResultResponse(BaseModel):
     is_pass: Optional[bool] = None
     execution_time_ms: Optional[int] = None
     error: Optional[str] = None
+    badcase_category: Optional[str] = None
+    badcase_confidence: Optional[float] = None
+    badcase_source: Optional[str] = None
     manual_status: Optional[str] = None
     manual_score: Optional[float] = None
     manual_tags: Optional[List[str]] = None
@@ -272,6 +276,14 @@ class ReportCompareSummaryDelta(BaseModel):
     fail_count_delta: int
     current_error_count: int
     baseline_error_count: int
+    current_cost_cny: Optional[float] = None
+    baseline_cost_cny: Optional[float] = None
+    cost_delta_cny: Optional[float] = None
+    cost_delta_ratio: Optional[float] = None
+    current_latency_p95_ms: Optional[float] = None
+    baseline_latency_p95_ms: Optional[float] = None
+    latency_p95_delta_ms: Optional[float] = None
+    latency_p95_delta_ratio: Optional[float] = None
     error_count_delta: int
 
 
@@ -300,6 +312,51 @@ class ReportCompareResponse(BaseModel):
     summary_delta: ReportCompareSummaryDelta
     metric_deltas: List[ReportCompareMetricDelta]
     row_changes: Dict[str, List[ReportCompareRowItem]]
+
+
+class QualityGateMetricRule(BaseModel):
+    metric: str
+    minimum_mean_delta: Optional[float] = None
+    minimum_pass_rate_delta: Optional[float] = None
+    minimum_mean_score: Optional[float] = None
+
+
+class QualityGateRequest(BaseModel):
+    baseline_eval_id: int
+    require_identical_fingerprint: bool = True
+    minimum_pass_rate_delta: float = 0.0
+    maximum_new_failures: int = 0
+    maximum_new_errors: int = 0
+    maximum_cost_increase_cny: Optional[float] = Field(default=None, ge=0)
+    maximum_cost_increase_ratio: Optional[float] = Field(default=None, ge=0)
+    maximum_latency_p95_increase_ms: Optional[float] = Field(default=None, ge=0)
+    maximum_latency_p95_increase_ratio: Optional[float] = Field(default=None, ge=0)
+    metric_rules: List[QualityGateMetricRule] = Field(default_factory=list)
+
+
+class QualityGateViolation(BaseModel):
+    rule: str
+    expected: Any = None
+    actual: Any = None
+    message: str
+
+
+class QualityGateResponse(BaseModel):
+    passed: bool
+    status: Literal["passed", "blocked"]
+    baseline_eval_id: int
+    current_eval_id: int
+    violations: List[QualityGateViolation]
+    comparison: ReportCompareResponse
+
+
+class BadCaseUpdate(BaseModel):
+    category: str = Field(min_length=1, max_length=50)
+
+
+class RegressionDatasetRequest(BaseModel):
+    name: Optional[str] = None
+    row_ids: Optional[List[int]] = None
 
 
 class BlindTestTargetPayload(BaseModel):

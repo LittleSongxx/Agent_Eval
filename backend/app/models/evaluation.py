@@ -50,6 +50,8 @@ class EvalTask(Base):
     # 评测口径指纹 = 数据 + 尺子 + 裁判。两个任务指纹相同才是严格可比的；
     # 不同则对比接口会列出具体变化维度，而不是把差异都算作被测系统的改进。
     eval_fingerprint = Column(String(64), nullable=True)
+    # 创建任务时冻结工具目录，避免工具 schema 变化后历史 Trace Lint 结果无法复现。
+    tool_registry_snapshot = Column(JSON, nullable=True)
     # 执行评测的后端进程 PID：启动 recovery 时据此跳过仍在存活进程里运行的任务，
     # 避免 TestClient / 误启动的 lifespan 把运行中的任务误标失败
     worker_pid = Column(Integer, nullable=True)
@@ -73,6 +75,9 @@ class EvalRowResult(Base):
     is_pass = Column(Boolean, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)
+    badcase_category = Column(String(50), nullable=True)
+    badcase_confidence = Column(Float, nullable=True)
+    badcase_source = Column(String(100), nullable=True)
     # 以下 manual_* 五列是 row_annotations 的**投影**，不是标注的存储位置。
     # 真值在 RowAnnotation：一行可以有多个标注者，投影只保留"当前生效的那一个"。
     # 保留投影的原因是向后兼容——前端 46 处引用与 3 个离线脚本都读这几列，

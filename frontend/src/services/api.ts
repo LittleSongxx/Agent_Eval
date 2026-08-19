@@ -125,6 +125,20 @@ export const updateReportRowReview = (evalId: number, rowId: number, data: any) 
   api.patch(`/reports/${evalId}/rows/${rowId}/review`, data).then(r => r.data);
 export const compareReport = (evalId: number, baselineEvalId: number) =>
   api.get(`/reports/${evalId}/compare`, { params: { baseline_eval_id: baselineEvalId } }).then(r => r.data);
+export const evaluateQualityGate = (evalId: number, data: any) =>
+  api.post(`/reports/${evalId}/quality-gate`, data).then(r => r.data);
+export const listBadcases = (evalId: number, category?: string) =>
+  api.get(`/reports/${evalId}/badcases`, { params: { category } }).then(r => r.data);
+export const updateBadcaseCategory = (evalId: number, rowId: number, category: string) =>
+  api.patch(`/reports/${evalId}/rows/${rowId}/badcase`, { category }).then(r => r.data);
+export const createRegressionDataset = (evalId: number, data: any = {}) =>
+  api.post(`/reports/${evalId}/badcases/regression-dataset`, data).then(r => r.data);
+
+export const listToolRegistry = () => api.get('/tool-registry').then(r => r.data);
+export const createToolRegistryItem = (data: any) => api.post('/tool-registry', data).then(r => r.data);
+export const updateToolRegistryItem = (id: number, data: any) => api.put(`/tool-registry/${id}`, data).then(r => r.data);
+export const deleteToolRegistryItem = (id: number) => api.delete(`/tool-registry/${id}`);
+export const lintTrace = (data: any) => api.post('/tool-registry/lint', data).then(r => r.data);
 
 // ======================== Blind Test ========================
 
