@@ -89,7 +89,7 @@ Compared with library-first tools such as Ragas, rag_eval, or dataset-focused to
 | Evaluation cost tracking | Per-row judge token usage recorded, total tokens and estimated cost shown in reports (unit price configurable) |
 | Dual-channel metrics | Generative answer relevancy (reverse-question + semantic similarity) and claim-level faithfulness (atomic claim decomposition and verification), coexisting with holistic metrics for cross-validation |
 | Judge engineering | Optional forced CoT, position-swap consistency check, multi-judge panel aggregation (mean/majority + inter-judge MAD) |
-| Human calibration loop | Reports compute Cohen's kappa between manual and automatic scores, suggesting rubric revisions below 0.7 |
+| Human calibration loop | Reports compute Cohen's kappa, Bootstrap intervals, and annotator-ceiling status; scores below 0.7 trigger review suggestions and pilot results are not presented as general accuracy |
 | Dataset versioning | Version auto-increments on row changes and is frozen at task creation for traceability |
 | Dataset governance tools | Contamination check (n-gram + embedding similarity), retrieval noise injection experiment, zero-dependency Chinese BM25 mock retriever |
 

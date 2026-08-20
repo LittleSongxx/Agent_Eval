@@ -3,7 +3,9 @@
 import asyncio
 from types import SimpleNamespace
 
-from app.core.agent_trace import normalize_agent_trace
+import pytest
+
+from app.core.agent_trace import AgentTraceValidationError, normalize_agent_trace
 from app.core.endpoint_eval import extract_eval_fields
 from app.core.scenario_snapshot import (
     build_judge_snapshot,
@@ -47,6 +49,40 @@ def test_normalize_agent_trace_builds_conversation_and_trajectory():
     assert row["agent_trajectory"][0]["tool_output"] == '{"status":"shipped"}'
     assert row["available_tools"] == {"query_order": "查询订单"}
     assert row["trace_id"].startswith("trace-")
+
+
+def test_trace_import_rejects_conflicting_duplicate_representations():
+    trace = _trace()
+    trace["agent_trajectory"] = [
+        {
+            "step": 1,
+            "tool": "different_tool",
+            "tool_input": {},
+            "tool_output": "wrong",
+        }
+    ]
+    with pytest.raises(AgentTraceValidationError, match="内容冲突"):
+        normalize_agent_trace(trace)
+
+
+def test_parallel_tool_calls_without_ids_are_rejected():
+    trace = {
+        "input": "并行查询",
+        "events": [
+            {
+                "type": "assistant",
+                "content": "同时查询",
+                "tool_calls": [
+                    {"name": "search", "arguments": {"q": "a"}},
+                    {"name": "search", "arguments": {"q": "b"}},
+                ],
+            },
+            {"type": "tool", "name": "search", "content": "a"},
+            {"type": "tool", "name": "search", "content": "b"},
+        ],
+    }
+    with pytest.raises(AgentTraceValidationError, match="唯一 id"):
+        normalize_agent_trace(trace)
 
 
 def test_endpoint_mapping_normalizes_events_to_agent_trajectory():

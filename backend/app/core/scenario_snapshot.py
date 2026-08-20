@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from types import SimpleNamespace
@@ -41,6 +42,8 @@ _COMPOSITE_METRIC_PROMPTS: dict[str, tuple[str, ...]] = {
         STRUCTURED_JSON_SYSTEM_PROMPT,
     ),
 }
+
+_JUDGE_COMPARISON_FIELDS = ("provider", "api_base_url", "model_name", "temperature", "max_tokens")
 
 
 def _digest(*parts: str | None) -> str:
@@ -177,7 +180,11 @@ def build_scenario_snapshot(scenario, metric_overrides: list[Any] | None = None)
     }
 
 
-def build_judge_snapshot(llm_config, judge_panel: list[int] | None = None) -> dict[str, Any]:
+def build_judge_snapshot(
+    llm_config,
+    judge_panel: list[int] | None = None,
+    panel_configs: list[Any] | None = None,
+) -> dict[str, Any]:
     """Freeze the judge identity a task scores with — never the API key.
 
     ``LLMConfig`` rows are edited in place with no versioning, so a task that
@@ -188,7 +195,7 @@ def build_judge_snapshot(llm_config, judge_panel: list[int] | None = None) -> di
     """
     if llm_config is None:
         return {}
-    return {
+    snapshot = {
         "llm_config_id": getattr(llm_config, "id", None),
         "name": getattr(llm_config, "name", None),
         "provider": getattr(llm_config, "provider", None),
@@ -198,6 +205,87 @@ def build_judge_snapshot(llm_config, judge_panel: list[int] | None = None) -> di
         "max_tokens": getattr(llm_config, "max_tokens", None),
         "judge_panel": list(judge_panel or []),
     }
+    # IDs alone are not enough to explain a panel after its configs are edited.
+    # Keep the old ID field for compatibility and add sanitized identities when
+    # the caller has loaded the panel rows.
+    snapshot["judge_panel_snapshots"] = [
+        _public_llm_snapshot(config) for config in (panel_configs or [])
+    ]
+    return snapshot
+
+
+def _runtime_llm_snapshot(llm_config) -> dict[str, Any]:
+    """Copy the exact runtime fields needed to construct a Judge client.
+
+    ``judge_snapshot`` intentionally omits the API key because it is returned
+    by report APIs.  This private task snapshot is different: it is read only
+    by the worker so a queued task is unaffected by an in-place LLM config edit
+    or deletion.  The field is never included in a response schema or a
+    fingerprint.
+    """
+
+    return {
+        "id": getattr(llm_config, "id", None),
+        "name": getattr(llm_config, "name", None),
+        "provider": getattr(llm_config, "provider", None),
+        "api_base_url": getattr(llm_config, "api_base_url", None),
+        "api_key": getattr(llm_config, "api_key", None),
+        "model_name": getattr(llm_config, "model_name", None),
+        "temperature": getattr(llm_config, "temperature", None),
+        "max_tokens": getattr(llm_config, "max_tokens", None),
+    }
+
+
+def _public_llm_snapshot(llm_config) -> dict[str, Any]:
+    """Copy Judge identity/config fields while excluding credentials."""
+
+    return {
+        key: value
+        for key, value in _runtime_llm_snapshot(llm_config).items()
+        if key != "api_key"
+    }
+
+
+def build_judge_runtime_snapshot(llm_config, panel_configs: list[Any] | None = None) -> dict[str, Any]:
+    """Freeze primary and panel Judge client configuration for the worker."""
+
+    return {
+        "primary": _runtime_llm_snapshot(llm_config) if llm_config is not None else None,
+        "panel": [_runtime_llm_snapshot(config) for config in (panel_configs or [])],
+    }
+
+
+def build_dataset_snapshot(rows: list[Any]) -> list[dict[str, Any]]:
+    """Freeze row identity and JSON input without retaining ORM objects."""
+
+    return [
+        {
+            "id": getattr(row, "id", None),
+            "row_index": int(getattr(row, "row_index", index)),
+            "data": copy.deepcopy(getattr(row, "data", None) or {}),
+        }
+        for index, row in enumerate(sorted(rows, key=lambda item: getattr(item, "row_index", 0)))
+    ]
+
+
+def dataset_snapshot_digest(dataset_snapshot: list[dict[str, Any]] | None) -> str | None:
+    """Return a stable content digest for the exact rows used by a task."""
+
+    if dataset_snapshot is None:
+        return None
+    payload = json.dumps(dataset_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _panel_comparison_snapshot(values: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Strip display-only IDs/names before comparing panel Judges."""
+
+    normalized = [
+        {field: item.get(field) for field in _JUDGE_COMPARISON_FIELDS}
+        for item in (values or [])
+        if isinstance(item, dict)
+    ]
+    return sorted(normalized, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True))
 
 
 def compute_eval_fingerprint(
@@ -207,6 +295,7 @@ def compute_eval_fingerprint(
     dataset_version: int | None,
     judge_samples: int | None = None,
     tool_registry_snapshot: list[dict[str, Any]] | None = None,
+    dataset_snapshot: list[dict[str, Any]] | None = None,
 ) -> str:
     """Hash every dimension that can move a score, so two tasks are comparable iff equal.
 
@@ -239,13 +328,16 @@ def compute_eval_fingerprint(
     material = {
         "dataset_id": dataset_id,
         "dataset_version": dataset_version,
+        "dataset_snapshot_digest": dataset_snapshot_digest(dataset_snapshot),
         "metrics": metrics,
         "judge": {
+            "provider": judge.get("provider"),
             "model_name": judge.get("model_name"),
             "api_base_url": judge.get("api_base_url"),
             "temperature": judge.get("temperature"),
             "max_tokens": judge.get("max_tokens"),
             "judge_panel": sorted(judge.get("judge_panel") or []),
+            "judge_panel_snapshots": _panel_comparison_snapshot(judge.get("judge_panel_snapshots")),
         },
         "judge_samples": judge_samples,
         "tool_registry": tool_registry_snapshot or [],
@@ -269,14 +361,26 @@ def describe_fingerprint_diff(
 
     if current.get("dataset_version") != baseline.get("dataset_version"):
         changed.append("dataset_version")
+    if current.get("dataset_snapshot_digest") != baseline.get("dataset_snapshot_digest"):
+        # Old tasks do not have a content digest.  Do not call a missing value
+        # a change when both tasks predate immutable row snapshots.
+        if current.get("dataset_snapshot_digest") is not None or baseline.get("dataset_snapshot_digest") is not None:
+            changed.append("dataset_content")
+    if current.get("judge_samples") != baseline.get("judge_samples"):
+        if current.get("judge_samples") is not None or baseline.get("judge_samples") is not None:
+            changed.append("judge.samples")
 
     cur_judge = (current.get("judge_snapshot") or {})
     base_judge = (baseline.get("judge_snapshot") or {})
-    for field in ("model_name", "api_base_url", "temperature", "max_tokens"):
+    for field in ("provider", "model_name", "api_base_url", "temperature", "max_tokens"):
         if cur_judge.get(field) != base_judge.get(field):
             changed.append(f"judge.{field}")
     if sorted(cur_judge.get("judge_panel") or []) != sorted(base_judge.get("judge_panel") or []):
         changed.append("judge.judge_panel")
+    if _panel_comparison_snapshot(cur_judge.get("judge_panel_snapshots")) != _panel_comparison_snapshot(
+        base_judge.get("judge_panel_snapshots")
+    ):
+        changed.append("judge.panel_configs")
 
     if current.get("tool_registry_snapshot") != baseline.get("tool_registry_snapshot"):
         changed.append("tool_registry")

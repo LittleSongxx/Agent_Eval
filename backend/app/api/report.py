@@ -810,12 +810,16 @@ def _build_comparability(current: EvalTask, baseline: EvalTask) -> dict:
     changed = describe_fingerprint_diff(
         {
             "dataset_version": current.dataset_version,
+            "dataset_snapshot_digest": current.dataset_snapshot_digest,
+            "judge_samples": current.judge_samples,
             "judge_snapshot": current.judge_snapshot,
             "scenario_snapshot": current.scenario_snapshot,
             "tool_registry_snapshot": current.tool_registry_snapshot,
         },
         {
             "dataset_version": baseline.dataset_version,
+            "dataset_snapshot_digest": baseline.dataset_snapshot_digest,
+            "judge_samples": baseline.judge_samples,
             "judge_snapshot": baseline.judge_snapshot,
             "scenario_snapshot": baseline.scenario_snapshot,
             "tool_registry_snapshot": baseline.tool_registry_snapshot,

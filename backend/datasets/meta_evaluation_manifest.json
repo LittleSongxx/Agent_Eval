@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "agent-eval-autumn-2026-meta-quality-v1",
+  "status": "planned",
+  "purpose": "建立可复核的 Judge/Agent/Citation 元评价主实验，不把合成 fixture 或单标注者结果当作通用准确率。",
+  "targets": {
+    "human_gold_rows_min": 60,
+    "human_gold_rows_recommended": 100,
+    "independent_annotators_min": 2,
+    "shared_rows_min": 50,
+    "held_out_rows_min": 20,
+    "agent_rows_min": 50,
+    "agent_recovery_gold_min": 10,
+    "citation_rows_min": 60,
+    "citation_major_error_min": 10,
+    "required_provenance_fields": [
+      "generated_at_utc",
+      "git_commit",
+      "dataset_sha256",
+      "sample_count",
+      "model"
+    ]
+  },
+  "annotation_protocol": {
+    "independent_annotators": 2,
+    "adjudicator_counts_for_human_human_agreement": false,
+    "judge_sees_human_labels": false,
+    "calibration_split": "calibration",
+    "held_out_split": "held_out",
+    "required_fields": [
+      "sample_id",
+      "split",
+      "annotator",
+      "label",
+      "created_at_utc"
+    ],
+    "notes": "两位标注者先独立盲标；只对共同标注且未仲裁的行计算人-人一致性；冲突另由仲裁者处理。"
+  },
+  "datasets": [
+    {
+      "id": "agent_trajectory_fixture_v1",
+      "path": "datasets/agent_trajectory_samples.json",
+      "domain": "agent",
+      "trajectory_gold_field": "expected_trajectory_faithfulness",
+      "recovery_gold_field": "expected_error_recovery",
+      "tool_selection_gold_field": "expected_tool_selection_rationality",
+      "source_status": "synthetic_fixture",
+      "target_rows": 50
+    },
+    {
+      "id": "citation_fixture_v1",
+      "path": "datasets/citation_samples.json",
+      "domain": "citation",
+      "score_gold_field": "expected_citation_accuracy",
+      "source_status": "synthetic_fixture",
+      "target_rows": 60
+    }
+  ],
+  "reports": [
+    {
+      "id": "calibration_compare_pilot",
+      "path": "calibration_compare_report.json",
+      "kind": "judge_vs_human",
+      "required_for_release": false
+    },
+    {
+      "id": "kappa_significance_pilot",
+      "path": "kappa_significance_report.json",
+      "kind": "judge_calibration",
+      "required_for_release": false
+    },
+    {
+      "id": "ragas_llm_comparison_pilot",
+      "path": "ragas_comparison_report_n25_scoped.json",
+      "kind": "concurrent_validity",
+      "required_for_release": false
+    },
+    {
+      "id": "ragas_nonllm_comparison_pilot",
+      "path": "ragas_nonllm_report.json",
+      "kind": "concurrent_validity",
+      "required_for_release": false
+    },
+    {
+      "id": "retrieval_goldset_pilot",
+      "path": "retrieval_goldset_agreement.json",
+      "kind": "retrieval_criterion_validity",
+      "required_for_release": false
+    }
+  ],
+  "database": {
+    "path": "eval_platform.db",
+    "annotation_table": "row_annotations",
+    "adjudication_column": "is_adjudication"
+  }
+}

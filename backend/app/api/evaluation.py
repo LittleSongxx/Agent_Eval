@@ -11,9 +11,12 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.core.scenario_snapshot import (
+    build_dataset_snapshot,
     build_judge_snapshot,
+    build_judge_runtime_snapshot,
     build_scenario_snapshot,
     compute_eval_fingerprint,
+    dataset_snapshot_digest,
     snapshot_to_scenario_metrics,
 )
 from app.models.evaluation import EvalTask
@@ -180,11 +183,17 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="LLM config not found")
 
     dataset = db.query(Dataset).filter(Dataset.id == payload.dataset_id).first()
-    actual_row_count = (
+    dataset_rows = (
         db.query(DatasetRow)
         .filter(DatasetRow.dataset_id == payload.dataset_id)
-        .count()
+        .order_by(DatasetRow.row_index)
+        .all()
     )
+    actual_row_count = len(dataset_rows)
+    dataset_snapshot = build_dataset_snapshot(dataset_rows)
+    dataset_digest = dataset_snapshot_digest(dataset_snapshot)
+    # Keep the denormalized count aligned with the actual rows before taking
+    # the immutable task snapshot.
     dataset.row_count = actual_row_count
     tool_registry_snapshot = [
         {
@@ -202,16 +211,23 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
 
     # 多裁判面板：校验附加裁判配置存在，任务创建时冻结面板
     judge_panel: list[int] = []
+    panel_configs: list[LLMConfig] = []
     for panel_config_id in list(payload.judge_llm_config_ids or []):
-        if not db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first():
+        if panel_config_id == payload.llm_config_id or panel_config_id in judge_panel:
+            # The primary Judge is already included; duplicate panel IDs would
+            # otherwise silently give one config extra voting weight.
+            continue
+        panel_config = db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first()
+        if not panel_config:
             raise HTTPException(status_code=404, detail=f"裁判 LLM 配置 {panel_config_id} 不存在")
-        if panel_config_id != payload.llm_config_id:
-            judge_panel.append(panel_config_id)
+        judge_panel.append(panel_config_id)
+        panel_configs.append(panel_config)
 
     # 评测口径 = 数据 + 尺子 + 裁判。三者都得在建任务时冻结，否则事后无法
     # 判断两个任务的分差来自被测系统还是来自口径本身。
     scenario_snapshot = build_scenario_snapshot(scenario, payload.metric_overrides)
-    judge_snapshot = build_judge_snapshot(llm_config, judge_panel)
+    judge_snapshot = build_judge_snapshot(llm_config, judge_panel, panel_configs)
+    judge_runtime_snapshot = build_judge_runtime_snapshot(llm_config, panel_configs)
 
     task = EvalTask(
         name=payload.name,
@@ -229,7 +245,11 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
         judge_panel=judge_panel or None,
         dataset_version=dataset.version,
         judge_snapshot=judge_snapshot,
+        judge_runtime_snapshot=judge_runtime_snapshot,
         tool_registry_snapshot=tool_registry_snapshot,
+        dataset_snapshot=dataset_snapshot,
+        dataset_snapshot_digest=dataset_digest,
+        judge_samples=int(settings.EVAL_JUDGE_SAMPLES),
         eval_fingerprint=compute_eval_fingerprint(
             scenario_snapshot,
             judge_snapshot,
@@ -237,6 +257,7 @@ async def create_evaluation(payload: EvalTaskCreate, db: Session = Depends(get_d
             dataset.version,
             judge_samples=int(settings.EVAL_JUDGE_SAMPLES),
             tool_registry_snapshot=tool_registry_snapshot,
+            dataset_snapshot=dataset_snapshot,
         ),
     )
     db.add(task)

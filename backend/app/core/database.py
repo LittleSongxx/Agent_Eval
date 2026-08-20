@@ -48,8 +48,12 @@ def ensure_runtime_schema() -> None:
         "dataset_version": "ALTER TABLE eval_tasks ADD COLUMN dataset_version INTEGER",
         "worker_pid": "ALTER TABLE eval_tasks ADD COLUMN worker_pid INTEGER",
         "judge_snapshot": "ALTER TABLE eval_tasks ADD COLUMN judge_snapshot JSON",
+        "judge_runtime_snapshot": "ALTER TABLE eval_tasks ADD COLUMN judge_runtime_snapshot JSON",
         "eval_fingerprint": "ALTER TABLE eval_tasks ADD COLUMN eval_fingerprint VARCHAR(64)",
         "tool_registry_snapshot": "ALTER TABLE eval_tasks ADD COLUMN tool_registry_snapshot JSON",
+        "dataset_snapshot": "ALTER TABLE eval_tasks ADD COLUMN dataset_snapshot JSON",
+        "dataset_snapshot_digest": "ALTER TABLE eval_tasks ADD COLUMN dataset_snapshot_digest VARCHAR(64)",
+        "judge_samples": "ALTER TABLE eval_tasks ADD COLUMN judge_samples INTEGER",
     }
     missing_eval_task_sql = [
         sql for name, sql in eval_task_additions.items() if name not in eval_task_columns

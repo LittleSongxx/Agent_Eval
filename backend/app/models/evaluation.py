@@ -47,11 +47,19 @@ class EvalTask(Base):
     # 创建任务时冻结的裁判身份（模型名/温度/base_url，不含 api_key）。
     # LLMConfig 是原地可改且无版本的，只留 llm_config_id 事后查不出真正打分的模型。
     judge_snapshot = Column(JSON, nullable=True)
+    # 仅供后台 worker 使用的完整裁判运行配置（含 API key，不出现在 API 响应）。
+    # LLMConfig 是原地可改且无版本的，任务必须使用创建时的配置才能复现。
+    judge_runtime_snapshot = Column(JSON, nullable=True)
     # 评测口径指纹 = 数据 + 尺子 + 裁判。两个任务指纹相同才是严格可比的；
     # 不同则对比接口会列出具体变化维度，而不是把差异都算作被测系统的改进。
     eval_fingerprint = Column(String(64), nullable=True)
     # 创建任务时冻结工具目录，避免工具 schema 变化后历史 Trace Lint 结果无法复现。
     tool_registry_snapshot = Column(JSON, nullable=True)
+    # 创建任务时复制的行输入；执行阶段不再读取当前可变 DatasetRow.data。
+    dataset_snapshot = Column(JSON, nullable=True)
+    dataset_snapshot_digest = Column(String(64), nullable=True)
+    # 创建任务时冻结的 Judge 重采样次数；采样次数变化会改变评分稳定性和成本。
+    judge_samples = Column(Integer, nullable=True)
     # 执行评测的后端进程 PID：启动 recovery 时据此跳过仍在存活进程里运行的任务，
     # 避免 TestClient / 误启动的 lifespan 把运行中的任务误标失败
     worker_pid = Column(Integer, nullable=True)

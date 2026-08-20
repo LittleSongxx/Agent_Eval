@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "/home/song/code/Agent/eval/Agent_Eval/backend/scripts/cost_optimization_experiment.py", line 13, in <module>
-    from app.core.evaluation_engine import (
-    ...<4 lines>...
-    )
-ImportError: cannot import name 'FaithfulnessMetric' from 'app.core.evaluation_engine' (/home/song/code/Agent/eval/Agent_Eval/backend/app/core/evaluation_engine.py)

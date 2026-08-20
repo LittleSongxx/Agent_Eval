@@ -51,11 +51,16 @@ def normalize_agent_trace(trace: dict[str, Any], index: int = 0) -> dict[str, An
         raise AgentTraceValidationError(f"第 {index + 1} 条轨迹的 agent_trajectory 必须是数组")
 
     events = _normalize_events(raw_events, index) if raw_events is not None else []
-    trajectory = _normalize_trajectory(raw_trajectory, index) if raw_trajectory is not None else []
+    supplied_trajectory = _normalize_trajectory(raw_trajectory, index) if raw_trajectory is not None else []
+    trajectory = supplied_trajectory
 
     if events:
         derived_trajectory = _trajectory_from_events(events)
         if derived_trajectory:
+            if supplied_trajectory and _trajectory_signature(supplied_trajectory) != _trajectory_signature(derived_trajectory):
+                raise AgentTraceValidationError(
+                    f"第 {index + 1} 条轨迹同时提供的 events 与 agent_trajectory 内容冲突"
+                )
             trajectory = derived_trajectory
     if not trajectory:
         raise AgentTraceValidationError(
@@ -237,28 +242,53 @@ def _trajectory_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]
                 )
                 step += 1
             continue
+        if len(calls) > 1 and any(not call.get("id") for call in calls):
+            raise AgentTraceValidationError(
+                "同一 assistant event 包含并行工具调用时，每个 tool_call 必须带唯一 id"
+            )
         for call in calls:
             output = None
             is_error = False
-            fallback_index = None
+            candidates: list[int] = []
+            available_tool_indices: list[int] = []
             for later_index, later in enumerate(events[event_index + 1 :], start=event_index + 1):
+                if later["type"] == "assistant":
+                    # A tool result after the next assistant turn belongs to a
+                    # later call; considering it here creates false matches.
+                    break
                 if later["type"] != "tool":
                     continue
                 if later_index in used_tool_events:
                     continue
-                if fallback_index is None:
-                    fallback_index = later_index
+                available_tool_indices.append(later_index)
                 same_id = call.get("id") and later.get("tool_call_id") == call.get("id")
                 same_name = call.get("name") and later.get("name") == call.get("name")
-                if same_id or same_name:
-                    output = later.get("content")
-                    is_error = bool(later.get("is_error", False))
-                    used_tool_events.add(later_index)
+                if same_id:
+                    candidates = [later_index]
                     break
-            if output is None and fallback_index is not None:
-                output = events[fallback_index].get("content")
-                is_error = bool(events[fallback_index].get("is_error", False))
-                used_tool_events.add(fallback_index)
+                if not call.get("id") and same_name:
+                    candidates.append(later_index)
+            if not candidates and not call.get("id"):
+                remaining = available_tool_indices
+                if len(remaining) == 1:
+                    candidates = remaining
+                elif len(remaining) > 1:
+                    raise AgentTraceValidationError(
+                        f"工具 {call.get('name') or '<unknown>'} 缺少 call id，存在多个可能的返回结果"
+                    )
+            if call.get("id") and not candidates:
+                raise AgentTraceValidationError(
+                    f"工具 {call.get('name') or '<unknown>'} 的 call id {call.get('id')} 找不到对应返回结果"
+                )
+            if len(candidates) > 1:
+                raise AgentTraceValidationError(
+                    f"工具 {call.get('name') or '<unknown>'} 缺少 call id，无法唯一匹配返回结果"
+                )
+            if candidates:
+                matched_index = candidates[0]
+                output = events[matched_index].get("content")
+                is_error = bool(events[matched_index].get("is_error", False))
+                used_tool_events.add(matched_index)
             trajectory.append(
                 {
                     "step": step,
@@ -414,3 +444,17 @@ def _first_non_empty(data: dict[str, Any], *keys: str) -> Any:
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _trajectory_signature(trajectory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compare execution facts while ignoring formatting/default fields."""
+
+    return [
+        {
+            "tool": item.get("tool"),
+            "tool_input": item.get("tool_input"),
+            "tool_output": item.get("tool_output"),
+            "is_error": bool(item.get("is_error", False)),
+        }
+        for item in trajectory
+    ]

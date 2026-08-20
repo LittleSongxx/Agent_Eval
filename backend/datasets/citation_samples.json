@@ -7,7 +7,8 @@
       "Python 元组（tuple）是不可变的数据结构，使用圆括号 () 定义。一旦创建，就不能修改其中的元素。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "正确引用：两个引用都准确对应源文档"
+    "annotation": "正确引用：两个引用都准确对应源文档",
+    "sample_id": "citation-001"
   },
   {
     "user_input": "Python 字典如何使用？",
@@ -17,7 +18,8 @@
       "字典的键必须是不可变类型，如字符串、数字或元组，并且每个键必须是唯一的。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "部分错误：[2]引用说'键必须是唯一的'正确，但[1]说'字典是无序的'在Python 3.7+后已过时（字典现在是有序的）"
+    "annotation": "部分错误：[2]引用说'键必须是唯一的'正确，但[1]说'字典是无序的'在Python 3.7+后已过时（字典现在是有序的）",
+    "sample_id": "citation-002"
   },
   {
     "user_input": "如何在 Python 中处理异常？",
@@ -27,7 +29,8 @@
       "可以使用 else 块来处理没有发生异常时的代码，这个块会在 try 块正常执行后运行。"
     ],
     "expected_citation_accuracy": 0.5,
-    "annotation": "引用错位：[3]引用的finally块内容在文档中不存在（只有2个文档）"
+    "annotation": "引用错位：[3]引用的finally块内容在文档中不存在（只有2个文档）",
+    "sample_id": "citation-003"
   },
   {
     "user_input": "Python 中的装饰器是什么？",
@@ -37,7 +40,8 @@
       "使用@符号语法可以方便地应用装饰器。例如 @decorator_name 放在函数定义之前。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "部分错误：[1]两次引用都正确，但[2]只对应@符号语法，没有说装饰器嵌套"
+    "annotation": "部分错误：[1]两次引用都正确，但[2]只对应@符号语法，没有说装饰器嵌套",
+    "sample_id": "citation-004"
   },
   {
     "user_input": "Python 中如何创建类？",
@@ -47,7 +51,8 @@
       "__init__ 是一个特殊方法，称为构造函数，在创建对象时自动调用。self 参数代表类的实例本身。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确：所有引用都准确对应"
+    "annotation": "完全正确：所有引用都准确对应",
+    "sample_id": "citation-005"
   },
   {
     "user_input": "Python 的 GIL 是什么？",
@@ -57,7 +62,8 @@
       "GIL 的存在主要是为了简化 CPython 的内存管理实现，保护解释器内部状态的访问。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]多进程绕过GIL的内容不在文档中"
+    "annotation": "引用错位：[3]多进程绕过GIL的内容不在文档中",
+    "sample_id": "citation-006"
   },
   {
     "user_input": "Python 中的生成器是什么？",
@@ -67,7 +73,8 @@
       "生成器采用惰性计算（lazy evaluation），只在需要时才计算值，这使得它们非常节省内存，特别适合处理大数据集。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-007"
   },
   {
     "user_input": "Python 的 lambda 函数如何使用？",
@@ -77,7 +84,8 @@
       "lambda 函数只能包含一个表达式，不能包含语句或多行代码。如果需要复杂逻辑，应该使用 def 定义普通函数。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-008"
   },
   {
     "user_input": "Python 中的上下文管理器是什么？",
@@ -87,7 +95,8 @@
       "使用 with 语句处理文件时，即使发生异常，文件也会被正确关闭。这比手动调用 close() 更安全可靠。"
     ],
     "expected_citation_accuracy": 0.5,
-    "annotation": "引用错位：[3]不存在；文件操作内容在文档[2]中"
+    "annotation": "引用错位：[3]不存在；文件操作内容在文档[2]中",
+    "sample_id": "citation-009"
   },
   {
     "user_input": "Python 的 *args 和 **kwargs 是什么？",
@@ -97,7 +106,8 @@
       "*args 和 **kwargs 常用于编写灵活的函数，特别是在装饰器、包装器函数和需要转发参数的场景中。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-010"
   },
   {
     "user_input": "Python 的 is 和 == 有什么区别？",
@@ -107,7 +117,8 @@
       "在 Python 中，None 是一个单例对象，检查 None 时应该使用 'is None' 而不是 '== None'。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：None用is比较的内容在[2]，不是[3]"
+    "annotation": "引用错位：None用is比较的内容在[2]，不是[3]",
+    "sample_id": "citation-011"
   },
   {
     "user_input": "Python 的列表推导式如何使用？",
@@ -117,7 +128,8 @@
       "列表推导式可以包含 if 条件来过滤元素，也支持嵌套的 for 循环来处理多维数据结构。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-012"
   },
   {
     "user_input": "Python 的深拷贝和浅拷贝有什么区别？",
@@ -127,7 +139,8 @@
       "深拷贝（deep copy）递归地复制对象及其所有嵌套的对象。使用 copy.deepcopy() 可以创建深拷贝，这样修改副本不会影响原对象。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-013"
   },
   {
     "user_input": "Python 的 @property 装饰器如何使用？",
@@ -137,7 +150,8 @@
       "配合 @属性名.setter 和 @属性名.deleter 装饰器，可以定义属性的设置和删除行为，实现对属性访问的完整控制。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]不存在，'完整控制'在[2]中已提到"
+    "annotation": "引用错位：[3]不存在，'完整控制'在[2]中已提到",
+    "sample_id": "citation-014"
   },
   {
     "user_input": "Python 的 __name__ == '__main__' 是什么意思？",
@@ -147,7 +161,8 @@
       "使用 if __name__ == '__main__': 可以编写既能独立运行又能被导入的模块。这种模式下，测试代码只在直接运行时执行。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-015"
   },
   {
     "user_input": "Python 的 enumerate 函数如何使用？",
@@ -157,7 +172,8 @@
       "enumerate() 返回一个枚举对象，这是一个迭代器，可以转换为列表或在 for 循环中直接使用。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-016"
   },
   {
     "user_input": "Python 的 zip 函数如何使用？",
@@ -167,7 +183,8 @@
       "zip() 函数在最短的输入序列耗尽时停止。如果需要处理不等长的序列，可以使用 itertools.zip_longest()，它会用指定的填充值补齐较短的序列。"
     ],
     "expected_citation_accuracy": 0.5,
-    "annotation": "引用错位：[3]的内容实际在[2]中"
+    "annotation": "引用错位：[3]的内容实际在[2]中",
+    "sample_id": "citation-017"
   },
   {
     "user_input": "Python 的 map 函数如何使用？",
@@ -177,7 +194,8 @@
       "map() 可以接受多个可迭代对象，此时函数必须接受相应数量的参数。map() 会并行迭代所有序列。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]关于内存的内容不在文档中"
+    "annotation": "引用错位：[3]关于内存的内容不在文档中",
+    "sample_id": "citation-018"
   },
   {
     "user_input": "Python 的 filter 函数如何使用？",
@@ -187,7 +205,8 @@
       "filter() 接受两个参数：一个返回布尔值的函数和一个可迭代对象。函数返回 True 的元素会被保留，返回 False 的会被过滤掉。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-019"
   },
   {
     "user_input": "Python 的 reduce 函数如何使用？",
@@ -197,7 +216,8 @@
       "reduce() 函数在 Python 3 中被移到 functools 模块，使用前需要导入：from functools import reduce。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]初始值的内容不在文档中"
+    "annotation": "引用错位：[3]初始值的内容不在文档中",
+    "sample_id": "citation-020"
   },
   {
     "user_input": "Python 的 sorted 函数如何使用？",
@@ -207,7 +227,8 @@
       "sorted() 接受可选的 key 参数（用于指定排序依据的函数）和 reverse 参数（True 表示降序，False 表示升序，默认为 False）。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-021"
   },
   {
     "user_input": "Python 的 all 和 any 函数有什么区别？",
@@ -217,7 +238,8 @@
       "对于空序列，all() 返回 True（逻辑上，没有元素不满足条件），any() 返回 False（没有元素满足条件）。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-022"
   },
   {
     "user_input": "Python 的 isinstance 和 type 有什么区别？",
@@ -227,7 +249,8 @@
       "type() 函数返回对象的确切类型（类对象）。与 isinstance() 不同，type() 不考虑继承关系，只检查精确的类型。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]不存在，'不考虑继承'在[2]中"
+    "annotation": "引用错位：[3]不存在，'不考虑继承'在[2]中",
+    "sample_id": "citation-023"
   },
   {
     "user_input": "Python 的 staticmethod 和 classmethod 有什么区别？",
@@ -237,7 +260,8 @@
       "@classmethod 装饰器定义类方法，第一个参数自动传入类本身（约定命名为 cls）。类方法可以访问和修改类状态，常用于实现工厂方法模式。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]不存在，工厂模式在[2]末尾已提到"
+    "annotation": "引用错位：[3]不存在，工厂模式在[2]末尾已提到",
+    "sample_id": "citation-024"
   },
   {
     "user_input": "Python 的 super() 函数如何使用？",
@@ -247,7 +271,8 @@
       "在 Python 3 中，super() 不再需要传递类名和 self 参数，直接调用 super() 即可。Python 2 中需要写成 super(ClassName, self)。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]MRO的内容不在文档中"
+    "annotation": "引用错位：[3]MRO的内容不在文档中",
+    "sample_id": "citation-025"
   },
   {
     "user_input": "Python 的 __str__ 和 __repr__ 有什么区别？",
@@ -257,7 +282,8 @@
       "__repr__ 方法定义对象的'官方'字符串表示，目标是无歧义，理想情况下可以用于重新创建对象。如果没有定义 __str__，Python 会回退使用 __repr__。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-026"
   },
   {
     "user_input": "Python 的 __init__ 和 __new__ 有什么区别？",
@@ -267,7 +293,8 @@
       "__init__ 是实例方法，在 __new__ 返回实例后被调用，用于初始化实例的属性。__init__ 方法不应返回任何值（除了 None）。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-027"
   },
   {
     "user_input": "Python 的 with 语句如何自定义？",
@@ -277,7 +304,8 @@
       "__exit__ 方法在退出 with 块时调用，接收三个参数：异常类型、异常值和traceback。如果 __exit__ 返回 True，异常会被抑制。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-028"
   },
   {
     "user_input": "Python 的 __call__ 方法如何使用？",
@@ -287,7 +315,8 @@
       "__call__ 方法的应用场景包括：创建可调用对象、实现装饰器类、创建有状态的函数等。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]闭包的内容不在文档中"
+    "annotation": "引用错位：[3]闭包的内容不在文档中",
+    "sample_id": "citation-029"
   },
   {
     "user_input": "Python 的 __getitem__ 和 __setitem__ 如何使用？",
@@ -297,7 +326,8 @@
       "__setitem__ 方法使对象支持索引赋值。当使用 obj[key] = value 语法时，会调用 __setitem__ 方法。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]__delitem__的内容不在文档中"
+    "annotation": "引用错位：[3]__delitem__的内容不在文档中",
+    "sample_id": "citation-030"
   },
   {
     "user_input": "Python 的 __iter__ 和 __next__ 如何使用？",
@@ -307,7 +337,8 @@
       "__next__ 方法返回迭代器的下一个值。当没有更多值时，应该抛出 StopIteration 异常以终止迭代。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-031"
   },
   {
     "user_input": "Python 的 __len__ 和 __bool__ 有什么用？",
@@ -317,7 +348,8 @@
       "__bool__ 方法定义对象的布尔值。当对象用于布尔上下文（如 if 语句）时调用。如果没有定义 __bool__，Python 会尝试调用 __len__，长度为 0 视为 False。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]的内容在[2]末尾已说明"
+    "annotation": "引用错位：[3]的内容在[2]末尾已说明",
+    "sample_id": "citation-032"
   },
   {
     "user_input": "Python 的 __eq__ 和 __hash__ 有什么关系？",
@@ -327,7 +359,8 @@
       "__hash__ 方法返回对象的哈希值，这个值用于字典的键和集合的元素。可哈希对象必须满足：相等的对象有相同的哈希值。如果重写 __eq__ 却不重写 __hash__，对象会变成不可哈希的。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]的内容在[2]末尾已完整说明"
+    "annotation": "引用错位：[3]的内容在[2]末尾已完整说明",
+    "sample_id": "citation-033"
   },
   {
     "user_input": "Python 的 __getattr__ 和 __getattribute__ 有什么区别？",
@@ -337,7 +370,8 @@
       "__getattribute__ 方法在每次属性访问时都会被调用，无论属性是否存在。在其中访问属性时要使用 super().__getattribute__() 以避免无限递归。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]的递归警告在[2]中已提到"
+    "annotation": "引用错位：[3]的递归警告在[2]中已提到",
+    "sample_id": "citation-034"
   },
   {
     "user_input": "Python 的 @dataclass 装饰器有什么用？",
@@ -347,7 +381,8 @@
       "@dataclass 支持多个参数：frozen=True 使实例不可变，order=True 自动生成比较方法（__lt__、__le__ 等）。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]的order=True在[2]中已说明"
+    "annotation": "引用错位：[3]的order=True在[2]中已说明",
+    "sample_id": "citation-035"
   },
   {
     "user_input": "Python 的 asyncio 如何使用？",
@@ -357,7 +392,8 @@
       "asyncio.run() 是运行协程的简便方式（Python 3.7+），它会创建事件循环、运行协程并关闭循环。asyncio.create_task() 用于并发运行多个协程。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]的create_task在[2]中已说明"
+    "annotation": "引用错位：[3]的create_task在[2]中已说明",
+    "sample_id": "citation-036"
   },
   {
     "user_input": "Python 的 f-string 如何使用？",
@@ -367,7 +403,8 @@
       "f-string 可以在大括号 {} 中嵌入任意 Python 表达式。还支持格式说明符，如 {value:.2f} 保留两位小数，{text:>10} 右对齐 10 个字符。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]对齐的内容在[2]的示例中已包含"
+    "annotation": "引用错位：[3]对齐的内容在[2]的示例中已包含",
+    "sample_id": "citation-037"
   },
   {
     "user_input": "Python 的 namedtuple 如何使用？",
@@ -377,7 +414,8 @@
       "namedtuple 实例是不可变的，像元组一样。它非常适合用作轻量的数据记录，比完整的类占用更少内存。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]'比普通类更轻量'在[2]中已说明"
+    "annotation": "引用错位：[3]'比普通类更轻量'在[2]中已说明",
+    "sample_id": "citation-038"
   },
   {
     "user_input": "Python 的 Counter 如何使用？",
@@ -387,7 +425,8 @@
       "Counter 提供了便捷方法如 most_common(n) 返回最常见的 n 个元素。它还支持算术运算，如两个 Counter 对象可以相加、相减。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]算术运算在[2]末尾已说明"
+    "annotation": "引用错位：[3]算术运算在[2]末尾已说明",
+    "sample_id": "citation-039"
   },
   {
     "user_input": "Python 的 defaultdict 如何使用？",
@@ -397,7 +436,8 @@
       "创建 defaultdict 时需要传入一个可调用对象（工厂函数），如 int（默认值 0）、list（空列表）、set（空集合）等。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-040"
   },
   {
     "user_input": "Python 的 deque 如何使用？",
@@ -407,7 +447,8 @@
       "deque 提供了 append()、appendleft()、pop()、popleft() 等方法。可以在创建时指定 maxlen 参数，使其成为固定长度的循环队列。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]maxlen在[2]中已说明"
+    "annotation": "引用错位：[3]maxlen在[2]中已说明",
+    "sample_id": "citation-041"
   },
   {
     "user_input": "Python 的 ChainMap 如何使用？",
@@ -417,7 +458,8 @@
       "对 ChainMap 的修改操作（增删改）只作用于第一个字典。它常用于实现多层配置（如默认配置、用户配置、命令行参数）。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]'管理多层配置'在[2]中已说明"
+    "annotation": "引用错位：[3]'管理多层配置'在[2]中已说明",
+    "sample_id": "citation-042"
   },
   {
     "user_input": "Python 的 OrderedDict 如何使用？",
@@ -427,7 +469,8 @@
       "OrderedDict 的 move_to_end() 方法可以将指定的键移到末尾（或开头），popitem() 可以按 LIFO 或 FIFO 顺序删除。"
     ],
     "expected_citation_accuracy": 0.5,
-    "annotation": "引用错位：[3]两次引用的内容都在[2]中，不在[3]（不存在）"
+    "annotation": "引用错位：[3]两次引用的内容都在[2]中，不在[3]（不存在）",
+    "sample_id": "citation-043"
   },
   {
     "user_input": "Python 的 heapq 模块如何使用？",
@@ -437,7 +480,8 @@
       "主要函数包括：heappush() 添加元素并维护堆性质，heappop() 弹出并返回最小元素，heapify() 将普通列表原地转换为堆。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]heapify在[2]中已说明"
+    "annotation": "引用错位：[3]heapify在[2]中已说明",
+    "sample_id": "citation-044"
   },
   {
     "user_input": "Python 的 bisect 模块如何使用？",
@@ -447,7 +491,8 @@
       "bisect_left() 和 bisect_right() 查找元素应该插入的位置。insort_left() 和 insort_right() 在插入元素的同时保持列表的有序性。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-045"
   },
   {
     "user_input": "Python 的 itertools.chain 如何使用？",
@@ -457,7 +502,8 @@
       "chain.from_iterable() 接受一个产生可迭代对象的可迭代对象（迭代器的迭代器），常用于扁平化嵌套列表。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]'扁平化'在[2]中已说明"
+    "annotation": "引用错位：[3]'扁平化'在[2]中已说明",
+    "sample_id": "citation-046"
   },
   {
     "user_input": "Python 的 itertools.product 如何使用？",
@@ -467,7 +513,8 @@
       "product() 接受 repeat 关键字参数，product(A, repeat=3) 等价于 product(A, A, A)，用于生成指定长度的排列组合。"
     ],
     "expected_citation_accuracy": 1.0,
-    "annotation": "完全正确"
+    "annotation": "完全正确",
+    "sample_id": "citation-047"
   },
   {
     "user_input": "Python 的 itertools.combinations 如何使用？",
@@ -477,7 +524,8 @@
       "itertools.combinations_with_replacement() 类似 combinations，但允许单个元素重复使用。itertools.permutations() 生成排列（考虑顺序）而非组合。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]permutations在[2]中已说明"
+    "annotation": "引用错位：[3]permutations在[2]中已说明",
+    "sample_id": "citation-048"
   },
   {
     "user_input": "Python 的 functools.lru_cache 如何使用？",
@@ -487,7 +535,8 @@
       "lru_cache 接受 maxsize 参数指定最大缓存条目数（默认 128）。设置 maxsize=None 可以创建无限缓存。被装饰的函数会获得 cache_info() 和 cache_clear() 方法。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]cache_info在[2]末尾已说明"
+    "annotation": "引用错位：[3]cache_info在[2]末尾已说明",
+    "sample_id": "citation-049"
   },
   {
     "user_input": "Python 的 functools.partial 如何使用？",
@@ -497,6 +546,7 @@
       "partial() 返回的是一个 partial 对象，这是一个可调用对象。它常用于需要固定某些参数的场景，如回调函数或传递给高阶函数。"
     ],
     "expected_citation_accuracy": 0.67,
-    "annotation": "引用错位：[3]'回调函数和高阶函数'在[2]中已说明"
+    "annotation": "引用错位：[3]'回调函数和高阶函数'在[2]中已说明",
+    "sample_id": "citation-050"
   }
 ]

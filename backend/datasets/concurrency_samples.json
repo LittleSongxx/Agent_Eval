@@ -1,0 +1,32 @@
+[
+  {
+    "user_input": "Python 中列表和元组有什么区别？",
+    "response": "列表是可变的，元组是不可变的。",
+    "retrieved_contexts": ["Python列表是可变的数据结构", "元组是不可变的"],
+    "reference": "列表可变，元组不可变"
+  },
+  {
+    "user_input": "什么是深度学习？",
+    "response": "深度学习是机器学习的一个分支，使用多层神经网络。",
+    "retrieved_contexts": ["深度学习使用神经网络", "属于机器学习领域"],
+    "reference": "深度学习是使用神经网络的机器学习方法"
+  },
+  {
+    "user_input": "如何优化SQL查询性能？",
+    "response": "可以添加索引、优化查询语句、避免全表扫描。",
+    "retrieved_contexts": ["索引可以加速查询", "避免SELECT *", "全表扫描效率低"],
+    "reference": "添加索引、优化查询语句"
+  },
+  {
+    "user_input": "React Hooks 的优势是什么？",
+    "response": "Hooks 让函数组件也能使用状态和生命周期特性。",
+    "retrieved_contexts": ["Hooks用于函数组件", "可以使用状态管理"],
+    "reference": "函数组件使用状态和生命周期"
+  },
+  {
+    "user_input": "什么是RESTful API？",
+    "response": "RESTful API 是一种基于HTTP协议的API设计风格。",
+    "retrieved_contexts": ["REST基于HTTP", "使用标准HTTP方法"],
+    "reference": "基于HTTP的API设计风格"
+  }
+]

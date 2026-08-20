@@ -1922,7 +1922,20 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         dataset = task.dataset
         scenario = task.scenario
         scenario_snapshot = task.scenario_snapshot or {}
-        llm_config = task.llm_config
+        # New tasks carry an immutable runtime copy.  Only legacy tasks fall
+        # back to the mutable relationship, and are explicitly marked in the
+        # log below so their evidence is not mistaken for a frozen run.
+        from types import SimpleNamespace
+
+        runtime_snapshot = task.judge_runtime_snapshot or {}
+        primary_runtime = runtime_snapshot.get("primary") if isinstance(runtime_snapshot, dict) else None
+        llm_config = (
+            SimpleNamespace(**primary_runtime)
+            if isinstance(primary_runtime, dict) and primary_runtime.get("model_name")
+            else task.llm_config
+        )
+        panel_runtime = runtime_snapshot.get("panel") if isinstance(runtime_snapshot, dict) else None
+        panel_runtime = panel_runtime if isinstance(panel_runtime, list) else []
         evaluation_mode = task.evaluation_mode or "offline"
 
         scenario_metrics = snapshot_to_scenario_metrics(scenario_snapshot)
@@ -1935,13 +1948,47 @@ async def run_evaluation(task_id: int, session_factory) -> None:
             for sm in scenario_metrics:
                 _ = sm.metric_definition
 
-        dataset_rows: list[DatasetRow] = (
+        current_dataset_rows: list[DatasetRow] = (
             db.query(DatasetRow)
             .filter(DatasetRow.dataset_id == dataset.id)
             .order_by(DatasetRow.row_index)
             .all()
         )
-        total_rows = len(dataset_rows)
+        frozen_rows = task.dataset_snapshot
+        if isinstance(frozen_rows, list):
+            # Keep ORM rows for FK/result persistence, but take the evaluated
+            # payload exclusively from the task snapshot.
+            rows_by_index = {row.row_index: row for row in current_dataset_rows}
+            snapshot_indices = [int(item.get("row_index", index)) for index, item in enumerate(frozen_rows)]
+            missing_indices = [index for index in snapshot_indices if index not in rows_by_index]
+            if missing_indices:
+                raise RuntimeError(
+                    "任务快照中的数据行已被删除，无法写入结果；缺失 row_index: "
+                    + ", ".join(str(index) for index in missing_indices[:20])
+                )
+            replaced_indices = [
+                int(item.get("row_index", index))
+                for index, item in enumerate(frozen_rows)
+                if item.get("id") is not None
+                and rows_by_index[int(item.get("row_index", index))].id != item.get("id")
+            ]
+            if replaced_indices:
+                raise RuntimeError(
+                    "任务快照中的数据行已被替换，无法写入结果；row_index: "
+                    + ", ".join(str(index) for index in replaced_indices[:20])
+                )
+            dataset_rows = current_dataset_rows
+            row_payloads_from_snapshot = [
+                (int(item.get("row_index", index)), dict(item.get("data") or {}))
+                for index, item in enumerate(frozen_rows)
+            ]
+            snapshot_is_frozen = True
+        else:
+            dataset_rows = current_dataset_rows
+            rows_by_index = {row.row_index: row for row in dataset_rows}
+            row_payloads_from_snapshot = [(row.row_index, dict(row.data or {})) for row in dataset_rows]
+            snapshot_is_frozen = False
+        total_rows = len(row_payloads_from_snapshot)
         if total_rows == 0:
             task.status = "failed"
             task.total_rows = 0
@@ -1960,6 +2007,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         _log(task, "========== 评测任务启动 ==========")
         _log(task, f"任务: {task.name} (ID={task_id})")
         _log(task, f"数据集: {dataset.name} ({total_rows} 条)")
+        _log(task, "输入快照: 已冻结" if snapshot_is_frozen else "输入快照: 旧任务兼容回退（不可严格复现）")
         _log(task, f"场景: {scenario_snapshot.get('name') or scenario.name}")
         _log(task, f"评测模式: {'接口实时评测' if evaluation_mode == 'endpoint' else '已有结果评测'}")
         _log(task, f"评判 LLM: {llm_config.model_name} @ {llm_config.api_base_url}")
@@ -1981,15 +2029,20 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         # 并发跑多行时每个并发槽位需要一整套独立裁判客户端（见下方 bundle 池），
         # 所以这里把构建成功的配置留下来，而不只留客户端实例
         panel_configs: list[t.Any] = []
-        for panel_config_id in list(task.judge_panel or []):
-            panel_config = db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first()
-            if panel_config is None:
-                _log(task, f"⚠ 裁判配置 #{panel_config_id} 不存在，已跳过")
-                continue
+        if panel_runtime:
+            panel_configs = [SimpleNamespace(**item) for item in panel_runtime if isinstance(item, dict)]
+        elif task.judge_panel:
+            # Compatibility path for tasks created before runtime snapshots.
+            for panel_config_id in list(task.judge_panel or []):
+                panel_config = db.query(LLMConfig).filter(LLMConfig.id == panel_config_id).first()
+                if panel_config is None:
+                    _log(task, f"⚠ 裁判配置 #{panel_config_id} 不存在，已跳过")
+                    continue
+                panel_configs.append(panel_config)
+        for panel_config in panel_configs:
             try:
                 panel_judges.append(OpenAIJudgeClient(panel_config))
-                panel_judge_names.append(panel_config.name or f"judge-{panel_config_id}")
-                panel_configs.append(panel_config)
+                panel_judge_names.append(panel_config.name or f"judge-{getattr(panel_config, 'id', 'panel')}")
                 _log(task, f"✓ 附加裁判 [{panel_config.name}] ({panel_config.model_name}) 构建成功")
             except Exception as exc:
                 _log(task, f"⚠ 裁判 [{panel_config.name}] 构建失败: {str(exc)[:200]}")
@@ -2036,7 +2089,7 @@ async def run_evaluation(task_id: int, session_factory) -> None:
         task_token_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         row_latencies_ms: list[int] = []
         metric_latencies_ms: dict[str, list[int]] = {}
-        rows_by_index = {row.row_index: row for row in dataset_rows}
+        write_back_count = 0
         wall_clock_started = time.time()
 
         cancel_event = asyncio.Event()
@@ -2146,8 +2199,8 @@ async def run_evaluation(task_id: int, session_factory) -> None:
 
         # ORM 属性在协程里访问可能触发懒加载，所以行数据在调度侧先取成纯 dict
         row_payloads = [
-            (position, row.row_index, dict(row.data or {}))
-            for position, row in enumerate(dataset_rows, start=1)
+            (position, row_index, payload)
+            for position, (row_index, payload) in enumerate(row_payloads_from_snapshot, start=1)
         ]
 
         watcher = asyncio.create_task(_watch_for_cancel())
@@ -2180,8 +2233,19 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     and frozen_save_mode == "write_back"
                     and extracted_fields
                 ):
-                    dataset_row.data = {**(dataset_row.data or {}), **extracted_fields}
+                    before_data = dict(dataset_row.data or {})
+                    merged_data = {**before_data, **extracted_fields}
+                    data_changed = merged_data != before_data
+                    dataset_row.data = merged_data
+                    before_schema = list(dataset.field_schema or [])
                     _ensure_dataset_schema_fields(dataset, extracted_fields)
+                    schema_changed = list(dataset.field_schema or []) != before_schema
+                    if data_changed or schema_changed:
+                        # write_back is a dataset mutation just like the
+                        # dataset API's row operations. Without this bump the
+                        # next task could reuse an old version/fingerprint.
+                        dataset.version = (dataset.version or 1) + 1
+                        write_back_count += 1
 
                 _persist_row_result(
                     db,
@@ -2286,6 +2350,8 @@ async def run_evaluation(task_id: int, session_factory) -> None:
                     f" (p95 {latency['slowest_metric']['p95_ms']}ms)",
                 )
             _log(task, "========== 评测完成 ==========")
+            if write_back_count:
+                _log(task, f"接口结果已回写 {write_back_count} 行，数据集版本已递增")
             db.commit()
             _broadcast_progress(task)
 

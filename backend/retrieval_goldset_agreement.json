@@ -1,7 +1,25 @@
 {
   "provenance": {
+    "generated_at_utc": "2026-08-20T09:22:37Z",
     "script": "scripts/compute_goldset_agreement.py",
+    "git_commit": "3492e042b5443b64c002d07f34404dcf587f7410",
+    "dataset": "retrieval_bm25_report.json",
+    "dataset_sha256": "4c064d262ab235b068730313df9abf7eececcf62cda021a67cf9f17a5c121c03",
+    "sample_count": 25,
+    "model": "none (deterministic retrieval post-processing)",
+    "python": "3.13.5",
+    "command": [
+      "/home/song/code/Agent/eval/Agent_Eval/backend/scripts/compute_goldset_agreement.py",
+      "--report",
+      "retrieval_bm25_report.json",
+      "--annotations",
+      "scripts/retrieval_goldset_annotations.json",
+      "--out",
+      "retrieval_goldset_agreement.json",
+      "--overwrite"
+    ],
     "scenario": "无关全部 + 难负例全部",
+    "scenario_index": -1,
     "annotations": {
       "annotator": "人工黄金集：Claude 独立判定初标 + 用户逐条人工严格复核，25/25 一致，人工审核确认为最终真值",
       "date": "2026-08-06",
@@ -10,6 +28,7 @@
       "source": "retrieval_bm25_report.json 最重压力场景（无关 26 + 同域难负例 10，库 42）逐条 detail + chunk 全文比对",
       "script_used": "docs/检索侧黄金集标注表.md 逐条人工判断记录（由 scripts/make_goldset_worksheet.py 生成）"
     },
+    "annotations_sha256": "589f575e844f49cfa78ec6ca0bf3637e5fcc686733a410929186d5d823eb218f",
     "k": 5
   },
   "verdict_distribution": {
@@ -33,9 +52,12 @@
   "rows": [
     {
       "row": 1,
+      "sample_id": null,
       "query": "云购商城的三级售后保障分别是什么？",
       "kind": "correct",
-      "gold": "doc-2-chunk-0",
+      "gold": [
+        "doc-2-chunk-0"
+      ],
       "expected_hits": [
         "doc-2-chunk-0"
       ],
@@ -46,9 +68,12 @@
     },
     {
       "row": 2,
+      "sample_id": null,
       "query": "7天无理由退货的起算时间是什么时候？",
       "kind": "correct",
-      "gold": "doc-2-chunk-0",
+      "gold": [
+        "doc-2-chunk-0"
+      ],
       "expected_hits": [
         "doc-2-chunk-0"
       ],
@@ -59,9 +84,12 @@
     },
     {
       "row": 3,
+      "sample_id": null,
       "query": "申请7天无理由退货对商品状态有什么要求？",
       "kind": "correct",
-      "gold": "doc-2-chunk-0",
+      "gold": [
+        "doc-2-chunk-0"
+      ],
       "expected_hits": [
         "doc-2-chunk-0"
       ],
@@ -72,9 +100,12 @@
     },
     {
       "row": 4,
+      "sample_id": null,
       "query": "已激活的手机数码产品是否支持7天无理由退货？",
       "kind": "correct",
-      "gold": "doc-2-chunk-0",
+      "gold": [
+        "doc-2-chunk-0"
+      ],
       "expected_hits": [
         "doc-2-chunk-0"
       ],
@@ -85,9 +116,12 @@
     },
     {
       "row": 5,
+      "sample_id": null,
       "query": "用户提交退货申请后，需要在多长时间内将商品寄回？",
       "kind": "correct",
-      "gold": "doc-3-chunk-0",
+      "gold": [
+        "doc-3-chunk-0"
+      ],
       "expected_hits": [
         "doc-3-chunk-0"
       ],
@@ -98,9 +132,12 @@
     },
     {
       "row": 6,
+      "sample_id": null,
       "query": "商家完成退货验收后，退款会在多久内退回？",
       "kind": "correct",
-      "gold": "doc-3-chunk-0",
+      "gold": [
+        "doc-3-chunk-0"
+      ],
       "expected_hits": [
         "doc-3-chunk-0",
         "doc-6-chunk-0"
@@ -112,9 +149,12 @@
     },
     {
       "row": 7,
+      "sample_id": null,
       "query": "商家在什么情况下可以拒绝退货？",
       "kind": "correct",
-      "gold": "doc-3-chunk-0",
+      "gold": [
+        "doc-3-chunk-0"
+      ],
       "expected_hits": [
         "doc-3-chunk-0"
       ],
@@ -125,9 +165,12 @@
     },
     {
       "row": 8,
+      "sample_id": null,
       "query": "商家拒绝退货后，用户有哪些处理方式可以选择？",
       "kind": "correct",
-      "gold": "doc-3-chunk-0",
+      "gold": [
+        "doc-3-chunk-0"
+      ],
       "expected_hits": [
         "doc-3-chunk-0"
       ],
@@ -138,9 +181,12 @@
     },
     {
       "row": 9,
+      "sample_id": null,
       "query": "非人为损坏的商品在保修期内维修是否收费？保修期是多长时间？",
       "kind": "correct",
-      "gold": "doc-4-chunk-0",
+      "gold": [
+        "doc-4-chunk-0"
+      ],
       "expected_hits": [
         "doc-4-chunk-0"
       ],
@@ -151,9 +197,12 @@
     },
     {
       "row": 10,
+      "sample_id": null,
       "query": "维修周期一般是多久？复杂故障最长需要多长时间？",
       "kind": "hallucinated",
-      "gold": "doc-4-chunk-0",
+      "gold": [
+        "doc-4-chunk-0"
+      ],
       "expected_hits": [
         "doc-4-chunk-0"
       ],
@@ -164,9 +213,12 @@
     },
     {
       "row": 11,
+      "sample_id": null,
       "query": "维修期间可以申请备用机吗？有什么限制条件？",
       "kind": "hallucinated",
-      "gold": "doc-4-chunk-0",
+      "gold": [
+        "doc-4-chunk-0"
+      ],
       "expected_hits": [
         "doc-4-chunk-0"
       ],
@@ -177,9 +229,12 @@
     },
     {
       "row": 12,
+      "sample_id": null,
       "query": "超过保修期的商品如何维修？维修前会如何处理报价？",
       "kind": "hallucinated",
-      "gold": "doc-4-chunk-0",
+      "gold": [
+        "doc-4-chunk-0"
+      ],
       "expected_hits": [
         "doc-4-chunk-0"
       ],
@@ -190,9 +245,12 @@
     },
     {
       "row": 13,
+      "sample_id": null,
       "query": "生鲜食品出现质量问题时，用户需要在多长时间内提供凭证？需要提供哪些凭证？",
       "kind": "hallucinated",
-      "gold": "doc-5-chunk-0",
+      "gold": [
+        "doc-5-chunk-0"
+      ],
       "expected_hits": [
         "doc-5-chunk-0"
       ],
@@ -203,9 +261,12 @@
     },
     {
       "row": 14,
+      "sample_id": null,
       "query": "海外购商品申请无理由退货时，用户需要承担哪些额外费用？是否支持15天换货？",
       "kind": "hallucinated",
-      "gold": "doc-5-chunk-0",
+      "gold": [
+        "doc-5-chunk-0"
+      ],
       "expected_hits": [
         "doc-5-chunk-0"
       ],
@@ -216,9 +277,12 @@
     },
     {
       "row": 15,
+      "sample_id": null,
       "query": "用户对售后结果存在争议时，应在多长时间内申请平台介入？平台多久给出仲裁结果？",
       "kind": "hallucinated",
-      "gold": "doc-5-chunk-0",
+      "gold": [
+        "doc-5-chunk-0"
+      ],
       "expected_hits": [
         "doc-5-chunk-0"
       ],
@@ -229,9 +293,12 @@
     },
     {
       "row": 16,
+      "sample_id": null,
       "query": "平台仲裁的依据包括哪些材料？用户对仲裁结果不满可以如何处理？",
       "kind": "hallucinated",
-      "gold": "doc-5-chunk-0",
+      "gold": [
+        "doc-5-chunk-0"
+      ],
       "expected_hits": [
         "doc-5-chunk-0"
       ],
@@ -242,9 +309,12 @@
     },
     {
       "row": 17,
+      "sample_id": null,
       "query": "签收后多少天内可以申请售后？",
       "kind": "hallucinated",
-      "gold": "doc-6-chunk-0",
+      "gold": [
+        "doc-6-chunk-0"
+      ],
       "expected_hits": [
         "doc-6-chunk-0"
       ],
@@ -255,9 +325,12 @@
     },
     {
       "row": 18,
+      "sample_id": null,
       "query": "超过30天售后申请时效后还能申请售后吗？",
       "kind": "truncated",
-      "gold": "doc-6-chunk-0",
+      "gold": [
+        "doc-6-chunk-0"
+      ],
       "expected_hits": [
         "doc-6-chunk-0"
       ],
@@ -268,9 +341,12 @@
     },
     {
       "row": 19,
+      "sample_id": null,
       "query": "商家验收通过后，退款一般多久到账？",
       "kind": "truncated",
-      "gold": "doc-6-chunk-0",
+      "gold": [
+        "doc-6-chunk-0"
+      ],
       "expected_hits": [
         "doc-6-chunk-0",
         "doc-3-chunk-0"
@@ -282,9 +358,12 @@
     },
     {
       "row": 20,
+      "sample_id": null,
       "query": "使用微信支付退款，通常多久到账？",
       "kind": "truncated",
-      "gold": "doc-6-chunk-0",
+      "gold": [
+        "doc-6-chunk-0"
+      ],
       "expected_hits": [
         "doc-6-chunk-0"
       ],
@@ -295,9 +374,12 @@
     },
     {
       "row": 21,
+      "sample_id": null,
       "query": "非保价商品可以申请差价补偿吗？",
       "kind": "truncated",
-      "gold": "doc-7-chunk-0",
+      "gold": [
+        "doc-7-chunk-0"
+      ],
       "expected_hits": [
         "doc-7-chunk-0"
       ],
@@ -308,9 +390,12 @@
     },
     {
       "row": 22,
+      "sample_id": null,
       "query": "退货时赠品需要一起退回吗？",
       "kind": "truncated",
-      "gold": "doc-7-chunk-0",
+      "gold": [
+        "doc-7-chunk-0"
+      ],
       "expected_hits": [
         "doc-7-chunk-0"
       ],
@@ -321,9 +406,12 @@
     },
     {
       "row": 23,
+      "sample_id": null,
       "query": "退货时如果没有将赠品一并寄回会怎样？",
       "kind": "truncated",
-      "gold": "doc-7-chunk-0",
+      "gold": [
+        "doc-7-chunk-0"
+      ],
       "expected_hits": [
         "doc-7-chunk-0"
       ],
@@ -334,9 +422,12 @@
     },
     {
       "row": 24,
+      "sample_id": null,
       "query": "签收商品时发现商品损坏但外包装完好，应该怎么做？",
       "kind": "truncated",
-      "gold": "doc-7-chunk-0",
+      "gold": [
+        "doc-7-chunk-0"
+      ],
       "expected_hits": [
         "doc-7-chunk-0"
       ],
@@ -347,9 +438,12 @@
     },
     {
       "row": 25,
+      "sample_id": null,
       "query": "已经签收的商品发现损坏，需要在多长时间内反馈？",
       "kind": "truncated",
-      "gold": "doc-7-chunk-0",
+      "gold": [
+        "doc-7-chunk-0"
+      ],
       "expected_hits": [
         "doc-7-chunk-0"
       ],

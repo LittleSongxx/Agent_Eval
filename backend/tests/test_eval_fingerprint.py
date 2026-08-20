@@ -190,6 +190,20 @@ def test_judge_snapshot_never_contains_api_key():
     assert snapshot["judge_panel"] == [4, 5]
 
 
+def test_judge_panel_snapshot_records_model_without_secret():
+    primary = SimpleNamespace(
+        id=1, name="Primary", provider="p", api_base_url="u", api_key="primary-key",
+        model_name="qwen-plus", temperature=0.01, max_tokens=1024,
+    )
+    panel = SimpleNamespace(
+        id=4, name="Panel", provider="p", api_base_url="u2", api_key="panel-key",
+        model_name="qwen-max", temperature=0.2, max_tokens=2048,
+    )
+    snapshot = build_judge_snapshot(primary, [4], [panel])
+    assert snapshot["judge_panel_snapshots"][0]["model_name"] == "qwen-max"
+    assert "api_key" not in snapshot["judge_panel_snapshots"][0]
+
+
 # --------------------------------------------------------------------------
 # 指纹
 # --------------------------------------------------------------------------
@@ -250,6 +264,47 @@ def test_fingerprint_changes_when_judge_model_changes():
     assert _fingerprint(judge=other_judge) != _fingerprint()
 
 
+def test_fingerprint_changes_when_panel_model_changes():
+    primary = SimpleNamespace(
+        id=1, name="Primary", provider="p", api_base_url="u", api_key="k",
+        model_name="qwen-plus", temperature=0.01, max_tokens=1024,
+    )
+    panel_a = SimpleNamespace(
+        id=4, name="Panel", provider="p", api_base_url="u", api_key="k",
+        model_name="qwen-plus", temperature=0.01, max_tokens=1024,
+    )
+    panel_b = SimpleNamespace(
+        id=4, name="Panel", provider="p", api_base_url="u", api_key="k",
+        model_name="qwen-max", temperature=0.01, max_tokens=1024,
+    )
+    scenario = build_scenario_snapshot(_fake_scenario())
+    assert compute_eval_fingerprint(
+        scenario, build_judge_snapshot(primary, [4], [panel_a]), 1, 1
+    ) != compute_eval_fingerprint(
+        scenario, build_judge_snapshot(primary, [4], [panel_b]), 1, 1
+    )
+
+
+def test_fingerprint_changes_when_same_version_row_content_moves():
+    """A direct JSON edit must not hide behind an unchanged Dataset.version."""
+    from app.core.scenario_snapshot import dataset_snapshot_digest
+
+    judge = build_judge_snapshot(
+        SimpleNamespace(
+            id=1, name="Judge", provider="p", api_base_url="u", api_key="k",
+            model_name="qwen-plus", temperature=0.01, max_tokens=1024,
+        )
+    )
+    rows_a = [{"id": 1, "row_index": 0, "data": {"response": "old"}}]
+    rows_b = [{"id": 1, "row_index": 0, "data": {"response": "new"}}]
+    assert dataset_snapshot_digest(rows_a) != dataset_snapshot_digest(rows_b)
+    assert compute_eval_fingerprint(
+        build_scenario_snapshot(_fake_scenario()), judge, 1, 1, dataset_snapshot=rows_a
+    ) != compute_eval_fingerprint(
+        build_scenario_snapshot(_fake_scenario()), judge, 1, 1, dataset_snapshot=rows_b
+    )
+
+
 def test_fingerprint_ignores_judge_config_rename():
     """改配置显示名不影响打分，不该让历史任务显示为不可比。"""
     renamed = build_judge_snapshot(
@@ -281,6 +336,7 @@ def test_fingerprint_reacts_to_prompt_manager_edit(monkeypatch):
 def test_describe_fingerprint_diff_names_changed_dimensions():
     baseline = {
         "dataset_version": 1,
+        "judge_samples": 1,
         "judge_snapshot": build_judge_snapshot(
             SimpleNamespace(
                 id=1, name="J", provider="p", api_base_url="u",
@@ -291,6 +347,7 @@ def test_describe_fingerprint_diff_names_changed_dimensions():
     }
     current = {
         "dataset_version": 2,
+        "judge_samples": 3,
         "judge_snapshot": build_judge_snapshot(
             SimpleNamespace(
                 id=1, name="J", provider="p", api_base_url="u",
@@ -305,6 +362,7 @@ def test_describe_fingerprint_diff_names_changed_dimensions():
     changed = describe_fingerprint_diff(current, baseline)
 
     assert "dataset_version" in changed
+    assert "judge.samples" in changed
     assert "judge.model_name" in changed
     assert "criteria.answer_relevancy" in changed
     assert "threshold.answer_relevancy" in changed

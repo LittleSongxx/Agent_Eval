@@ -69,14 +69,19 @@ class EvalTaskBrief(BaseModel):
     response_mapping: Optional[Dict[str, Any]] = None
     result_save_mode: Optional[str] = "task_only"
     judge_panel: Optional[List[int]] = None
+    judge_snapshot: Optional[Dict[str, Any]] = None
     dataset_version: Optional[int] = None
     tool_registry_snapshot: Optional[List[Dict[str, Any]]] = None
+    dataset_snapshot_digest: Optional[str] = None
+    eval_fingerprint: Optional[str] = None
+    judge_samples: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
     def hide_target_config_secrets(self):
         self.target_config = redact_sensitive_mapping(self.target_config)
+        self.judge_snapshot = redact_sensitive_mapping(self.judge_snapshot)
         return self
 
 

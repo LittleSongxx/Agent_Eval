@@ -54,6 +54,10 @@ Agent events / trajectory
 
 规范化后会得到 `user_input`、`response`、`tool_calls`、`agent_trajectory`、`available_tools` 等通用字段。导入会先全量校验，再一次性写入；重复轨迹按规范化内容去重，并递增数据集版本。
 
+一致性约束：同一请求同时提供 `events` 和 `agent_trajectory` 时，两者的工具、参数、返回值必须一致，否则拒绝导入；一个 assistant event 发起多个并行工具调用时，每个调用必须带唯一 `id`，避免把同名返回结果静默配错。
+
+评测任务创建时还会复制数据行和 Judge 运行参数。任务执行优先使用这份快照；数据集或 LLM 配置在排队期间的修改不会改变已创建任务的输入口径。
+
 ## 轨迹指标
 
 Agent 预设现在包含：

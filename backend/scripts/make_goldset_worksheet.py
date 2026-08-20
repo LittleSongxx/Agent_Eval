@@ -1,7 +1,8 @@
 """生成检索侧黄金集标注表（docs/检索侧黄金集标注表.md）。
 
-输入：retrieval_bm25_report.json 最重压力场景的逐条检索 detail +
-      retrieval_goldset_annotations.json（独立判定结果）。
+输入：retrieval_bm25_report.json 选定场景的逐条检索 detail +
+      retrieval_goldset_annotations.json（独立判定结果）。支持任意行数；
+      有稳定 sample_id 时优先按 sample_id 对齐，否则兼容历史 1-based 行号。
 输出：markdown 标注表——每条查询 + top-5 检索结果（含 chunk 文本摘要）+ 判定。
 
 说明：判定列来自 scripts/retrieval_goldset_annotations.json——人工黄金集
@@ -30,11 +31,18 @@ def main() -> int:
                         help="人工黄金集标注 JSON（默认 scripts/retrieval_goldset_annotations.json）")
     parser.add_argument("--out", type=pathlib.Path, default=OUT,
                         help="输出标注表（默认 docs/检索侧黄金集标注表.md）")
+    parser.add_argument("--scenario-index", type=int, default=-1,
+                        help="从 report.results 选择场景的下标（默认 -1，即最后一个）")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="允许覆盖已有标注表；默认保护已有人工记录")
     args = parser.parse_args()
 
     rep = json.loads(args.report.read_text(encoding="utf-8"))
     # 最重压力场景 = 无关全部 + 难负例全部（库 42）
-    scenario = rep["results"][-1]
+    try:
+        scenario = rep["results"][args.scenario_index]
+    except (KeyError, IndexError) as exc:
+        raise SystemExit(f"scenario-index 越界或报告缺少 results: {args.scenario_index}") from exc
 
     from app.core.database import SessionLocal
     from app.models.rag_dataset_job import RagDatasetChunk
@@ -52,7 +60,6 @@ def main() -> int:
         db.close()
 
     # 干扰语料文本（与 compare_ragas_nonllm 相同的 preamble 清洗），供标注者判断
-    import re
     from scripts.compare_ragas_nonllm import _load_corpus_chunks, _strip_fixture_preamble
 
     _FIXTURES = pathlib.Path(__file__).resolve().parent / "_fixtures"
@@ -70,6 +77,13 @@ def main() -> int:
 
     annotations = json.loads(args.annotations.read_text(encoding="utf-8"))["annotations"]
 
+    def annotation_for(row: dict, row_number: int) -> dict:
+        sample_id = row.get("sample_id")
+        value = annotations.get(sample_id) if sample_id else None
+        if value is None:
+            value = annotations.get(str(row_number), {})
+        return value if isinstance(value, dict) else {}
+
     lines = [
         "# 检索侧黄金集标注表",
         "",
@@ -83,14 +97,14 @@ def main() -> int:
         "答案来源（会误导回答）。",
         "> 若后续人工复核，覆盖该 JSON 的 `annotations` 字段后重跑本脚本即可。",
         "",
-        "| # | 查询 | 类别 | 金标 | 检索 top-5（ID + 摘要） | 判定 |",
-        "|---|------|------|------|----------------------|------|",
+        "| # | sample_id | 查询 | 类别 | 金标 | 检索 top-5（ID + 摘要） | 判定 |",
+        "|---|-----------|------|------|------|----------------------|------|",
     ]
     for i, row in enumerate(scenario["detail"], 1):
         retrieved = "; ".join(
             f"{rid}:{short(chunks.get(rid, '?'))}" for rid in row["retrieved"]
         )
-        a = annotations.get(str(i), {})
+        a = annotation_for(row, i)
         verdict = a.get("verdict", "")
         if verdict == "Y":
             verdict_display = "✅ Y"
@@ -99,10 +113,13 @@ def main() -> int:
         else:
             verdict_display = f"❌ {verdict}"
         lines.append(
-            f"| {i} | {row['user_input']} | {row['kind']} | {row['gold'][0]} "
+            f"| {i} | {row.get('sample_id', '')} | {row['user_input']} | {row['kind']} | {row['gold'][0]} "
             f"| {retrieved} | {verdict_display} |"
         )
 
+    if args.out.exists() and not args.overwrite:
+        raise SystemExit(f"标注表已存在: {args.out}；请指定 --overwrite 以明确覆盖")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text("\n".join(lines), encoding="utf-8")
     print(f"标注表已写入: {args.out}（{len(scenario['detail'])} 行）")
     return 0
